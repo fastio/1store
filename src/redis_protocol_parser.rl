@@ -19,6 +19,10 @@
  * Copyright (C) 2014 Cloudius Systems, Ltd.
  */
 
+/** This protocol parser was inspired by the memcached app,
+  which is the example in Seastar project.
+**/
+
 #include "core/ragel.hh"
 #include <memory>
 #include <iostream>
