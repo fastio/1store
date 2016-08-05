@@ -1,5 +1,25 @@
-#ifndef _OBJECT_HH
-#define _OBJECT_HH
+/*
+ *  * This file is open source software, licensed to you under the terms
+ * of the Apache License, Version 2.0 (the "License").  See the NOTICE file
+ * distributed with this work for additional information regarding copyright
+ * ownership.  You may not use this file except in compliance with the License.
+ *
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+/*  This file copy from Seastar's apps/memcached.
+ *  * Copyright (C) 2014 Cloudius Systems, Ltd.
+**/
+#ifndef _BASE_HH
+#define _BASE_HH
 
 #include <boost/intrusive/unordered_set.hpp>
 #include <boost/intrusive/list.hpp>
@@ -253,7 +273,6 @@ public:
 static constexpr const char* msg_crlf = "\r\n";
 static constexpr const char* msg_ok = "+OK\r\n";
 static constexpr const char* msg_err = "-ERR\r\n";
-//shared.emptybulk = createObject(OBJ_STRING,sdsnew("$0\r\n\r\n"));
 static constexpr const char* msg_zero = ":0\r\n";
 static constexpr const char* msg_one = ":1\r\n";
 static constexpr const char* msg_neg_one = ":-1\r\n";
