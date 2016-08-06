@@ -15,8 +15,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#ifndef _REDIS_HH
-#define _REDIS_HH
+#ifndef REDIS_HH
+#define REDIS_HH
 #include <functional>
 #include "core/sharded.hh"
 #include "core/sstring.hh"

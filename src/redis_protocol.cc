@@ -21,6 +21,7 @@
 #include <algorithm>
 #include "redis_commands.hh"
 namespace redis {
+
 redis_protocol::redis_protocol(sharded_redis& redis) : _redis(redis)
 {
 }

@@ -15,8 +15,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#ifndef _SYSTEM_STATS_HH
-#define _SYSTEM_STATS_HH
+#ifndef SYSTEM_STATS_HH
+#define SYSTEM_STATS_HH
 #include <boost/intrusive/unordered_set.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive_ptr.hpp>

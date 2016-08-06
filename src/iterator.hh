@@ -15,8 +15,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#ifndef _ITERATOR_HH 
-#define _ITERATOR_HH 
+#ifndef ITERATOR_HH 
+#define ITERATOR_HH 
 #include "core/sstring.hh"
 namespace redis {
 class item;

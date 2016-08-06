@@ -15,8 +15,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#ifndef _LIST_HH
-#define _LIST_HH
+#ifndef LIST_HH
+#define LIST_HH
 #include "core/stream.hh"
 #include "core/memory.hh"
 #include <boost/intrusive/list.hpp>
@@ -51,6 +51,7 @@ public:
   item_ptr index(long index);
   std::vector<item_ptr> range(int start, int end);
   int trim(int start, int end);
+  int trem(int count, sstring& value);
   long length();
 };
 }

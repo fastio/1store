@@ -60,7 +60,9 @@ struct list::rep
   int set(long idx, item* value);
   std::vector<item_ptr> range(int start, int end);
   int trim(int start, int end);
+  int trem(int count, sstring& value);
   long length() { return _len; }
+  void remove_range(int start, int count);
 };
 
 list::list() : _rep(new list::rep()) {}
@@ -134,7 +136,10 @@ item_ptr list::index(long idx)
 {
   return item_ptr(_rep->index(idx));
 }
-
+int list::trem(int count, sstring& value)
+{
+  return _rep->trem(count, value);
+}
 enum
 {
   FROM_HEAD_TO_TAIL = 0,
@@ -301,10 +306,63 @@ item* list::rep::remove_node(list_node *node)
   return i;
 }
 
+void list::rep::remove_range(int start, int count)
+{
+}
+
 int list::rep::trim(int start, int end)
 {
+  if (_len == 0)
+    return REDIS_ERR;
+  int lr = 0, rr = 0;
+  if (start < 0) start += _len;
+  if (end < 0) end += _len;
+  if (start < 0) start = 0;
+  if (start > end || start >= static_cast<int>(_len)) {
+    lr = _len; // all nodes were removed
+    rr = 0;
+  }
+  else {
+    if (end > static_cast<int>(_len)) end = _len - 1;
+    lr = start;
+    rr = _len - end - 1;
+  }
+  remove_range(0, lr);
+  remove_range(-rr, rr);
   return REDIS_OK;
 }
+
+int list::rep::trem(int count, sstring& value)
+{
+  if (_len == 0)
+    return 0;
+
+  int removed = 0;
+  list_iterator iter(this, count > 0 ? FROM_HEAD_TO_TAIL : FROM_TAIL_TO_HEAD);
+
+  if (count < 0)
+    count = -count;
+
+  // remove all nodes
+  if (count == 0)
+    count = static_cast<int>(_len);
+
+   iter.seek_to_first();
+   while (iter.status() == REDIS_OK && count > 0) {
+     if (node_equal(iter.value(), value) == true) {
+       auto n = iter.value();
+       iter.next();
+       del_node(n);
+       count--;
+       removed++;
+     }
+     else {
+       iter.next();
+     }
+   }
+   return removed;
+}
+
 std::vector<item_ptr> list::rep::range(int start, int end)
 {
   if (_len == 0) {
@@ -378,7 +436,7 @@ int list::rep::set(long idx, item* value)
   if (n) {
     auto old = n->_value;
     n->_value = value;
-    _free_value_fn(old);
+    if (_free_value_fn != nullptr) _free_value_fn(old);
     return REDIS_OK;
   }
   return REDIS_ERR;

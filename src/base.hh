@@ -18,8 +18,8 @@
 /*  This file copy from Seastar's apps/memcached.
  *  * Copyright (C) 2014 Cloudius Systems, Ltd.
 **/
-#ifndef _BASE_HH
-#define _BASE_HH
+#ifndef BASE_HH
+#define BASE_HH
 
 #include <boost/intrusive/unordered_set.hpp>
 #include <boost/intrusive/list.hpp>
@@ -113,56 +113,19 @@ private:
 public:
     inline static size_t item_size_for_row_string(const sstring& val) {
        return sizeof (_value_size) + sizeof(_slab_page_index) + sizeof(_ref_count)
-         + sizeof(_type) + sizeof(_expire) + val.size() + sizeof(uint8_t);
+         + sizeof(_type) + sizeof(_expire) + val.size();
     }
     inline static size_t item_size_for_row_string_append(const sstring& val, const std::experimental::string_view& v) {
        return sizeof (_value_size) + sizeof(_slab_page_index) + sizeof(_ref_count)
-         + sizeof(_type) + sizeof(_expire) + val.size() + sizeof(uint8_t) + v.size();
+         + sizeof(_type) + sizeof(_expire) + val.size() + v.size();
     }
     inline static size_t item_size_for_list() {
        return sizeof (_value_size) + sizeof(_slab_page_index) + sizeof(_ref_count)
-         + sizeof(_type) + sizeof(_expire) + sizeof(uint8_t) + sizeof(void*);
+         + sizeof(_type) + sizeof(_expire) + sizeof(void*);
     }
     inline static size_t item_size_for_uint64() {
        return sizeof (_value_size) + sizeof(_slab_page_index) + sizeof(_ref_count)
-         + sizeof(_type) + sizeof(_expire) + sizeof(uint8_t) + sizeof(uint64_t);
-    }
-private:
-
-    inline void encode_u64(char* b, uint64_t d) {
-      b[0] = d & 0xff;
-      b[1] = (d >> 8) & 0xff;
-      b[2] = (d >> 16) & 0xff;
-      b[3] = (d >> 24) & 0xff;
-      b[4] = (d >> 32) & 0xff;
-      b[5] = (d >> 40) & 0xff;
-      b[6] = (d >> 48) & 0xff;
-      b[7] = (d >> 56) & 0xff;
-    }
-
-    inline uint32_t decode_u32(const char* b) {
-      return ((static_cast<uint32_t>(static_cast<unsigned char>(b[0])))
-          | (static_cast<uint32_t>(static_cast<unsigned char>(b[1])) << 8)
-          | (static_cast<uint32_t>(static_cast<unsigned char>(b[2])) << 16)
-          | (static_cast<uint32_t>(static_cast<unsigned char>(b[3])) << 24));
-    }
-    inline uint64_t decode_u64(const char* b) {
-      return (static_cast<uint64_t>(decode_u32(b + 4)) << 32) | decode_u32(b);
-    }
-    inline int32_t decode_i32(const char* b) {
-      return ((static_cast<int32_t>(static_cast<char>(b[0])))
-          | (static_cast<int32_t>(static_cast<char>(b[1])) << 8)
-          | (static_cast<int32_t>(static_cast<char>(b[2])) << 16)
-          | (static_cast<int32_t>(static_cast<char>(b[3])) << 24));
-    }
-    inline int64_t decode_i64(const char* b) {
-      return (static_cast<int64_t>(decode_i32(b + 4)) << 32) | decode_i32(b);
-    }
-    inline void encode_ptr(char* b, void* o) {
-      encode_u64(b, reinterpret_cast<uint64_t>(o));
-    }
-    inline void* decode_ptr(const char* b) {
-      return reinterpret_cast<void*>(decode_u64(b));
+         + sizeof(_type) + sizeof(_expire) + sizeof(uint64_t);
     }
 public:
     item(uint32_t slab_page_index, sstring&& value, long expire)
@@ -170,7 +133,6 @@ public:
       , _slab_page_index(slab_page_index)
       , _ref_count(0U)
       , _type(REDIS_RAW_STRING)
-      , _cpu_id(engine().cpu_id())
       , _expire(expire)
     {
       memcpy(_u._data, value.c_str(), _value_size);
@@ -181,7 +143,6 @@ public:
       , _slab_page_index(slab_page_index)
       , _ref_count(0U)
       , _type(REDIS_RAW_STRING)
-      , _cpu_id(engine().cpu_id())
       , _expire(expire)
     {
       memcpy(_u._data, value.data(), _value_size);
@@ -196,7 +157,6 @@ public:
       , _slab_page_index(slab_page_index)
       , _ref_count(0U)
       , _type(REDIS_RAW_ITEM)
-      , _cpu_id(engine().cpu_id())
       , _expire(0)
     {
       memcpy(_u._data, value.c_str(), _value_size);
@@ -207,7 +167,6 @@ public:
       , _slab_page_index(slab_page_index)
       , _ref_count(0U)
       , _type(REDIS_RAW_UINT64)
-      , _cpu_id(engine().cpu_id())
       , _expire(0)
     {
       _u._uint64 = value;
@@ -218,7 +177,6 @@ public:
       , _slab_page_index(slab_page_index)
       , _ref_count(0U)
       , _type(type)
-      , _cpu_id(engine().cpu_id())
       , _expire(expire)
     {
       _u._ptr = ptr;

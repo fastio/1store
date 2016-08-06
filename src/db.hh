@@ -15,8 +15,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#ifndef _DB_HH
-#define _DB_HH
+#ifndef DB_HH
+#define DB_HH
 #include "core/shared_ptr.hh"
 #include "core/future.hh"
 #include <sstream>
@@ -82,14 +82,13 @@ public:
   template <typename origin = local_origin_tag>
   int set(sstring& key, size_t key_hash, sstring& val, long expire, uint32_t flag)
   {
-    if (_store->exists(key, key_hash) == 1) {
-      return 1;
-    }
+    _store->remove(key, key_hash);
     const size_t item_size = item::item_size_for_row_string(val);
     auto new_item = local_slab().create(item_size, origin::move_if_local(val), expire);
     intrusive_ptr_add_ref(new_item);
     return _store->set(key, key_hash, new_item);
   }
+
   template <typename origin = local_origin_tag>
   int append(sstring& key, size_t key_hash, sstring& val)
   {
@@ -147,18 +146,19 @@ public:
   }
  
   /** LIST API **/
+  inline list* fetch_list(const sstring& key, size_t key_hash)
+  {
+    auto it = _store->fetch_raw(key, key_hash);
+    if (it != nullptr && it->type() == REDIS_LIST) {
+      return static_cast<list*>(it->ptr());
+    }
+    return nullptr;
+  }
   template<typename origin = local_origin_tag>
   int push(const sstring& key, size_t key_hash, sstring& value, bool force, bool left)
   {
-    list* l = nullptr;
-    auto it = _store->fetch_raw(key, key_hash);
-    if (it != nullptr) {
-      if (it->type() != REDIS_LIST) {
-        return -1;
-      }
-      l = static_cast<list*>(it->ptr());
-    }
-    else {
+    list* l = fetch_list(key, key_hash);
+    if (l == nullptr) {
       if (!force) {
         return -1;
       }
@@ -179,13 +179,8 @@ public:
   template<typename origin = local_origin_tag>
   item_ptr pop(const sstring& key, size_t key_hash, bool left)
   {
-    list* l = nullptr;
-    auto it = _store->fetch_raw(key, key_hash);
-    if (it != nullptr) {
-      if (it->type() != REDIS_LIST) {
-        return nullptr;
-      }
-      l = static_cast<list*>(it->ptr());
+    list* l = fetch_list(key, key_hash);
+    if (l != nullptr) {
       auto it = left ? l->pop_head() : l->pop_tail();
       if (l->length() == 0) {
         _store->remove(key, key_hash);
@@ -198,13 +193,8 @@ public:
   template<typename origin = local_origin_tag>
   int llen(const sstring& key, size_t key_hash)
   {
-    list* l = nullptr;
-    auto it = _store->fetch_raw(key, key_hash);
-    if (it != nullptr) {
-      if (it->type() != REDIS_LIST) {
-        return 0;
-      }
-      l = static_cast<list*>(it->ptr());
+    list* l = fetch_list(key, key_hash);
+    if (l != nullptr) {
       return l->length();
     } 
     return 0;
@@ -212,13 +202,8 @@ public:
   template<typename origin = local_origin_tag>
   item_ptr lindex(const sstring& key, size_t key_hash, int idx)
   {
-    list* l = nullptr;
-    auto it = _store->fetch_raw(key, key_hash);
-    if (it != nullptr) {
-      if (it->type() != REDIS_LIST) {
-        return nullptr;
-      }
-      l = static_cast<list*>(it->ptr());
+    list* l = fetch_list(key, key_hash);
+    if (l != nullptr) {
       return l->index(idx);
     } 
     return nullptr;
@@ -226,13 +211,8 @@ public:
   template<typename origin = local_origin_tag>
   int linsert(const sstring& key, size_t key_hash, sstring& pivot, sstring& value, bool after)
   {
-    list* l = nullptr;
-    auto it = _store->fetch_raw(key, key_hash);
-    if (it != nullptr) {
-      if (it->type() != REDIS_LIST) {
-        return 0;
-      }
-      l = static_cast<list*>(it->ptr());
+    list* l = fetch_list(key, key_hash);
+    if (l != nullptr) {
       const size_t item_size = item::item_size_for_row_string(value);
       auto new_item = local_slab().create(item_size, origin::move_if_local(value), 0);
       intrusive_ptr_add_ref(new_item);
@@ -243,14 +223,9 @@ public:
   template<typename origin = local_origin_tag>
   std::vector<item_ptr> lrange(const sstring& key, size_t key_hash, int start, int end)
   {
-    list* l = nullptr;
+    list* l = fetch_list(key, key_hash);
     std::vector<item_ptr> result;
-    auto it = _store->fetch_raw(key, key_hash);
-    if (it != nullptr) {
-      if (it->type() != REDIS_LIST) {
-        return std::move(result); 
-      }
-      l = static_cast<list*>(it->ptr());
+    if (l != nullptr) {
       return l->range(start, end);
     } 
     return std::move(result); 
@@ -258,13 +233,8 @@ public:
   template<typename origin = local_origin_tag>
   int lset(const sstring& key, size_t key_hash, int idx, sstring& value)
   {
-    list* l = nullptr;
-    auto it = _store->fetch_raw(key, key_hash);
-    if (it != nullptr) {
-      if (it->type() != REDIS_LIST) {
-        return 0;
-      }
-      l = static_cast<list*>(it->ptr());
+    list* l = fetch_list(key, key_hash);
+    if (l != nullptr) {
       const size_t item_size = item::item_size_for_row_string(value);
       auto new_item = local_slab().create(item_size, origin::move_if_local(value), 0);
       intrusive_ptr_add_ref(new_item);
@@ -274,6 +244,26 @@ public:
         intrusive_ptr_release(new_item);
       }
     } 
+    return 0;
+  }
+
+  template<typename origin = local_origin_tag>
+  int lrem(const sstring& key, size_t key_hash, int count, sstring& value)
+  {
+    list* l = fetch_list(key, key_hash);
+    if (l != nullptr) {
+      return l->trem(count, value);
+    }
+    return 0;
+  }
+
+  template<typename origin = local_origin_tag>
+  int ltrim(const sstring& key, size_t key_hash, int start, int end)
+  {
+    list* l = fetch_list(key, key_hash);
+    if (l != nullptr) {
+      return l->trim(start, end);
+    }
     return 0;
   }
 
