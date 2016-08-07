@@ -316,7 +316,7 @@ int dict::rep::generic_delete(const sstring& key, size_t kh, int nofree)
         else
           _ht[table]._table[idx] = he->_next;
         if (!nofree) {
-          if (_free_value_fn != nullptr) _free_value_fn(he->_val);
+          //if (_free_value_fn != nullptr) _free_value_fn(he->_val);
           delete he->_key;
         }
         delete he;

@@ -16,8 +16,8 @@
  * under the License.
  */
 
-#ifndef DICT_HH
-#define DICT_HH
+#ifndef _DICT_HH
+#define _DICT_HH
 #include "core/stream.hh"
 #include "core/memory.hh"
 #include <boost/intrusive/list.hpp>

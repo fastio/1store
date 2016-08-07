@@ -15,8 +15,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#ifndef LIST_HH
-#define LIST_HH
+#ifndef _LIST_HH
+#define _LIST_HH
 #include "core/stream.hh"
 #include "core/memory.hh"
 #include <boost/intrusive/list.hpp>

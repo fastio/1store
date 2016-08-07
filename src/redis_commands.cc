@@ -203,6 +203,22 @@ redis_commands::redis_commands()
        return out.write(std::move(msg));
      });
   });
+  // LREM
+  regist_handler("LREM", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+     return _redis->lrem(args).then([this, &out] (int count) {
+       scattered_message<char> msg;
+       this_type::append_item(msg, std::move(count));
+       return out.write(std::move(msg));
+     });
+  });
+  // LTRIM
+  regist_handler("LTRIM", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+     return _redis->ltrim(args).then([this, &out] (int count) {
+       scattered_message<char> msg;
+       this_type::append_item(msg, std::move(count));
+       return out.write(std::move(msg));
+     });
+  });
 }
 
 }

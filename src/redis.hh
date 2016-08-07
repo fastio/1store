@@ -15,8 +15,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#ifndef REDIS_HH
-#define REDIS_HH
+#ifndef _REDIS_HH
+#define _REDIS_HH
 #include <functional>
 #include "core/sharded.hh"
 #include "core/sstring.hh"
@@ -91,6 +91,8 @@ public:
   future<int> linsert(args_collection& args);
   future<int> lset(args_collection& args);
   future<std::vector<item_ptr>> lrange(args_collection& args);
+  future<int> ltrim(args_collection& args);
+  future<int> lrem(args_collection& args);
 private:
   future<item_ptr> pop_impl(args_collection& args, bool left);
   future<int> push_impl(args_collection& arg, bool force, bool left);

@@ -15,8 +15,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#ifndef REDIS_PROTOCOL_HH
-#define REDIS_PROTOCOL_HH
+#ifndef _REDIS_PROTOCOL_HH
+#define _REDIS_PROTOCOL_HH
 #include <boost/intrusive/unordered_set.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive_ptr.hpp>

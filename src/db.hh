@@ -15,8 +15,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#ifndef DB_HH
-#define DB_HH
+#ifndef _DB_HH
+#define _DB_HH
 #include "core/shared_ptr.hh"
 #include "core/future.hh"
 #include <sstream>

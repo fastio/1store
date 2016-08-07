@@ -140,6 +140,10 @@ int list::trem(int count, sstring& value)
 {
   return _rep->trem(count, value);
 }
+int list::trim(int start, int stop) 
+{
+  return _rep->trim(start, stop);
+}
 enum
 {
   FROM_HEAD_TO_TAIL = 0,
@@ -308,6 +312,20 @@ item* list::rep::remove_node(list_node *node)
 
 void list::rep::remove_range(int start, int count)
 {
+  if (count <= 0)
+    return;
+
+  while (start < 0) start += _len;
+  list_iterator iter(this, FROM_HEAD_TO_TAIL);
+  iter.seek_to_first();
+  while (iter.status() == REDIS_OK && start-- > 0) {
+    iter.next();
+  }
+  while (iter.status() == REDIS_OK && count-- > 0) {
+    auto n = iter.value();
+    iter.next();
+    del_node(n);
+  }
 }
 
 int list::rep::trim(int start, int end)
@@ -317,6 +335,10 @@ int list::rep::trim(int start, int end)
   int lr = 0, rr = 0;
   if (start < 0) start += _len;
   if (end < 0) end += _len;
+
+  if (end < 0)
+    return REDIS_ERR;
+
   if (start < 0) start = 0;
   if (start > end || start >= static_cast<int>(_len)) {
     lr = _len; // all nodes were removed
@@ -327,6 +349,7 @@ int list::rep::trim(int start, int end)
     lr = start;
     rr = _len - end - 1;
   }
+
   remove_range(0, lr);
   remove_range(-rr, rr);
   return REDIS_OK;
@@ -342,7 +365,7 @@ int list::rep::trem(int count, sstring& value)
 
   if (count < 0)
     count = -count;
-
+  
   // remove all nodes
   if (count == 0)
     count = static_cast<int>(_len);
