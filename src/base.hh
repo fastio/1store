@@ -18,8 +18,8 @@
 /*  This file copy from Seastar's apps/memcached.
  *  * Copyright (C) 2014 Cloudius Systems, Ltd.
 **/
-#ifndef BASE_HH
-#define BASE_HH
+#ifndef _BASE_HH
+#define _BASE_HH
 
 #include <boost/intrusive/unordered_set.hpp>
 #include <boost/intrusive/list.hpp>
@@ -112,20 +112,16 @@ private:
     static constexpr uint32_t field_alignment = alignof(void*);
 public:
     inline static size_t item_size_for_row_string(const sstring& val) {
-       return sizeof (_value_size) + sizeof(_slab_page_index) + sizeof(_ref_count)
-         + sizeof(_type) + sizeof(_expire) + val.size();
+       return sizeof(item) + val.size();
     }
     inline static size_t item_size_for_row_string_append(const sstring& val, const std::experimental::string_view& v) {
-       return sizeof (_value_size) + sizeof(_slab_page_index) + sizeof(_ref_count)
-         + sizeof(_type) + sizeof(_expire) + val.size() + v.size();
+      return sizeof(item) + val.size() + v.size();
     }
     inline static size_t item_size_for_list() {
-       return sizeof (_value_size) + sizeof(_slab_page_index) + sizeof(_ref_count)
-         + sizeof(_type) + sizeof(_expire) + sizeof(void*);
+       return sizeof(item) + sizeof(void*);
     }
     inline static size_t item_size_for_uint64() {
-       return sizeof (_value_size) + sizeof(_slab_page_index) + sizeof(_ref_count)
-         + sizeof(_type) + sizeof(_expire) + sizeof(uint64_t);
+       return sizeof(item) + sizeof(uint64_t);
     }
 public:
     item(uint32_t slab_page_index, sstring&& value, long expire)
