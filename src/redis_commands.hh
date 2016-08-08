@@ -14,9 +14,12 @@
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
+ *
+ *  Copyright (c) 2006-2010, Peng Jian, postack@163.com. All rights reserved.
+ *
  */
-#ifndef _REDIS_COMMANDS_H
-#define _REDIS_COMMANDS_H
+#ifndef REDIS_COMMANDS_HH_
+#define REDIS_COMMANDS_HH_
 #include <boost/intrusive/unordered_set.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive_ptr.hpp>

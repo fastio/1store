@@ -14,9 +14,12 @@
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
+ *
+ *  Copyright (c) 2006-2010, Peng Jian, postack@163.com. All rights reserved.
+ *
  */
-#ifndef _DB_HH
-#define _DB_HH
+#ifndef DB_HH_
+#define DB_HH_
 #include "core/shared_ptr.hh"
 #include "core/future.hh"
 #include <sstream>

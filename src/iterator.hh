@@ -14,9 +14,13 @@
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
+ *
+ *
+ *  Copyright (c) 2006-2010, Peng Jian, postack@163.com. All rights reserved.
+ *
  */
-#ifndef _ITERATOR_HH 
-#define _ITERATOR_HH 
+#ifndef ITERATOR_HH_
+#define ITERATOR_HH_ 
 #include "core/sstring.hh"
 namespace redis {
 class item;

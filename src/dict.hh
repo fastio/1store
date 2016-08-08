@@ -14,10 +14,13 @@
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
+ *
+ *  Copyright (c) 2006-2010, Peng Jian, postack@163.com. All rights reserved.
+ *
  */
 
-#ifndef _DICT_HH
-#define _DICT_HH
+#ifndef DICT_HH_
+#define DICT_HH_
 #include "core/stream.hh"
 #include "core/memory.hh"
 #include <boost/intrusive/list.hpp>

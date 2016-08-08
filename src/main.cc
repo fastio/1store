@@ -14,6 +14,10 @@
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
+ *
+ *
+ *  Copyright (c) 2006-2010, Peng Jian, postack@163.com. All rights reserved.
+ *
  */
 #include "redis.hh"
 #include "db.hh"

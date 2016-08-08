@@ -17,9 +17,10 @@
  */
 /*  This file copy from Seastar's apps/memcached.
  *  * Copyright (C) 2014 Cloudius Systems, Ltd.
+ *
  **/
-#ifndef _BASE_HH
-#define _BASE_HH
+#ifndef BASE_HH_
+#define BASE_HH_
 
 #include <boost/intrusive/unordered_set.hpp>
 #include <boost/intrusive/list.hpp>
