@@ -54,51 +54,49 @@ class item;
 using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
 class sharded_redis {
 private:
-  distributed<db>& _peers;
-  inline unsigned get_cpu(const size_t h) {
-      return h % smp::count;
-  }
+    distributed<db>& _peers;
+    inline unsigned get_cpu(const size_t h) {
+        return h % smp::count;
+    }
 public:
-  sharded_redis(distributed<db>& peers) : _peers(peers) {}
+    sharded_redis(distributed<db>& peers) : _peers(peers) {}
 
-  // [COUNTER APIs]
-  future<uint64_t> incr(args_collection& args);
-  future<uint64_t> decr(args_collection& args);
-  future<uint64_t> incrby(args_collection& args);
-  future<uint64_t> decrby(args_collection& args);
-  // [STRING APIs]
-  // The caller must keep @insertion live until the resulting future resolves.
-  future<int> set(args_collection& args);
+    // [TEST APIs]
+    future<sstring> echo(args_collection& args);
+    // [COUNTER APIs]
+    future<uint64_t> incr(args_collection& args);
+    future<uint64_t> decr(args_collection& args);
+    future<uint64_t> incrby(args_collection& args);
+    future<uint64_t> decrby(args_collection& args);
 
-  // The caller must keep @key live until the resulting future resolves.
-  future<int> del(args_collection& args);
-  future<int> exists(args_collection& args);
-  future<int> append(args_collection& args);
-  future<int> strlen(args_collection& args);
+    // [STRING APIs]
+    future<int> set(args_collection& args);
+    future<int> del(args_collection& args);
+    future<int> exists(args_collection& args);
+    future<int> append(args_collection& args);
+    future<int> strlen(args_collection& args);
+    future<item_ptr> get(args_collection& args);
 
-  // The caller must keep @key live until the resulting future resolves.
-  future<item_ptr> get(args_collection& args);
-
-  // [LIST APIs]
-  future<int> lpush(args_collection& arg);
-  future<int> lpushx(args_collection& args);
-  future<int> rpush(args_collection& arg);
-  future<int> rpushx(args_collection& args);
-  future<item_ptr> lpop(args_collection& args);
-  future<item_ptr> rpop(args_collection& args);
-  future<int> llen(args_collection& args);
-  future<item_ptr> lindex(args_collection& args);
-  future<int> linsert(args_collection& args);
-  future<int> lset(args_collection& args);
-  future<std::vector<item_ptr>> lrange(args_collection& args);
-  future<int> ltrim(args_collection& args);
-  future<int> lrem(args_collection& args);
+    // [LIST APIs]
+    future<int> lpush(args_collection& arg);
+    future<int> lpushx(args_collection& args);
+    future<int> rpush(args_collection& arg);
+    future<int> rpushx(args_collection& args);
+    future<item_ptr> lpop(args_collection& args);
+    future<item_ptr> rpop(args_collection& args);
+    future<int> llen(args_collection& args);
+    future<item_ptr> lindex(args_collection& args);
+    future<int> linsert(args_collection& args);
+    future<int> lset(args_collection& args);
+    future<std::vector<item_ptr>> lrange(args_collection& args);
+    future<int> ltrim(args_collection& args);
+    future<int> lrem(args_collection& args);
 private:
-  future<item_ptr> pop_impl(args_collection& args, bool left);
-  future<int> push_impl(args_collection& arg, bool force, bool left);
-  future<int> push_impl(sstring& key, sstring& value, bool force, bool left);
-  future<int> remove_impl(const sstring& key, size_t hash);
-  future<uint64_t> counter_by(args_collection& args, bool incr, bool with_step);
+    future<item_ptr> pop_impl(args_collection& args, bool left);
+    future<int> push_impl(args_collection& arg, bool force, bool left);
+    future<int> push_impl(sstring& key, sstring& value, bool force, bool left);
+    future<int> remove_impl(const sstring& key, size_t hash);
+    future<uint64_t> counter_by(args_collection& args, bool incr, bool with_step);
 };
 
 } /* namespace redis */

@@ -17,7 +17,7 @@
  */
 /*  This file copy from Seastar's apps/memcached.
  *  * Copyright (C) 2014 Cloudius Systems, Ltd.
-**/
+ **/
 #ifndef _BASE_HH
 #define _BASE_HH
 
@@ -49,133 +49,175 @@ namespace redis {
 
 namespace stdx = std::experimental;
 
-
 enum {
-  FLAG_SET_EX = 1 << 0,
-  FLAG_SET_PX = 1 << 1,
-  FLAG_SET_NX = 1 << 2,
-  FLAG_SET_XX = 1 << 3,
+    FLAG_SET_EX = 1 << 0,
+    FLAG_SET_PX = 1 << 1,
+    FLAG_SET_NX = 1 << 2,
+    FLAG_SET_XX = 1 << 3,
 };
 
 enum {
-  REDIS_RAW_UINT64,
-  REDIS_RAW_INT64,
-  REDIS_RAW_DOUBLE,
-  REDIS_RAW_STRING,
-  REDIS_RAW_OBJECT, // for data struct
-  REDIS_RAW_ITEM,   // for data item
-  REDIS_LIST,
+    REDIS_RAW_UINT64,
+    REDIS_RAW_INT64,
+    REDIS_RAW_DOUBLE,
+    REDIS_RAW_STRING,
+    REDIS_RAW_OBJECT, // for data struct
+    REDIS_RAW_ITEM,   // for data item
+    REDIS_LIST,
 };
 
 struct args_collection {
-  uint32_t _command_args_count;
-  sstring _command;
-  std::vector<sstring> _command_args;
-  args_collection () : _command_args_count(0) {}
+    uint32_t _command_args_count;
+    sstring _command;
+    std::vector<sstring> _command_args;
+    args_collection () : _command_args_count(0) {}
 };
 
 
 class item;
 extern __thread slab_allocator<item>* _slab;
 inline slab_allocator<item>& local_slab() {
-  return *_slab;
+    return *_slab;
 }
 class redis_commands;
 extern __thread redis_commands* _redis_commands_ptr;
 inline redis_commands* redis_commands_ptr() {
-  return _redis_commands_ptr;
+    return _redis_commands_ptr;
 }
 class object
 {
 public:
-  object() {}
-  virtual ~object() {};
+    object() {}
+    virtual ~object() {};
 };
 
+using clock_type = lowres_clock;
+static constexpr clock_type::time_point never_expire_timepoint = clock_type::time_point(clock_type::duration::min());
+
+// The defination of `expiration was copied from apps/memcached
+struct expiration {
+    using time_point = clock_type::time_point;
+    using duration   = time_point::duration;
+
+    static constexpr uint32_t seconds_in_a_month = 60U * 60 * 24 * 30;
+    time_point _time = never_expire_timepoint;
+
+    expiration() {}
+
+    expiration(clock_type::duration wc_to_clock_type_delta, uint32_t s) {
+        using namespace std::chrono;
+
+        static_assert(sizeof(clock_type::duration::rep) >= 8, "clock_type::duration::rep must be at least 8 bytes wide");
+
+        if (s == 0U) {
+            return; // means never expire.
+        } else if (s <= seconds_in_a_month) {
+            _time = clock_type::now() + seconds(s); // from delta
+        } else {
+            _time = time_point(seconds(s) + wc_to_clock_type_delta); // from real time
+        }
+    }
+
+    bool ever_expires() {
+        return _time != never_expire_timepoint;
+    }
+
+    time_point to_time_point() {
+        return _time;
+    }
+};
+
+class db;
+// The defination of `item was copied from apps/memcached
 class item : public slab_item_base {
+public:
+    using time_point = expiration::time_point;
+    using duration = expiration::duration;
 private:
+    friend class db;
+    bi::list_member_hook<> _timer_link;
     uint32_t _value_size;
     uint32_t _slab_page_index;
     uint16_t _ref_count;
     uint8_t  _type;
     uint8_t  _cpu_id;
     long     _expire;
-
+    expiration _expired;    
     union {
-      char     _data[];
-      object*    _ptr;
-      double   _double;
-      uint64_t _uint64;
-      int64_t  _int64;
+        char     _data[];
+        object*    _ptr;
+        double   _double;
+        uint64_t _uint64;
+        int64_t  _int64;
     } _u;
     friend class dict;
     static constexpr uint32_t field_alignment = alignof(void*);
 public:
     inline static size_t item_size_for_row_string(const sstring& val) {
-       return sizeof(item) + val.size();
+        return sizeof(item) + val.size();
     }
     inline static size_t item_size_for_row_string_append(const sstring& val, const std::experimental::string_view& v) {
-      return sizeof(item) + val.size() + v.size();
+        return sizeof(item) + val.size() + v.size();
     }
     inline static size_t item_size_for_list() {
-       return sizeof(item) + sizeof(void*);
+        return sizeof(item) + sizeof(void*);
     }
     inline static size_t item_size_for_uint64() {
-       return sizeof(item) + sizeof(uint64_t);
+        return sizeof(item) + sizeof(uint64_t);
     }
 public:
     item(uint32_t slab_page_index, sstring&& value, long expire)
-      : _value_size(value.size())
-      , _slab_page_index(slab_page_index)
-      , _ref_count(0U)
-      , _type(REDIS_RAW_STRING)
-      , _expire(expire)
+        : _value_size(value.size())
+          , _slab_page_index(slab_page_index)
+          , _ref_count(0U)
+          , _type(REDIS_RAW_STRING)
+          , _expire(expire)
     {
-      memcpy(_u._data, value.c_str(), _value_size);
+        memcpy(_u._data, value.c_str(), _value_size);
     }
 
     item(uint32_t slab_page_index, const std::experimental::string_view& value, sstring&& append, long expire)
-      : _value_size(value.size())
-      , _slab_page_index(slab_page_index)
-      , _ref_count(0U)
-      , _type(REDIS_RAW_STRING)
-      , _expire(expire)
+        : _value_size(value.size())
+          , _slab_page_index(slab_page_index)
+          , _ref_count(0U)
+          , _type(REDIS_RAW_STRING)
+          , _expire(expire)
     {
-      memcpy(_u._data, value.data(), _value_size);
-      if (append.size() > 0) {
-        memcpy(_u._data + _value_size, append.c_str(), append.size());
-        _value_size += append.size();
-      }
+        memcpy(_u._data, value.data(), _value_size);
+        if (append.size() > 0) {
+            memcpy(_u._data + _value_size, append.c_str(), append.size());
+            _value_size += append.size();
+        }
     }
 
     item(uint32_t slab_page_index, sstring&& value)
-      : _value_size(value.size())
-      , _slab_page_index(slab_page_index)
-      , _ref_count(0U)
-      , _type(REDIS_RAW_ITEM)
-      , _expire(0)
+        : _value_size(value.size())
+          , _slab_page_index(slab_page_index)
+          , _ref_count(0U)
+          , _type(REDIS_RAW_ITEM)
+          , _expire(0)
     {
-      memcpy(_u._data, value.c_str(), _value_size);
+        memcpy(_u._data, value.c_str(), _value_size);
     }
 
     item(uint32_t slab_page_index, uint64_t value)
-      : _value_size(sizeof(uint64_t))
-      , _slab_page_index(slab_page_index)
-      , _ref_count(0U)
-      , _type(REDIS_RAW_UINT64)
-      , _expire(0)
+        : _value_size(sizeof(uint64_t))
+          , _slab_page_index(slab_page_index)
+          , _ref_count(0U)
+          , _type(REDIS_RAW_UINT64)
+          , _expire(0)
     {
-      _u._uint64 = value;
+        _u._uint64 = value;
     }
 
     item(uint32_t slab_page_index, object* ptr, uint8_t type, long expire)
-      : _value_size(sizeof(void*))
-      , _slab_page_index(slab_page_index)
-      , _ref_count(0U)
-      , _type(type)
-      , _expire(expire)
+        : _value_size(sizeof(void*))
+          , _slab_page_index(slab_page_index)
+          , _ref_count(0U)
+          , _type(type)
+          , _expire(expire)
     {
-      _u._ptr = ptr;
+        _u._ptr = ptr;
     }
 
 
@@ -184,9 +226,9 @@ public:
 
 
     inline const std::experimental::string_view value() const {
-      return std::experimental::string_view(_u._data, _value_size);
+        return std::experimental::string_view(_u._data, _value_size);
     }
-    
+
     void* ptr() { return _u._ptr; }
 
     uint64_t uint64() { return _u._uint64; }
@@ -196,36 +238,40 @@ public:
     inline const uint32_t value_size() const { return _value_size; }
 
     inline uint32_t get_slab_page_index() const {
-      return _slab_page_index;
+        return _slab_page_index;
     }
     inline bool is_unlocked() const {
-      return _ref_count == 1;
+        return _ref_count == 1;
+    }
+    bool cancel() {
+        return false;
     }
     inline const char* data() const { return _u._data; }
     inline uint8_t type() const { return _type; }
     friend inline void intrusive_ptr_add_ref(item* it) {
-      assert(it->_ref_count >= 0);
-      ++it->_ref_count;
-      if (it->_ref_count == 2) {
-        local_slab().lock_item(it);
-      }
+        assert(it->_ref_count >= 0);
+        ++it->_ref_count;
+        if (it->_ref_count == 2) {
+            local_slab().lock_item(it);
+        }
     }
 
     friend inline void intrusive_ptr_release(item* it) {
-      --it->_ref_count;
-      if (it->_ref_count == 1) {
-        local_slab().unlock_item(it);
-      } else if (it->_ref_count == 0) {
-        if (it->_type == REDIS_LIST) {
-          delete it->_u._ptr;
+        --it->_ref_count;
+        if (it->_ref_count == 1) {
+            local_slab().unlock_item(it);
+        } else if (it->_ref_count == 0) {
+            if (it->_type == REDIS_LIST) {
+                delete it->_u._ptr;
+            }
+            local_slab().free(it);
         }
-        local_slab().free(it);
-      }
-      assert(it->_ref_count >= 0);
+        assert(it->_ref_count >= 0);
     }
 };
 static constexpr const char* msg_crlf = "\r\n";
 static constexpr const char* msg_ok = "+OK\r\n";
+static constexpr const char* msg_pong = "+PONG\r\n";
 static constexpr const char* msg_err = "-ERR\r\n";
 static constexpr const char* msg_zero = ":0\r\n";
 static constexpr const char* msg_one = ":1\r\n";
@@ -248,6 +294,4 @@ static constexpr const char *msg_nil = "+(nil)\r\n";
 static constexpr const int REDIS_OK = 0;
 static constexpr const int REDIS_ERR = 1;
 } /* namespace redis */
-
-
 #endif

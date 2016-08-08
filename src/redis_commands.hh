@@ -48,85 +48,92 @@ using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
 using handler_type = std::function<future<> (args_collection&, output_stream<char>&)>;
 class redis_commands {
 private:
-  using this_type = redis_commands;
-  std::unordered_map<sstring, handler_type> _handlers;
-  handler_type _dummy; 
-  void regist_handler(sstring command, handler_type handler) {
-      _handlers[command] = handler;
-  }
-  sharded_redis* _redis;
-  static std::vector<sstring> _number_str;
-  static void init_number_str_array() {
-    for (size_t i = 0; i < 32; ++i) {
-      sstring s(":");
-      sstring n(std::to_string(i).c_str());
-      s.append(n.c_str(), n.size());
-      s.append(msg_crlf, 2);
-      _number_str.emplace_back(std::move(s));
+    using this_type = redis_commands;
+    std::unordered_map<sstring, handler_type> _handlers;
+    handler_type _dummy; 
+    void regist_handler(sstring command, handler_type handler) {
+        _handlers[command] = handler;
     }
-  }
+    sharded_redis* _redis;
+    static std::vector<sstring> _number_str;
+    static void init_number_str_array() {
+        for (size_t i = 0; i < 32; ++i) {
+            sstring s(":");
+            sstring n(std::to_string(i).c_str());
+            s.append(n.c_str(), n.size());
+            s.append(msg_crlf, 2);
+            _number_str.emplace_back(std::move(s));
+        }
+    }
 private:
-  static void  append_item(scattered_message<char>& msg, item_ptr item) {
-    if (!item) {
-      msg.append_static(msg_not_found);
-    }
-    else {
-      msg.append_static(msg_batch_tag);
-      if (item->type() == REDIS_RAW_UINT64 || item->type() == REDIS_RAW_INT64) {
-        std::string s = std::to_string(item->uint64());
-        msg.append_static(std::to_string(s.size()).c_str());
+    static void  append_item(scattered_message<char>& msg, sstring message) {
+        msg.append_static(msg_batch_tag);
+        msg.append_static(std::to_string(message.size()).c_str());
         msg.append_static(msg_crlf);
-        msg.append_static(s.c_str());
+        msg.append_static(message);
         msg.append_static(msg_crlf);
-      } else if (item->type() == REDIS_RAW_ITEM || item->type() == REDIS_RAW_STRING) {
-        msg.append_static(std::to_string(item->value_size()).c_str());
+    }
+    static void  append_item(scattered_message<char>& msg, item_ptr item) {
+        if (!item) {
+            msg.append_static(msg_not_found);
+        }
+        else {
+            msg.append_static(msg_batch_tag);
+            if (item->type() == REDIS_RAW_UINT64 || item->type() == REDIS_RAW_INT64) {
+                std::string s = std::to_string(item->uint64());
+                msg.append_static(std::to_string(s.size()).c_str());
+                msg.append_static(msg_crlf);
+                msg.append_static(s.c_str());
+                msg.append_static(msg_crlf);
+            } else if (item->type() == REDIS_RAW_ITEM || item->type() == REDIS_RAW_STRING) {
+                msg.append_static(std::to_string(item->value_size()).c_str());
+                msg.append_static(msg_crlf);
+                msg.append_static(item->value());
+                msg.append_static(msg_crlf);
+            } else {
+                msg.append_static(msg_type_err);
+            }
+            msg.on_delete([item = std::move(item)] {});
+        }
+    }
+    static void  append_item(scattered_message<char>& msg, uint64_t c) {
+        msg.append_static(msg_num_tag);
+        msg.append_static(std::to_string(c).c_str());
         msg.append_static(msg_crlf);
-        msg.append_static(item->value());
+    }
+    static void  append_item(scattered_message<char>& msg, int c) {
+        if (c < 32) {
+            msg.append_static(_number_str[c]);
+        } else {
+            msg.append_static(msg_num_tag);
+            msg.append_static(std::to_string(c).c_str());
+            msg.append_static(msg_crlf);
+        }
+    }
+    static void  append_multi_items(scattered_message<char>& msg, std::vector<item_ptr> items) {
+        msg.append_static("*");
+        msg.append_static(to_sstring(items.size()));
         msg.append_static(msg_crlf);
-      } else {
-        msg.append_static(msg_type_err);
-      }
-      msg.on_delete([item = std::move(item)] {});
+        for (size_t i = 0; i < items.size(); ++i) {
+            msg.append_static("$");
+            msg.append_static(to_sstring(items[i]->value_size()));
+            msg.append_static(msg_crlf);
+            msg.append_static(items[i]->value());
+            msg.append_static(msg_crlf);
+        }
+        msg.on_delete([item = std::move(items)] {});
     }
-  }
-  static void  append_item(scattered_message<char>& msg, uint64_t c) {
-    msg.append_static(msg_num_tag);
-    msg.append_static(std::to_string(c).c_str());
-    msg.append_static(msg_crlf);
-  }
-  static void  append_item(scattered_message<char>& msg, int c) {
-    if (c < 32) {
-      msg.append_static(_number_str[c]);
-    } else {
-      msg.append_static(msg_num_tag);
-      msg.append_static(std::to_string(c).c_str());
-      msg.append_static(msg_crlf);
-    }
-  }
-  static void  append_multi_items(scattered_message<char>& msg, std::vector<item_ptr> items) {
-    msg.append_static("*");
-    msg.append_static(to_sstring(items.size()));
-    msg.append_static(msg_crlf);
-    for (size_t i = 0; i < items.size(); ++i) {
-      msg.append_static("$");
-      msg.append_static(to_sstring(items[i]->value_size()));
-      msg.append_static(msg_crlf);
-      msg.append_static(items[i]->value());
-      msg.append_static(msg_crlf);
-    }
-    msg.on_delete([item = std::move(items)] {});
-  }
 public:
-  redis_commands();
-  ~redis_commands() {} 
-  void set_redis(sharded_redis* r) { _redis = r; }
-  handler_type& get(sstring& command) {
-    auto it = _handlers.find(command);
-    if (it != _handlers.end()) {
-      return it->second;
+    redis_commands();
+    ~redis_commands() {} 
+    void set_redis(sharded_redis* r) { _redis = r; }
+    handler_type& get(sstring& command) {
+        auto it = _handlers.find(command);
+        if (it != _handlers.end()) {
+            return it->second;
+        }
+        return _dummy;
     }
-    return _dummy;
-  }
 };
 }
 #endif

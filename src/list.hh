@@ -34,25 +34,25 @@ class list_iterator;
 
 class list : public object {
 private:
-  friend class list_iterator;
-  struct rep;
-  rep* _rep;
+    friend class list_iterator;
+    struct rep;
+    rep* _rep;
 public:
-  list();
-  ~list();
-  int add_head(item* val);
-  int add_tail(item* val);
-  item_ptr pop_head();
-  item_ptr pop_tail();
-  int insert_before(const sstring& pivot, item *value);
-  int insert_after(const sstring& pivot, item *value);
-  int set(long idx, item *value);
-  void remove(const sstring& target);
-  item_ptr index(long index);
-  std::vector<item_ptr> range(int start, int end);
-  int trim(int start, int end);
-  int trem(int count, sstring& value);
-  long length();
+    list();
+    ~list();
+    int add_head(item* val);
+    int add_tail(item* val);
+    item_ptr pop_head();
+    item_ptr pop_tail();
+    int insert_before(const sstring& pivot, item *value);
+    int insert_after(const sstring& pivot, item *value);
+    int set(long idx, item *value);
+    void remove(const sstring& target);
+    item_ptr index(long index);
+    std::vector<item_ptr> range(int start, int end);
+    int trim(int start, int end);
+    int trem(int count, sstring& value);
+    long length();
 };
 }
 #endif 
