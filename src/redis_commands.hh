@@ -18,8 +18,7 @@
  *  Copyright (c) 2006-2010, Peng Jian, pstack@163.com. All rights reserved.
  *
  */
-#ifndef REDIS_COMMANDS_HH_
-#define REDIS_COMMANDS_HH_
+#pragma once
 #include <boost/intrusive/unordered_set.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive_ptr.hpp>
@@ -139,4 +138,3 @@ public:
     }
 };
 }
-#endif

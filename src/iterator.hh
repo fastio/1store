@@ -19,8 +19,7 @@
  *  Copyright (c) 2006-2010, Peng Jian, pstack@163.com. All rights reserved.
  *
  */
-#ifndef ITERATOR_HH_
-#define ITERATOR_HH_ 
+#pragma once
 #include "core/sstring.hh"
 namespace redis {
 class item;
@@ -55,5 +54,3 @@ private:
 };
 
 }  // namespace redis
-
-#endif

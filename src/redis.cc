@@ -225,12 +225,12 @@ future<int> sharded_redis::push_impl(args_collection& args, bool force, bool lef
         std::vector<sstring> values;
         for (size_t i = 1; i < args._command_args.size(); ++i) values.emplace_back(args._command_args[i]);
         return parallel_for_each(values.begin(), values.end(), [this, force, left, &key, &success_count] (auto& value) {
-                return this->push_impl(key, value, force, left).then([this, &success_count] (auto r) {
-                    if (r) success_count++;
-                    });
-                }).then([this, success_count] () {
-                    return make_ready_future<int>(success_count); 
-                    });
+            return this->push_impl(key, value, force, left).then([this, &success_count] (auto r) {
+                if (r) success_count++;
+            });
+         }).then([this, success_count] () {
+             return make_ready_future<int>(success_count); 
+         });
     }
 }
 

@@ -18,8 +18,7 @@
  *  Copyright (c) 2006-2010, Peng Jian, pstack@163.com. All rights reserved.
  *
  */
-#ifndef DB_HH_
-#define DB_HH_
+#pragma once
 #include "core/shared_ptr.hh"
 #include "core/future.hh"
 #include <sstream>
@@ -159,8 +158,8 @@ public:
       if (it == nullptr) {
         return REDIS_ERR;
       }
-      auto exp = expiration(_cache.get_wc_to_clock_type_delta(), expired);
-      it->update_expired_point(exp);
+      //auto exp = expiration(get_wc_to_clock_type_delta(), expired);
+      //it->update_expired_point(exp);
       return REDIS_OK;
     }
 
@@ -292,5 +291,4 @@ public:
     future<> stop() { return make_ready_future<>(); }
 };
 }
-#endif
 

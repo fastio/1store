@@ -18,8 +18,7 @@
  *  Copyright (c) 2006-2010, Peng Jian, pstack@163.com. All rights reserved.
  *
  */
-#ifndef LIST_HH_
-#define LIST_HH_
+#pragma once
 #include "core/stream.hh"
 #include "core/memory.hh"
 #include <boost/intrusive/list.hpp>
@@ -58,4 +57,3 @@ public:
     long length();
 };
 }
-#endif 

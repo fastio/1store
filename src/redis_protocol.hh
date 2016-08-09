@@ -18,8 +18,7 @@
  *  Copyright (c) 2006-2010, Peng Jian, pstack@163.com. All rights reserved.
  *
  */
-#ifndef REDIS_PROTOCOL_HH_
-#define REDIS_PROTOCOL_HH_
+#pragma once
 #include <boost/intrusive/unordered_set.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive_ptr.hpp>
@@ -59,4 +58,3 @@ public:
     future<> handle(input_stream<char>& in, output_stream<char>& out);
 };
 }
-#endif

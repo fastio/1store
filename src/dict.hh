@@ -18,9 +18,7 @@
  *  Copyright (c) 2006-2010, Peng Jian, pstack@163.com. All rights reserved.
  *
  */
-
-#ifndef DICT_HH_
-#define DICT_HH_
+#pragma once
 #include "core/stream.hh"
 #include "core/memory.hh"
 #include <boost/intrusive/list.hpp>
@@ -50,4 +48,3 @@ public:
 };
 
 } // namespace redis
-#endif /* __DICT_H */

@@ -19,8 +19,7 @@
  *  Copyright (c) 2006-2010, Peng Jian, pstack@163.com. All rights reserved.
  *
  */
-#ifndef REDIS_HH_
-#define REDIS_HH_
+#pragma once
 #include <functional>
 #include "core/sharded.hh"
 #include "core/sstring.hh"
@@ -104,5 +103,3 @@ private:
 };
 
 } /* namespace redis */
-
-#endif

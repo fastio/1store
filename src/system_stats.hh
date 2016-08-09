@@ -18,8 +18,7 @@
  *  Copyright (c) 2006-2010, Peng Jian, pstack@163.com. All rights reserved.
  *
  */
-#ifndef SYSTEM_STATS_HH_
-#define SYSTEM_STATS_HH_
+#pragma once
 #include <boost/intrusive/unordered_set.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive_ptr.hpp>
@@ -66,4 +65,3 @@ public:
     future<> stop() { return make_ready_future<>(); }
 };
 }
-#endif
