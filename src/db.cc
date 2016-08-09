@@ -29,8 +29,9 @@ __thread slab_allocator<item>* _slab;
 __thread redis_commands* _redis_commands_ptr;
 db::db() : _store(new dict())
 {
-    _slab = new slab_allocator<item>(default_slab_growth_factor, default_per_cpu_slab_size, default_slab_page_size,
-            [this](item& item_ref) {  });
+    _slab = new slab_allocator<item>(default_slab_growth_factor,
+            default_per_cpu_slab_size, default_slab_page_size,
+            [this](item& item_ref) { intrusive_ptr_release(&item_ref); });
     _redis_commands_ptr = new redis_commands();
 }
 db::~db()

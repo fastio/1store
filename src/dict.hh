@@ -45,6 +45,7 @@ public:
     item* fetch_raw(const sstring& key, size_t kh);
     int replace(const sstring& key, size_t kh, item* val);
     int remove(const sstring& key, size_t kh);
+    size_t size();
 };
 
 } // namespace redis

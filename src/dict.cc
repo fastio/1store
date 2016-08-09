@@ -24,11 +24,9 @@
 namespace redis {
 struct dict_node
 {
-    sstring* _key;
     item* _val;
-    size_t _key_hash;
     struct dict_node *_next;
-    dict_node() : _key(nullptr), _val(nullptr), _key_hash(0), _next(nullptr) {}
+    dict_node() : _val(nullptr), _next(nullptr) {}
 };
 
 struct dict_hash_table
@@ -74,28 +72,20 @@ struct dict::rep
     void do_rehash_step();
     int generic_delete(const sstring& key, size_t kh, int nofree);
     int clear(dict_hash_table *ht);
+    size_t size();
 private:
     static const int DICT_HT_INITAL_SIZE = 4;
-    inline void dict_set_key(dict_node* entry, const sstring& key) {
-        if (entry->_key != nullptr) {
-            delete entry->_key;
-        }
-        entry->_key = new sstring(key);
-    }
-    inline bool key_equal(const sstring* l, size_t kh, const dict_node* r) {
-        if (l == nullptr || r == nullptr) {
+    inline bool key_equal(const sstring* l, size_t kh, item* val) {
+        if (l == nullptr || val == nullptr) {
             return false;
         }
-        if (kh != r->_key_hash) {
+        if (kh != val->key_hash()) {
             return false;
         }
-        return *l == *(r->_key);
-    }
-    inline sstring* dict_get_key(dict_node* entry) {
-        return entry->_key;
-    }
-    inline item* dict_get_val(dict_node* entry) {
-        return entry->_val;
+        if (l->size() != val->key_size()) {
+          return false;
+        }
+        return memcmp(l->c_str(), val->key().data(), val->key_size()) == 0;
     }
     inline bool dict_is_rehashing() {
         return _rehash_idx != -1;
@@ -219,7 +209,7 @@ int dict::rep::do_rehash(int n)
             unsigned int h;
 
             nextde = de->_next;
-            h = de->_key_hash & _ht[1]._size_mask;
+            h = de->_val->key_hash() & _ht[1]._size_mask;
             de->_next = _ht[1]._table[h];
             _ht[1]._table[h] = de;
             _ht[0]._used--;
@@ -240,8 +230,12 @@ int dict::rep::do_rehash(int n)
 
     return 1;
 }
-
-void dict::rep::do_rehash_step() {
+size_t dict::rep::size()
+{
+  return _ht[0]._used + _ht[1]._used;
+}
+void dict::rep::do_rehash_step()
+{
     if (_iterators == 0) do_rehash(1);
 }
 
@@ -257,21 +251,19 @@ dict_node* dict::rep::add_raw(const sstring& key, size_t kh)
 {
     int index;
     dict_node *entry;
-    dict_hash_table *__ht = nullptr;
+    dict_hash_table *ht = nullptr;
 
     if (dict_is_rehashing()) do_rehash_step();
 
     if ((index = key_index(key, kh)) == -1)
         return nullptr;
 
-    __ht = dict_is_rehashing() ? &_ht[1] : &_ht[0];
+    ht = dict_is_rehashing() ? &_ht[1] : &_ht[0];
     entry = new dict_node();
-    entry->_next = __ht->_table[index];
-    entry->_key_hash = kh;
-    __ht->_table[index] = entry;
-    __ht->_used++;
+    entry->_next = ht->_table[index];
+    ht->_table[index] = entry;
+    ht->_used++;
 
-    dict_set_key(entry, key);
     return entry;
 }
 
@@ -313,14 +305,13 @@ int dict::rep::generic_delete(const sstring& key, size_t kh, int nofree)
         he = _ht[table]._table[idx];
         prevHe = nullptr;
         while(he) {
-            if (key_equal(&key, kh, he)) {
+            if (key_equal(&key, kh, he->_val)) {
                 if (prevHe)
                     prevHe->_next = he->_next;
                 else
                     _ht[table]._table[idx] = he->_next;
                 if (!nofree) {
-                    //if (_free_value_fn != nullptr) _free_value_fn(he->_val);
-                    delete he->_key;
+                    if (_free_value_fn != nullptr) _free_value_fn(he->_val);
                 }
                 delete he;
                 _ht[table]._used--;
@@ -353,7 +344,6 @@ int dict::rep::clear(dict_hash_table *ht)
         while(he) {
             nextHe = he->_next;
             if (_free_value_fn != nullptr) _free_value_fn(he->_val);
-            delete he->_key;
             delete he;
 
             ht->_used--;
@@ -374,7 +364,7 @@ dict::rep::~rep()
 dict_node* dict::rep::find(const sstring& key, size_t kh)
 {
     dict_node *he;
-    unsigned int h, idx, table;
+    size_t h, idx, table;
 
     if (_ht[0]._used + _ht[1]._used == 0) return nullptr;
     if (dict_is_rehashing()) do_rehash_step();
@@ -383,7 +373,7 @@ dict_node* dict::rep::find(const sstring& key, size_t kh)
         idx = h & _ht[table]._size_mask;
         he = _ht[table]._table[idx];
         while(he) {
-            if (key_equal(&key, kh, he))
+            if (key_equal(&key, kh, he->_val))
                 return he;
             he = he->_next;
         }
@@ -395,9 +385,8 @@ dict_node* dict::rep::find(const sstring& key, size_t kh)
 item* dict::rep::fetch_value(const sstring& key, size_t kh)
 {
     dict_node *he;
-
     he = find(key, kh);
-    return he ? dict_get_val(he) : nullptr;
+    return he ? he->_val : nullptr;
 }
 
 
@@ -440,7 +429,7 @@ int dict::rep::key_index(const sstring& key, size_t kh)
         idx = h & _ht[table]._size_mask;
         he = _ht[table]._table[idx];
         while(he) {
-            if (key_equal(&key, kh, he) == true)
+            if (key_equal(&key, kh, he->_val) == true)
                 return -1;
             he = he->_next;
         }
@@ -498,5 +487,8 @@ int dict::exists(const sstring& key, size_t kh)
 {
     return _rep->find(key, kh) != nullptr ? 1 : 0; 
 }
-
+size_t dict::size()
+{
+  return _rep->size();
+}
 } /* namespace redis*/

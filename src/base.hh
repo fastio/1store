@@ -19,9 +19,7 @@
  *  * Copyright (C) 2014 Cloudius Systems, Ltd.
  *
  **/
-#ifndef BASE_HH_
-#define BASE_HH_
-
+#pragma once
 #include <boost/intrusive/unordered_set.hpp>
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive_ptr.hpp>
@@ -65,6 +63,7 @@ enum {
     REDIS_RAW_OBJECT, // for data struct
     REDIS_RAW_ITEM,   // for data item
     REDIS_LIST,
+    REDIS_DICT,
 };
 
 struct args_collection {
@@ -73,7 +72,6 @@ struct args_collection {
     std::vector<sstring> _command_args;
     args_collection () : _command_args_count(0) {}
 };
-
 
 class item;
 extern __thread slab_allocator<item>* _slab;
@@ -138,6 +136,8 @@ private:
     friend class db;
     bi::list_member_hook<> _timer_link;
     uint32_t _value_size;
+    uint32_t _key_size;
+    size_t   _key_hash;
     uint32_t _slab_page_index;
     uint16_t _ref_count;
     uint8_t  _type;
@@ -145,98 +145,137 @@ private:
     long     _expire;
     expiration _expired;    
     union {
-        char     _data[];
-        object*    _ptr;
-        double   _double;
-        uint64_t _uint64;
-        int64_t  _int64;
+      char     _data[];
+      object*  _ptr;
+      uint64_t _uint64;
     } _u;
     friend class dict;
     static constexpr uint32_t field_alignment = alignof(void*);
-public:
-    inline static size_t item_size_for_row_string(const sstring& val) {
-        return sizeof(item) + val.size();
-    }
-    inline static size_t item_size_for_row_string_append(const sstring& val, const std::experimental::string_view& v) {
-        return sizeof(item) + val.size() + v.size();
-    }
-    inline static size_t item_size_for_list() {
-        return sizeof(item) + sizeof(void*);
-    }
-    inline static size_t item_size_for_uint64() {
-        return sizeof(item) + sizeof(uint64_t);
+    inline static size_t item_size_for_raw_ptr(size_t key_size) {
+        return sizeof(item) + align_up(static_cast<uint32_t>(key_size), field_alignment) + sizeof(void*);
     }
 public:
-    item(uint32_t slab_page_index, sstring&& value, long expire)
+    inline static size_t item_size_for_row_string(size_t value_size) {
+        return sizeof(item) + value_size;
+    }
+    inline static size_t item_size_for_string(size_t key_size, size_t val_size) {
+        return sizeof(item) + align_up(static_cast<uint32_t>(key_size), field_alignment) + val_size;
+    }
+    inline static size_t item_size_for_row_string_append(size_t key_size, size_t val_size, size_t append_size) {
+        return sizeof(item) + align_up(static_cast<uint32_t>(key_size), field_alignment) + val_size + append_size;
+    }
+    inline static size_t item_size_for_list(size_t key_size) {
+      return item_size_for_raw_ptr(key_size);
+    }
+    inline static size_t item_size_for_dict(size_t key_size) {
+      return item_size_for_raw_ptr(key_size);
+    }
+    inline static size_t item_size_for_uint64(size_t key_size) {
+        return sizeof(item) + align_up(static_cast<uint32_t>(key_size), field_alignment) + sizeof(uint64_t);
+    }
+public:
+    item(uint32_t slab_page_index, const sstring& key, size_t kh, sstring&& value)
         : _value_size(value.size())
-          , _slab_page_index(slab_page_index)
-          , _ref_count(0U)
-          , _type(REDIS_RAW_STRING)
-          , _expire(expire)
+        , _key_size(key.size())
+        , _key_hash(kh)
+        , _slab_page_index(slab_page_index)
+        , _ref_count(0U)
+        , _type(REDIS_RAW_STRING)
+        , _expire(0)
     {
         memcpy(_u._data, value.c_str(), _value_size);
+        if (_key_size > 0) {
+            memcpy(_u._data + align_up(_value_size, field_alignment), key.c_str(), _key_size);
+        }
     }
 
-    item(uint32_t slab_page_index, const std::experimental::string_view& value, sstring&& append, long expire)
+    item(uint32_t slab_page_index, const sstring& key, size_t kh, const std::experimental::string_view& value, sstring&& append)
         : _value_size(value.size())
-          , _slab_page_index(slab_page_index)
-          , _ref_count(0U)
-          , _type(REDIS_RAW_STRING)
-          , _expire(expire)
+        , _key_size(key.size())
+        , _key_hash(kh)
+        , _slab_page_index(slab_page_index)
+        , _ref_count(0U)
+        , _type(REDIS_RAW_STRING)
+        , _expire(0)
     {
         memcpy(_u._data, value.data(), _value_size);
-        if (append.size() > 0) {
-            memcpy(_u._data + _value_size, append.c_str(), append.size());
-            _value_size += append.size();
+        memcpy(_u._data + _value_size, append.c_str(), append.size());
+        _value_size += append.size();
+        if (_key_size > 0) {
+            memcpy(_u._data + align_up(_value_size, field_alignment), key.c_str(), _key_size);
         }
     }
 
     item(uint32_t slab_page_index, sstring&& value)
         : _value_size(value.size())
-          , _slab_page_index(slab_page_index)
-          , _ref_count(0U)
-          , _type(REDIS_RAW_ITEM)
-          , _expire(0)
+        , _key_size(0)
+        , _key_hash(0)
+        , _slab_page_index(slab_page_index)
+        , _ref_count(0U)
+        , _type(REDIS_RAW_ITEM)
+        , _expire(0)
     {
         memcpy(_u._data, value.c_str(), _value_size);
     }
 
-    item(uint32_t slab_page_index, uint64_t value)
+    item(uint32_t slab_page_index, const sstring& key, size_t kh, uint64_t value)
         : _value_size(sizeof(uint64_t))
-          , _slab_page_index(slab_page_index)
-          , _ref_count(0U)
-          , _type(REDIS_RAW_UINT64)
-          , _expire(0)
+        , _key_size(key.size())
+        , _key_hash(kh)
+        , _slab_page_index(slab_page_index)
+        , _ref_count(0U)
+        , _type(REDIS_RAW_UINT64)
+        , _expire(0)
     {
         _u._uint64 = value;
+        if (_key_size > 0) {
+            memcpy(_u._data + align_up(_value_size, field_alignment), key.c_str(), _key_size);
+        }
     }
 
-    item(uint32_t slab_page_index, object* ptr, uint8_t type, long expire)
+    item(uint32_t slab_page_index, const sstring& key, size_t kh, object* ptr, uint8_t type)
         : _value_size(sizeof(void*))
-          , _slab_page_index(slab_page_index)
-          , _ref_count(0U)
-          , _type(type)
-          , _expire(expire)
+        , _key_size(key.size())
+        , _key_hash(kh)
+        , _slab_page_index(slab_page_index)
+        , _ref_count(0U)
+        , _type(type)
+        , _expire(0)
     {
         _u._ptr = ptr;
+        if (_key_size > 0) {
+            memcpy(_u._data + align_up(_value_size, field_alignment), key.c_str(), _key_size);
+        }
     }
 
+    const std::experimental::string_view key() const {
+        return std::experimental::string_view(_u._data + align_up(_value_size, field_alignment), _key_size);
+    }
 
+    const size_t key_hash() { return _key_hash; }
+
+    const std::experimental::string_view value() const {
+        return std::experimental::string_view(_u._data, _value_size);
+    }
     item(const item&) = delete;
     item(item&&) = delete;
 
 
-    inline const std::experimental::string_view value() const {
-        return std::experimental::string_view(_u._data, _value_size);
+    inline object* ptr() { return _u._ptr; }
+
+    inline uint64_t uint64() { return _u._uint64; }
+
+    uint64_t incr(uint64_t step) {
+        _u._uint64 += step;
+        return _u._uint64;
+    }
+    uint64_t decr(uint64_t step) {
+        _u._uint64 -= step;
+        return _u._uint64;
     }
 
-    void* ptr() { return _u._ptr; }
-
-    uint64_t uint64() { return _u._uint64; }
-    uint64_t incr(uint64_t step) { _u._uint64 += step; return _u._uint64; }
-    uint64_t decr(uint64_t step) { _u._uint64 -= step; return _u._uint64; }
-
     inline const uint32_t value_size() const { return _value_size; }
+    inline const uint32_t key_size() const { return _key_size; }
 
     inline uint32_t get_slab_page_index() const {
         return _slab_page_index;
@@ -247,7 +286,6 @@ public:
     bool cancel() {
         return false;
     }
-    inline const char* data() const { return _u._data; }
     inline uint8_t type() const { return _type; }
     friend inline void intrusive_ptr_add_ref(item* it) {
         assert(it->_ref_count >= 0);
@@ -263,7 +301,7 @@ public:
             local_slab().unlock_item(it);
         } else if (it->_ref_count == 0) {
             if (it->_type == REDIS_LIST) {
-                delete it->_u._ptr;
+                delete it->ptr();
             }
             local_slab().free(it);
         }
@@ -295,4 +333,3 @@ static constexpr const char *msg_nil = "+(nil)\r\n";
 static constexpr const int REDIS_OK = 0;
 static constexpr const int REDIS_ERR = 1;
 } /* namespace redis */
-#endif

@@ -120,7 +120,7 @@ private:
             msg.append_static("$");
             msg.append_static(to_sstring(items[i]->value_size()));
             msg.append_static(msg_crlf);
-            msg.append_static(items[i]->value());
+            msg.append_static(items[i]->value().data());
             msg.append_static(msg_crlf);
         }
         msg.on_delete([item = std::move(items)] {});

@@ -133,13 +133,13 @@ future<int> sharded_redis::del(args_collection& args)
     else {
         int success_count = 0;
         return parallel_for_each(args._command_args.begin(), args._command_args.end(), [this, &success_count] (const auto& key) {
-                auto hash = std::hash<sstring>()(key);
-                return this->remove_impl(key, hash).then([this, &success_count] (auto r) {
-                    if (r) success_count++;
-                    });
-                }).then([this, success_count] () {
-                    return make_ready_future<int>(success_count); 
-                    });
+            auto hash = std::hash<sstring>()(key);
+            return this->remove_impl(key, hash).then([this, &success_count] (auto r) {
+                if (r) success_count++;
+            });
+        }).then([this, &success_count] () {
+            return make_ready_future<int>(success_count); 
+        });
     }
 }
 
@@ -228,9 +228,9 @@ future<int> sharded_redis::push_impl(args_collection& args, bool force, bool lef
             return this->push_impl(key, value, force, left).then([this, &success_count] (auto r) {
                 if (r) success_count++;
             });
-         }).then([this, success_count] () {
-             return make_ready_future<int>(success_count); 
-         });
+        }).then([&success_count] () {
+            return make_ready_future<int>(success_count); 
+        });
     }
 }
 
