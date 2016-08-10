@@ -74,11 +74,13 @@ public:
 
     // [STRING APIs]
     future<int> set(args_collection& args);
+    future<int> mset(args_collection& args);
     future<int> del(args_collection& args);
     future<int> exists(args_collection& args);
     future<int> append(args_collection& args);
     future<int> strlen(args_collection& args);
     future<item_ptr> get(args_collection& args);
+    future<std::vector<item_ptr>> mget(args_collection& args);
 
     // [LIST APIs]
     future<int> lpush(args_collection& arg);
@@ -94,10 +96,27 @@ public:
     future<std::vector<item_ptr>> lrange(args_collection& args);
     future<int> ltrim(args_collection& args);
     future<int> lrem(args_collection& args);
+
+    // [HASH APIs]
+    future<int> hdel(args_collection& args);
+    future<int> hexists(args_collection& args);
+    future<int> hset(args_collection& args);
+    future<int> hmset(args_collection& args);
+    future<int> hincrby(args_collection& args);
+    future<int> hincrbyfloat(args_collection& args);
+    future<int> hlen(args_collection& args);
+    future<int> hstrlen(args_collection& args);
+    future<item_ptr> hget(args_collection& args);
+    future<std::vector<item_ptr>> hgetall(args_collection& args);
+    future<std::vector<item_ptr>> hgetmget(args_collection& args);
+    future<std::vector<item_ptr>> hkeys(args_collection& args);
+    future<std::vector<item_ptr>> hvals(args_collection& args);
 private:
     future<item_ptr> pop_impl(args_collection& args, bool left);
     future<int> push_impl(args_collection& arg, bool force, bool left);
     future<int> push_impl(sstring& key, sstring& value, bool force, bool left);
+    future<int> set_impl(sstring& key, size_t hk, sstring& value, long expir, uint8_t flag);
+    future<item_ptr> get_impl(const sstring& key, size_t hk);
     future<int> remove_impl(const sstring& key, size_t hash);
     future<uint64_t> counter_by(args_collection& args, bool incr, bool with_step);
 };

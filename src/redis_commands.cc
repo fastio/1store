@@ -21,11 +21,17 @@
  */
 #include "redis_commands.hh"
 #include "redis.hh"
+#include <sstream>
+
 namespace redis {
 std::vector<sstring> redis_commands::_number_str;
+std::vector<sstring> redis_commands::_multi_number_str;
+std::vector<sstring> redis_commands::_content_number_str;
 redis_commands::redis_commands()
 {
-    init_number_str_array();
+    init_number_str_array(_number_str, ":");
+    init_number_str_array(_multi_number_str, "*");
+    init_number_str_array(_content_number_str, "$");
     _dummy = [] (args_collection&, output_stream<char>& out) {
         return out.write("+BAD\r\n");
     };
@@ -88,6 +94,13 @@ redis_commands::redis_commands()
         });
     });
 
+    // MSET
+    regist_handler(sstring("MSET"), [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->mset(args).then([this, &out] (int r) {
+            return out.write(r == 0 ? msg_ok : msg_err);
+        });
+    });
+
     // GET
     regist_handler("GET", [this] (args_collection& args, output_stream<char>& out) -> future<> {
         return _redis->get(args).then([this, &out] (item_ptr it) {
@@ -96,6 +109,15 @@ redis_commands::redis_commands()
             return out.write(std::move(msg));
         });
     });
+    // MGET
+    regist_handler("MGET", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->mget(args).then([this, &out] (std::vector<item_ptr> items) {
+            scattered_message<char> msg;
+            this_type::append_multi_items(msg, std::move(items));
+            return out.write(std::move(msg));
+        });
+    });
+
     // COMMAND
     regist_handler(sstring("COMMAND"), [this] (args_collection& args, output_stream<char>& out) -> future<> {
         return out.write(msg_ok);
@@ -195,17 +217,7 @@ redis_commands::redis_commands()
     regist_handler("LRANGE", [this] (args_collection& args, output_stream<char>& out) -> future<> {
         return _redis->lrange(args).then([this, &out] (std::vector<item_ptr> items) {
             scattered_message<char> msg;
-            msg.append_static("*");
-            msg.append_static(std::to_string(items.size()).c_str());
-            msg.append_static(msg_crlf);
-            for (size_t i = 0; i < items.size(); ++i) {
-                msg.append_static("$");
-                msg.append_static(std::to_string(items[i]->value_size()).c_str());
-                msg.append_static(msg_crlf);
-                msg.append_static(items[i]->value().data());
-                msg.append_static(msg_crlf);
-            }
-            msg.on_delete([item = std::move(items)] {});
+            this_type::append_multi_items(msg, std::move(items));
             return out.write(std::move(msg));
         });
     });
@@ -257,11 +269,37 @@ redis_commands::redis_commands()
 
     // LTRIM
     regist_handler("LTRIM", [this] (args_collection& args, output_stream<char>& out) -> future<> {
-         return _redis->ltrim(args).then([this, &out] (int count) {
-             scattered_message<char> msg;
-             this_type::append_item(msg, std::move(count));
-             return out.write(std::move(msg));
-         });
+        return _redis->ltrim(args).then([this, &out] (int count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
+            return out.write(std::move(msg));
+        });
+    });
+
+    //[ HASH APIs]
+    // HSET
+    regist_handler("HSET", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->hset(args).then([this, &out] (int count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
+            return out.write(std::move(msg));
+        });
+    });
+    // HDEL
+    regist_handler("HDEL", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->hdel(args).then([this, &out] (int count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
+            return out.write(std::move(msg));
+        });
+    });
+    // HGET
+    regist_handler("HGET", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->hget(args).then([this, &out] (item_ptr item) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(item));
+            return out.write(std::move(msg));
+        });
     });
 }
 

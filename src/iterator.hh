@@ -41,8 +41,6 @@ public:
 
     virtual void prev() = 0;
 
-    virtual sstring* key() const = 0;
-
     virtual  ValueType* value() const = 0;
 
     virtual int status() const = 0;

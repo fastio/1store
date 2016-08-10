@@ -192,7 +192,7 @@ public:
         const size_t item_size = item::item_size_for_row_string(static_cast<size_t>(value.size()));
         auto new_item = local_slab().create(item_size, origin::move_if_local(value));
         intrusive_ptr_add_ref(new_item);
-        return (left ? l->add_head(new_item) : l->add_tail(new_item)) == 0 ? 1 : 0;
+        return (left ? l->add_head(new_item) : l->add_tail(new_item)) == 0 ? static_cast<int>(l->length()) : 0;
     }
 
     template<typename origin = local_origin_tag>
@@ -359,6 +359,17 @@ public:
             return d->size();
         }
         return 0;
+    }
+
+    // HGETALL
+    template<typename origin = local_origin_tag>
+    std::vector<item_ptr> hgetall(const sstring& key, size_t key_hash)
+    {
+        dict* d = fetch_dict(key, key_hash);
+        if (d != nullptr) {
+            return d->fetch();
+        }
+        return make_ready_future<std::vector<item_ptr>>();
     }
 
     future<> stop() { return make_ready_future<>(); }

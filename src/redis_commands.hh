@@ -58,13 +58,15 @@ private:
     }
     sharded_redis* _redis;
     static std::vector<sstring> _number_str;
-    static void init_number_str_array() {
-        for (size_t i = 0; i < 32; ++i) {
-            sstring s(":");
+    static std::vector<sstring> _multi_number_str;
+    static std::vector<sstring> _content_number_str;
+    static void init_number_str_array(std::vector<sstring>& numbers, const char* park) {
+        for (size_t i = 0; i < 64; ++i) {
+            sstring s(park, 1);
             sstring n(std::to_string(i).c_str());
             s.append(n.c_str(), n.size());
-            s.append(msg_crlf, 2);
-            _number_str.emplace_back(std::move(s));
+            s.append(msg_crlf.data(), msg_crlf.size());
+            numbers.emplace_back(std::move(s));
         }
     }
 private:
@@ -113,15 +115,16 @@ private:
         }
     }
     static void  append_multi_items(scattered_message<char>& msg, std::vector<item_ptr> items) {
-        msg.append_static("*");
-        msg.append_static(to_sstring(items.size()));
-        msg.append_static(msg_crlf);
+        msg.append(msg_sigle_tag);
+        msg.append(std::move(to_sstring(items.size())));
+        msg.append(std::move(to_sstring(msg_crlf)));
         for (size_t i = 0; i < items.size(); ++i) {
-            msg.append_static("$");
-            msg.append_static(to_sstring(items[i]->value_size()));
-            msg.append_static(msg_crlf);
-            msg.append_static(items[i]->value().data());
-            msg.append_static(msg_crlf);
+            msg.append(msg_batch_tag);
+            msg.append(std::move(to_sstring(items[i]->value_size())));
+            msg.append(std::move(to_sstring(msg_crlf)));
+            sstring v{items[i]->value().data(), items[i]->value().size()};
+            msg.append(std::move(v));
+            msg.append(msg_crlf);
         }
         msg.on_delete([item = std::move(items)] {});
     }

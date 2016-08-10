@@ -194,7 +194,6 @@ public:
         if (_next != nullptr)
             _next = _direction == FROM_HEAD_TO_TAIL ? _next->_prev : _next->_next;
     }
-    sstring* key() const { return nullptr; }
     list_node* value() const {
         if (_next != nullptr) {
             return _next;

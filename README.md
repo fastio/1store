@@ -4,12 +4,17 @@
 
 NoSQL data store using the SEASTAR framework, compatible with REDIS.
 
-Pedis is inspired by seastar's memcached server.
-
 Redis is very popular *data structures* server. For more infomation, see here: http://redis.io/
 Seastar is an advanced, open-source C++ framework for high-performance server applications on modern hardware.
 For more infomation, see here: http://www.seastar-project.org/
 
+
+Now, the redis commands were supported as follow:
+  * Key: DEL, EXISTS
+  * String: GET, SET, DECR, INCR, DECRBY, INCRBY, APPEND, STRLEN
+  * List: LINDEX, LINSERT, LLEN, LPUSH, LPUSHX, LPOP, LRANGE, LREM, LTRIM, LSET, RPOP, RPUSH, RPUSHX
+  * Hash: HSET, HDEL, HGET
+  * Other: echo, ping
 
 ## Building Pedis on Ubuntu 14.04
 

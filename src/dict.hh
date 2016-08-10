@@ -41,11 +41,13 @@ public:
     virtual ~dict();
     int set(const sstring& key, size_t kh, item* val);
     int exists(const sstring& key, size_t kh);
-    item_ptr fetch(const sstring& key, size_t kh);
     item* fetch_raw(const sstring& key, size_t kh);
     int replace(const sstring& key, size_t kh, item* val);
     int remove(const sstring& key, size_t kh);
     size_t size();
+    item_ptr fetch(const sstring& key, size_t kh);
+    std::vector<item_ptr> fetch();
+    std::vector<item_ptr> fetch(const std::unordered_set<std::experimental::string_view>& keys);
 };
 
 } // namespace redis

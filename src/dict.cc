@@ -73,8 +73,22 @@ struct dict::rep
     int generic_delete(const sstring& key, size_t kh, int nofree);
     int clear(dict_hash_table *ht);
     size_t size();
+    std::vector<item_ptr> fetch();
+    std::vector<item_ptr> fetch(const std::unordered_set<std::experimental::string_view>& keys);
 private:
     static const int DICT_HT_INITAL_SIZE = 4;
+    inline bool key_equal(std::experimental::string_view& k, size_t kh, item* val) {
+        if (val == nullptr) {
+            return false;
+        }
+        if (kh != val->key_hash()) {
+            return false;
+        }
+        if (k.size() != val->key_size()) {
+          return false;
+        }
+        return memcmp(k.data(), val->key().data(), val->key_size()) == 0;
+    }
     inline bool key_equal(const sstring* l, size_t kh, item* val) {
         if (l == nullptr || val == nullptr) {
             return false;
@@ -109,43 +123,89 @@ private:
     int _table_index;
     size_t _index;
     dict::rep* _rep;
+    int _status;
 public:
     dict_iterator(dict::rep* rep)
         : _current(nullptr)
-          , _next(nullptr)
-          , _ht(nullptr)
-          , _table_index(0)
-          , _index(0)
-          , _rep(rep)
+        , _next(nullptr)
+        , _ht(nullptr)
+        , _table_index(0)
+        , _index(0)
+        , _rep(rep)
+        , _status(REDIS_ERR)
     {
         _ht = &(_rep->_ht[_table_index]);
+        // to prevent the rehash operation
+        _rep->_iterators++;
     }
-    ~dict_iterator() {}
+    ~dict_iterator()
+    {
+        _rep->_iterators--;
+    }
     bool valid() const { return _ht != nullptr; }
     void seek_to_first() {
+        _table_index = 0;
+        _ht = &(_rep->_ht[_table_index]);
         _index = 0;
-        _current = _next = nullptr;
+        do {
+            _current = _ht->_table[_index];
+            if (_current == nullptr) ++_index;
+            if (_index >= _ht->_size) {
+                if (_table_index == 0) {
+                    ++_table_index;
+                    _ht = &(_rep->_ht[_table_index]);
+                    _index = 0;
+                    continue;
+                }
+                else {
+                    break;
+                }
+            }
+        } while (_current == nullptr);
+        if (_current != nullptr) {
+            _status = REDIS_OK;
+        }
     }
     void seek_to_last() {
     }
     void seek(const sstring& key) {
     }
     void next() {
+        for(;;) {
+            if (_current == nullptr) {
+                _index++;
+                if (_index > _ht->_size) {
+                    if (_table_index == 0) {
+                        _table_index++;
+                        _ht = &(_rep->_ht[_table_index]);
+                        _index = 0;
+                    }
+                    else {
+                        // we iteratored all nodes.
+                        _status = REDIS_ERR;
+                        break;
+                    }
+                }
+                _current = _ht->_table[_index];
+            }
+            else {
+                _current = _current->_next;
+            }
+            if (_current != nullptr) {
+                break;
+            }
+        }
     }
     void prev() {
     }
-    sstring* key() const { return nullptr; }
     dict_node* value() const {
         if (_current != nullptr) {
             return _current;
         }
         return nullptr;
     }
-    int status() const {
-        return _current != nullptr ? REDIS_OK : REDIS_ERR;
-    }
+    inline int status() const { return _status; }
 };
-
 
 dict::rep::rep()
    : _rehash_idx(-1)
@@ -230,10 +290,12 @@ int dict::rep::do_rehash(int n)
 
     return 1;
 }
+
 size_t dict::rep::size()
 {
-  return _ht[0]._used + _ht[1]._used;
+    return _ht[0]._used + _ht[1]._used;
 }
+
 void dict::rep::do_rehash_step()
 {
     if (_iterators == 0) do_rehash(1);
@@ -333,6 +395,35 @@ int dict::rep::remove_no_free(const sstring& key, size_t kh) {
     return generic_delete(key, kh, 1);
 }
 
+std::vector<item_ptr> dict::rep::fetch(const std::unordered_set<std::experimental::string_view>& keys)
+{
+    std::vector<item_ptr> items;
+    dict_iterator iter(this);
+    iter.seek_to_first();
+    while (iter.status() == REDIS_OK) {
+        auto n = iter.value();
+        auto k = n->_val->key();
+        if (keys.find(k) != keys.end()) {
+            items.emplace_back(item_ptr(n->_val));
+        }
+        iter.next();
+    }
+    return std::move(items);
+}
+
+std::vector<item_ptr> dict::rep::fetch()
+{
+    std::vector<item_ptr> items;
+    dict_iterator iter(this);
+    iter.seek_to_first();
+    while (iter.status() == REDIS_OK) {
+        auto n = iter.value();
+        items.emplace_back(item_ptr(n->_val));
+        iter.next();
+    }
+    return std::move(items);
+}
+
 int dict::rep::clear(dict_hash_table *ht)
 {
     unsigned long i;
@@ -388,7 +479,6 @@ item* dict::rep::fetch_value(const sstring& key, size_t kh)
     he = find(key, kh);
     return he ? he->_val : nullptr;
 }
-
 
 int dict::rep::expend_if_needed()
 {
@@ -463,16 +553,6 @@ int dict::set(const sstring& key, size_t kh, item* val)
     return _rep->add(key, kh, val);
 }
 
-item_ptr dict::fetch(const sstring& key, size_t kh)
-{
-    return item_ptr(_rep->fetch_value(key, kh));
-}
-
-item* dict::fetch_raw(const sstring& key, size_t kh)
-{
-    return _rep->fetch_value(key, kh);
-}
-
 int dict::replace(const sstring& key, size_t kh, item* val)
 {
     return _rep->replace(key, kh, val);
@@ -487,8 +567,30 @@ int dict::exists(const sstring& key, size_t kh)
 {
     return _rep->find(key, kh) != nullptr ? 1 : 0; 
 }
+
 size_t dict::size()
 {
   return _rep->size();
 }
+
+item* dict::fetch_raw(const sstring& key, size_t kh)
+{
+    return _rep->fetch_value(key, kh);
+}
+
+item_ptr dict::fetch(const sstring& key, size_t kh)
+{
+    return item_ptr(_rep->fetch_value(key, kh));
+}
+
+std::vector<item_ptr> dict::fetch(const std::unordered_set<std::experimental::string_view>& keys)
+{
+  return _rep->fetch(keys);
+}
+
+std::vector<item_ptr> dict::fetch()
+{
+  return _rep->fetch();
+}
+
 } /* namespace redis*/
