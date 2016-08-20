@@ -461,6 +461,7 @@ future<uint64_t> sharded_redis::decrby(args_collection& args)
 {
     return counter_by(args, false, true);
 }
+
 future<uint64_t> sharded_redis::counter_by(args_collection& args, bool incr, bool with_step)
 {
     if (args._command_args_count < 1 || args._command_args.empty() || (with_step == true && args._command_args_count <= 1)) {
@@ -528,7 +529,24 @@ future<int> sharded_redis::hset(args_collection& args)
 
 future<int> sharded_redis::hmset(args_collection& args)
 {
-    return make_ready_future<int>(0);
+    if (args._command_args_count < 3 || args._command_args.empty()) {
+        return make_ready_future<int>(0);
+    }
+    unsigned int field_count = (args._command_args_count - 1) / 2;
+    if (field_count == 1) {
+        return hset(args);
+    }
+    sstring& key = args._command_args[0];
+    std::unordered_map<sstring, sstring> key_values_collection;
+    for (unsigned int i = 0; i < field_count; ++i) {
+        key_values_collection.emplace(std::make_pair(args._command_args[i], args._command_args[i + 1]));
+    }
+    auto hash = std::hash<sstring>()(key);
+    auto cpu = get_cpu(hash);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<int>(_peers.local().hmset(key, hash, key_values_collection));
+    }
+    return _peers.invoke_on(cpu, &db::hmset<remote_origin_tag>, std::ref(key), hash, std::ref(key_values_collection));
 }
 
 future<int> sharded_redis::hincrby(args_collection& args)

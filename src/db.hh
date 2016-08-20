@@ -110,16 +110,20 @@ public:
                     origin::move_if_local(val));
             intrusive_ptr_add_ref(new_item);
             intrusive_ptr_release(it);
-            if (_store->replace(key, key_hash, new_item) != 0)
+            if (_store->replace(key, key_hash, new_item) != 0) {
+                intrusive_ptr_release(new_item);
                 return -1;
+            }
         }
         else {
             current_size = val.size();
             const size_t item_size = item::item_size_for_string(key.size(), val.size());
             auto new_item = local_slab().create(item_size, key, key_hash, origin::move_if_local(val));
             intrusive_ptr_add_ref(new_item);
-            if (_store->set(key, key_hash, new_item) != 0)
+            if (_store->set(key, key_hash, new_item) != 0) {
+                intrusive_ptr_release(new_item);
                 return -1;
+            }
         }
         return current_size;
     }
@@ -186,6 +190,7 @@ public:
             auto list_item = local_slab().create(list_size, key, key_hash, l, REDIS_LIST);
             intrusive_ptr_add_ref(list_item);
             if (_store->set(key, key_hash, list_item) != 0) {
+                intrusive_ptr_release(list_item);
                 return -1;
             }
         }
@@ -298,6 +303,7 @@ public:
         }
         return nullptr;
     }
+
     // HSET
     template<typename origin = local_origin_tag>
     int hset(const sstring& key, size_t key_hash, sstring& field, sstring& value)
@@ -309,6 +315,7 @@ public:
             auto dict_item = local_slab().create(dict_size, key, key_hash, d, REDIS_DICT);
             intrusive_ptr_add_ref(dict_item);
             if (_store->set(key, key_hash, dict_item) != 0) {
+                intrusive_ptr_release(dict_item);
                 return -1;
             }
         }
@@ -316,6 +323,34 @@ public:
         auto field_hash = std::hash<sstring>()(field);
         auto new_item = local_slab().create(item_size, field, field_hash, origin::move_if_local(value));
         return d->replace(field, field_hash, new_item);
+    }
+    template<typename origin = local_origin_tag>
+    int hmset(const sstring& key, size_t key_hash, std::unordered_map<sstring, sstring>& kv)
+    {
+        dict* d = fetch_dict(key, key_hash);
+        if (d == nullptr) {
+            const size_t dict_size = item::item_size_for_dict(key.size());
+            d = new dict();
+            auto dict_item = local_slab().create(dict_size, key, key_hash, d, REDIS_DICT);
+            intrusive_ptr_add_ref(dict_item);
+            if (_store->set(key, key_hash, dict_item) != 0) {
+                intrusive_ptr_release(dict_item);
+                return -1;
+            }
+        }
+        for (auto& p : kv) {
+            const sstring& field = p.first;
+            sstring& value = p.second;
+            const size_t item_size = item::item_size_for_string(field.size(), value.size());
+            auto field_hash = std::hash<sstring>()(field);
+            auto new_item = local_slab().create(item_size, field, field_hash, origin::move_if_local(value));
+            intrusive_ptr_add_ref(new_item);
+            if (d->replace(field, field_hash, new_item) != -1) {
+                intrusive_ptr_release(new_item);
+                return -1;
+            }
+        }
+        return 0;
     }
     // HGET
     template<typename origin = local_origin_tag>
