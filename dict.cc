@@ -74,9 +74,15 @@ struct dict::rep
     int clear(dict_hash_table *ht);
     size_t size();
     std::vector<item_ptr> fetch();
-    std::vector<item_ptr> fetch(const std::unordered_set<std::experimental::string_view>& keys);
+    std::vector<item_ptr> fetch(const std::unordered_set<sstring>& keys);
 private:
     static const int DICT_HT_INITAL_SIZE = 4;
+    inline bool key_equal(std::experimental::string_view& k, const sstring& key) {
+        if (k.size() != key.size()) {
+          return false;
+        }
+        return memcmp(k.data(), key.data(), k.size()) == 0;
+    }
     inline bool key_equal(std::experimental::string_view& k, size_t kh, item* val) {
         if (val == nullptr) {
             return false;
@@ -174,11 +180,17 @@ public:
         for(;;) {
             if (_current == nullptr) {
                 _index++;
-                if (_index > _ht->_size) {
+                if (_index > _ht->_size_mask) {
                     if (_table_index == 0) {
                         _table_index++;
                         _ht = &(_rep->_ht[_table_index]);
                         _index = 0;
+                        if (_ht->_size == 0) {
+                            // we iteratored all nodes.
+                            _status = REDIS_ERR;
+                            break;
+                        }
+
                     }
                     else {
                         // we iteratored all nodes.
@@ -395,7 +407,7 @@ int dict::rep::remove_no_free(const sstring& key, size_t kh) {
     return generic_delete(key, kh, 1);
 }
 
-std::vector<item_ptr> dict::rep::fetch(const std::unordered_set<std::experimental::string_view>& keys)
+std::vector<item_ptr> dict::rep::fetch(const std::unordered_set<sstring>& keys)
 {
     std::vector<item_ptr> items;
     dict_iterator iter(this);
@@ -403,7 +415,7 @@ std::vector<item_ptr> dict::rep::fetch(const std::unordered_set<std::experimenta
     while (iter.status() == REDIS_OK) {
         auto n = iter.value();
         auto k = n->_val->key();
-        if (keys.find(k) != keys.end()) {
+        if (std::find_if(keys.begin(), keys.end(), [this, &k] (const sstring& key) { return key_equal(k, key); }) != keys.end()) {
             items.emplace_back(item_ptr(n->_val));
         }
         iter.next();
@@ -583,7 +595,7 @@ item_ptr dict::fetch(const sstring& key, size_t kh)
     return item_ptr(_rep->fetch_value(key, kh));
 }
 
-std::vector<item_ptr> dict::fetch(const std::unordered_set<std::experimental::string_view>& keys)
+std::vector<item_ptr> dict::fetch(const std::unordered_set<sstring>& keys)
 {
   return _rep->fetch(keys);
 }

@@ -145,9 +145,11 @@ private:
     long     _expire;
     expiration _expired;    
     union {
-      char     _data[];
       object*  _ptr;
       uint64_t _uint64;
+      int64_t  _int64;
+      double   _double;
+      char     _data[];
     } _u;
     friend class dict;
     static constexpr uint32_t field_alignment = alignof(void*);
@@ -172,6 +174,12 @@ public:
     }
     inline static size_t item_size_for_uint64(size_t key_size) {
         return sizeof(item) + align_up(static_cast<uint32_t>(key_size), field_alignment) + sizeof(uint64_t);
+    }
+    inline static size_t item_size_for_int64(size_t key_size) {
+        return sizeof(item) + align_up(static_cast<uint32_t>(key_size), field_alignment) + sizeof(int64_t);
+    }
+    inline static size_t item_size_for_double(size_t key_size) {
+        return sizeof(item) + align_up(static_cast<uint32_t>(key_size), field_alignment) + sizeof(double);
     }
 public:
     item(uint32_t slab_page_index, const sstring& key, size_t kh, sstring&& value)
@@ -233,6 +241,36 @@ public:
         }
     }
 
+    item(uint32_t slab_page_index, const sstring& key, size_t kh, double value)
+        : _value_size(sizeof(double))
+        , _key_size(key.size())
+        , _key_hash(kh)
+        , _slab_page_index(slab_page_index)
+        , _ref_count(0U)
+        , _type(REDIS_RAW_DOUBLE)
+        , _expire(0)
+    {
+        _u._double = value;
+        if (_key_size > 0) {
+            memcpy(_u._data + align_up(_value_size, field_alignment), key.c_str(), _key_size);
+        }
+    }
+
+    item(uint32_t slab_page_index, const sstring& key, size_t kh, int64_t value)
+        : _value_size(sizeof(int64_t))
+        , _key_size(key.size())
+        , _key_hash(kh)
+        , _slab_page_index(slab_page_index)
+        , _ref_count(0U)
+        , _type(REDIS_RAW_INT64)
+        , _expire(0)
+    {
+        _u._int64 = value;
+        if (_key_size > 0) {
+            memcpy(_u._data + align_up(_value_size, field_alignment), key.c_str(), _key_size);
+        }
+    }
+
     item(uint32_t slab_page_index, const sstring& key, size_t kh, object* ptr, uint8_t type)
         : _value_size(sizeof(void*))
         , _key_size(key.size())
@@ -264,14 +302,20 @@ public:
     inline object* ptr() { return _u._ptr; }
 
     inline uint64_t uint64() { return _u._uint64; }
+    inline int64_t int64() { return _u._int64; }
+    inline int64_t Double() { return _u._double; }
 
-    uint64_t incr(uint64_t step) {
+    inline uint64_t incr(uint64_t step) {
         _u._uint64 += step;
         return _u._uint64;
     }
-    uint64_t decr(uint64_t step) {
-        _u._uint64 -= step;
-        return _u._uint64;
+    inline int64_t incr(int64_t step) {
+        _u._int64 += step;
+        return _u._int64;
+    }
+    inline double incr(double step) {
+        _u._double += step;
+        return _u._double;
     }
 
     inline const uint32_t value_size() const { return _value_size; }

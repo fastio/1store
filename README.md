@@ -13,8 +13,8 @@ Now, the redis commands were supported as follow:
   * Key: DEL, EXISTS
   * String: GET, SET, DECR, INCR, DECRBY, INCRBY, APPEND, STRLEN
   * List: LINDEX, LINSERT, LLEN, LPUSH, LPUSHX, LPOP, LRANGE, LREM, LTRIM, LSET, RPOP, RPUSH, RPUSHX
-  * Hash: HSET, HDEL, HGET
-  * Other: echo, ping
+  * Hash: HSET, HDEL, HGET, HLEN, HSTRLEN, HMSET, HMGET, HKEYS, HVALS, HEXISTS, HINCRBY
+  * Other: ECHO, PING
 
 ## Building Pedis on Ubuntu 14.04
 

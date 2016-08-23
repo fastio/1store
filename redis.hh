@@ -103,14 +103,12 @@ public:
     future<int> hset(args_collection& args);
     future<int> hmset(args_collection& args);
     future<int> hincrby(args_collection& args);
-    future<int> hincrbyfloat(args_collection& args);
+    future<double> hincrbyfloat(args_collection& args);
     future<int> hlen(args_collection& args);
     future<int> hstrlen(args_collection& args);
     future<item_ptr> hget(args_collection& args);
     future<std::vector<item_ptr>> hgetall(args_collection& args);
-    future<std::vector<item_ptr>> hgetmget(args_collection& args);
-    future<std::vector<item_ptr>> hkeys(args_collection& args);
-    future<std::vector<item_ptr>> hvals(args_collection& args);
+    future<std::vector<item_ptr>> hmget(args_collection& args);
 private:
     future<item_ptr> pop_impl(args_collection& args, bool left);
     future<int> push_impl(args_collection& arg, bool force, bool left);

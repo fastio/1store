@@ -41,6 +41,7 @@
 #include "net/packet-data-source.hh"
 #include <unistd.h>
 #include <cstdlib>
+#include <sstream>
 #include "base.hh"
 namespace redis {
 class sharded_redis;
@@ -84,7 +85,7 @@ private:
         else {
             msg.append_static(msg_batch_tag);
             if (item->type() == REDIS_RAW_UINT64 || item->type() == REDIS_RAW_INT64) {
-                std::string s = std::to_string(item->uint64());
+                std::string s = std::to_string(item->int64());
                 msg.append_static(std::to_string(s.size()).c_str());
                 msg.append_static(msg_crlf);
                 msg.append_static(s.c_str());
@@ -93,6 +94,12 @@ private:
                 msg.append_static(std::to_string(item->value_size()).c_str());
                 msg.append_static(msg_crlf);
                 msg.append_static(item->value());
+                msg.append_static(msg_crlf);
+            } else if (item->type() == REDIS_RAW_DOUBLE) {
+                std::string s = std::to_string(item->Double());
+                msg.append_static(std::to_string(s.size()).c_str());
+                msg.append_static(msg_crlf);
+                msg.append_static(s.c_str());
                 msg.append_static(msg_crlf);
             } else {
                 msg.append_static(msg_type_err);
@@ -105,6 +112,11 @@ private:
         msg.append_static(std::to_string(c).c_str());
         msg.append_static(msg_crlf);
     }
+    static void  append_item(scattered_message<char>& msg, double c) {
+        msg.append_static(msg_num_tag);
+        msg.append_static(std::to_string(c));
+        msg.append_static(msg_crlf);
+    }
     static void  append_item(scattered_message<char>& msg, int c) {
         if (c < 32) {
             msg.append_static(_number_str[c]);
@@ -114,17 +126,47 @@ private:
             msg.append_static(msg_crlf);
         }
     }
-    static void  append_multi_items(scattered_message<char>& msg, std::vector<item_ptr> items) {
+    template<bool key = false, bool value = true>
+    static void  append_multi_items(scattered_message<char>& msg, std::vector<item_ptr>&& items) {
         msg.append(msg_sigle_tag);
-        msg.append(std::move(to_sstring(items.size())));
+        if (key && value)
+            msg.append(std::move(to_sstring(items.size() * 2)));
+        else
+            msg.append(std::move(to_sstring(items.size())));
         msg.append(std::move(to_sstring(msg_crlf)));
         for (size_t i = 0; i < items.size(); ++i) {
-            msg.append(msg_batch_tag);
-            msg.append(std::move(to_sstring(items[i]->value_size())));
-            msg.append(std::move(to_sstring(msg_crlf)));
-            sstring v{items[i]->value().data(), items[i]->value().size()};
-            msg.append(std::move(v));
-            msg.append(msg_crlf);
+            if (key) {
+                msg.append(msg_batch_tag);
+                msg.append(std::move(to_sstring(items[i]->key_size())));
+                msg.append(std::move(to_sstring(msg_crlf)));
+                sstring v{items[i]->key().data(), items[i]->key().size()};
+                msg.append(std::move(v));
+                msg.append(msg_crlf);
+            }
+            if (value) {
+                msg.append(msg_batch_tag);
+                if (items[i]->type() == REDIS_RAW_UINT64 || items[i]->type() == REDIS_RAW_INT64) {
+                    std::string s = std::to_string(items[i]->int64());
+                    msg.append_static(std::to_string(s.size()).c_str());
+                    msg.append_static(msg_crlf);
+                    msg.append_static(s.c_str());
+                    msg.append_static(msg_crlf);
+                } else if (items[i]->type() == REDIS_RAW_ITEM || items[i]->type() == REDIS_RAW_STRING) {
+                    msg.append(std::move(to_sstring(items[i]->value_size())));
+                    msg.append(std::move(to_sstring(msg_crlf)));
+                    sstring v{items[i]->value().data(), items[i]->value().size()};
+                    msg.append(std::move(v));
+                    msg.append(msg_crlf);
+                } else if (items[i]->type() == REDIS_RAW_DOUBLE) {
+                    std::string s = std::to_string(items[i]->Double());
+                    msg.append_static(std::to_string(s.size()).c_str());
+                    msg.append_static(msg_crlf);
+                    msg.append_static(s.c_str());
+                    msg.append_static(msg_crlf);
+                } else {
+                    msg.append_static(msg_type_err);
+                }
+            }
         }
         msg.on_delete([item = std::move(items)] {});
     }

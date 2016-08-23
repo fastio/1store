@@ -47,7 +47,7 @@ public:
     size_t size();
     item_ptr fetch(const sstring& key, size_t kh);
     std::vector<item_ptr> fetch();
-    std::vector<item_ptr> fetch(const std::unordered_set<std::experimental::string_view>& keys);
+    std::vector<item_ptr> fetch(const std::unordered_set<sstring>& keys);
 };
 
 } // namespace redis

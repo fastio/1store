@@ -238,6 +238,21 @@ core = [
     'seastar/rpc/rpc.cc',
     ]
 
+http = ['seastar/http/transformers.cc',
+        'seastar/http/json_path.cc',
+        'seastar/http/file_handler.cc',
+        'seastar/http/common.cc',
+        'seastar/http/routes.cc',
+        'seastar/json/json_elements.cc',
+        'seastar/json/formatter.cc',
+        'seastar/http/matcher.cc',
+        'seastar/http/mime_types.cc',
+        'seastar/http/httpd.cc',
+        'seastar/http/reply.cc',
+        'seastar/http/request_parser.rl',
+        'seastar/http/api_docs.cc',
+        ]
+
 defines = []
 libs = '-laio -lboost_program_options -lboost_system -lboost_filesystem -lstdc++ -lm -lboost_unit_test_framework -lboost_thread -lcryptopp -lrt -lgnutls -lgnutlsxx'
 hwloc_libs = '-lhwloc -lnuma -lpciaccess -lxml2 -lz'
@@ -276,15 +291,15 @@ deps = {
     'libseastar.a' : core + libnet,
     'seastar.pc': [],
     'pedis': [
-      'src/redis.cc',
-      'src/dict.cc',
-      'src/list.cc',
-      'src/main.cc',
-      'src/redis_commands.cc',
-      'src/db.cc',
-      'src/system_stats.cc',
-      'src/redis_protocol_parser.rl',
-      'src/redis_protocol.cc',
+      'redis.cc',
+      'dict.cc',
+      'list.cc',
+      'main.cc',
+      'redis_commands.cc',
+      'db.cc',
+      'system_stats.cc',
+      'redis_protocol_parser.rl',
+      'redis_protocol.cc',
       ] + libnet + core,
 }
 

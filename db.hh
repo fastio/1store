@@ -73,7 +73,7 @@ public:
             if (it->type() != REDIS_RAW_UINT64) {
                 return REDIS_ERR;
             }
-            return incr ? it->incr(step) : it->decr(step);
+            return it->incr(incr ? step : -step);
         } else {
             const size_t item_size = item::item_size_for_uint64(key.size());
             auto new_item = local_slab().create(item_size, key, key_hash, step);
@@ -322,8 +322,11 @@ public:
         const size_t item_size = item::item_size_for_string(field.size(), value.size());
         auto field_hash = std::hash<sstring>()(field);
         auto new_item = local_slab().create(item_size, field, field_hash, origin::move_if_local(value));
+        intrusive_ptr_add_ref(new_item);
         return d->replace(field, field_hash, new_item);
     }
+
+    // HMSET
     template<typename origin = local_origin_tag>
     int hmset(const sstring& key, size_t key_hash, std::unordered_map<sstring, sstring>& kv)
     {
@@ -352,6 +355,7 @@ public:
         }
         return 0;
     }
+
     // HGET
     template<typename origin = local_origin_tag>
     item_ptr hget(const sstring& key, size_t key_hash, sstring& field)
@@ -363,6 +367,7 @@ public:
         }
         return nullptr;
     }
+
     // HDEL
     template<typename origin = local_origin_tag>
     int hdel(const sstring& key, size_t key_hash, sstring& field)
@@ -374,6 +379,7 @@ public:
         }
         return 0;
     }
+
     // HEXISTS
     template<typename origin = local_origin_tag>
     int hexists(const sstring& key, size_t key_hash, sstring& field)
@@ -385,6 +391,22 @@ public:
         }
         return REDIS_ERR;
     }
+
+    // HSTRLEN
+    template<typename origin = local_origin_tag>
+    int hstrlen(const sstring& key, size_t key_hash, sstring& field)
+    {
+        dict* d = fetch_dict(key, key_hash);
+        if (d != nullptr) {
+            auto field_hash = std::hash<sstring>()(field);
+            auto it = d->fetch(field, field_hash);
+            if (it && it->type() == REDIS_RAW_STRING) {
+                return static_cast<int>(it->value_size());
+            }
+        }
+        return 0;
+    }
+
     // HLEN
     template<typename origin = local_origin_tag>
     int hlen(const sstring& key, size_t key_hash)
@@ -396,6 +418,72 @@ public:
         return 0;
     }
 
+    // HINCRBY
+    template<typename origin = local_origin_tag>
+    int hincrby(const sstring& key, size_t key_hash, sstring& field, int delta)
+    {
+        dict* d = fetch_dict(key, key_hash);
+        if (d == nullptr) {
+            const size_t dict_size = item::item_size_for_dict(key.size());
+            d = new dict();
+            auto dict_item = local_slab().create(dict_size, key, key_hash, d, REDIS_DICT);
+            intrusive_ptr_add_ref(dict_item);
+            if (_store->set(key, key_hash, dict_item) != 0) {
+                intrusive_ptr_release(dict_item);
+                return -1;
+            }
+        }
+        auto field_hash = std::hash<sstring>()(field);
+        auto it = d->fetch(field, field_hash);
+        if (!it) {
+            const size_t item_size = item::item_size_for_int64(field.size());
+            auto new_item = local_slab().create(item_size, field, field_hash, static_cast<int64_t>(delta));
+            intrusive_ptr_add_ref(new_item);
+            if (d->set(field, field_hash, new_item) == -1) {
+                intrusive_ptr_release(new_item);
+                return -1;
+            }
+            return delta;
+        }
+        if (it->type() == REDIS_RAW_INT64) {
+            return it->incr(static_cast<int64_t>(delta));
+        }
+        return -1;
+    }
+
+    // HINCRBYFLOAT
+    template<typename origin = local_origin_tag>
+    double hincrbyfloat(const sstring& key, size_t key_hash, sstring& field, double delta)
+    {
+        dict* d = fetch_dict(key, key_hash);
+        if (d == nullptr) {
+            const size_t dict_size = item::item_size_for_dict(key.size());
+            d = new dict();
+            auto dict_item = local_slab().create(dict_size, key, key_hash, d, REDIS_DICT);
+            intrusive_ptr_add_ref(dict_item);
+            if (_store->set(key, key_hash, dict_item) != 0) {
+                intrusive_ptr_release(dict_item);
+                return -1;
+            }
+        }
+        auto field_hash = std::hash<sstring>()(field);
+        auto it = d->fetch(field, field_hash);
+        if (!it) {
+            const size_t item_size = item::item_size_for_double(field.size());
+            auto new_item = local_slab().create(item_size, field, field_hash, delta);
+            intrusive_ptr_add_ref(new_item);
+            if (d->set(field, field_hash, new_item) == -1) {
+                intrusive_ptr_release(new_item);
+                return -1;
+            }
+            return delta;
+        }
+        if (it->type() == REDIS_RAW_DOUBLE) {
+            return it->incr(delta);
+        }
+        return -1;
+    }
+
     // HGETALL
     template<typename origin = local_origin_tag>
     std::vector<item_ptr> hgetall(const sstring& key, size_t key_hash)
@@ -404,7 +492,20 @@ public:
         if (d != nullptr) {
             return d->fetch();
         }
-        return make_ready_future<std::vector<item_ptr>>();
+        std::vector<item_ptr> empty;
+        return std::move(empty);
+    }
+
+    // HMGET
+    template<typename origin = local_origin_tag>
+    std::vector<item_ptr> hmget(const sstring& key, size_t key_hash, std::unordered_set<sstring>& keys)
+    {
+        dict* d = fetch_dict(key, key_hash);
+        if (d != nullptr) {
+            return d->fetch(keys);
+        }
+        std::vector<item_ptr> empty;
+        return std::move(empty);
     }
 
     future<> stop() { return make_ready_future<>(); }

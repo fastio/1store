@@ -33,7 +33,7 @@ redis_commands::redis_commands()
     init_number_str_array(_multi_number_str, "*");
     init_number_str_array(_content_number_str, "$");
     _dummy = [] (args_collection&, output_stream<char>& out) {
-        return out.write("+BAD\r\n");
+        return out.write("+Not Implemented\r\n");
     };
     // [TEST]
     // ECHO
@@ -301,6 +301,78 @@ redis_commands::redis_commands()
             return out.write(std::move(msg));
         });
     });
+    // HLEN
+    regist_handler("HLEN", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->hlen(args).then([this, &out] (int count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
+            return out.write(std::move(msg));
+        });
+    });
+    // HEXISTS
+    regist_handler("HEXISTS", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->hexists(args).then([this, &out] (int count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
+            return out.write(std::move(msg));
+        });
+    });
+    // HSTRLEN
+    regist_handler("HSTRLEN", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->hstrlen(args).then([this, &out] (int count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
+            return out.write(std::move(msg));
+        });
+    });
+    // HINCRBY
+    regist_handler("HINCRBY", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->hincrby(args).then([this, &out] (int count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
+            return out.write(std::move(msg));
+        });
+    });
+    // HINCRBYFLOAT
+    regist_handler("HINCRBYFLOAT", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->hincrbyfloat(args).then([this, &out] (double count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
+            return out.write(std::move(msg));
+        });
+    });
+    // HKEYS
+    regist_handler("HKEYS", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->hgetall(args).then([this, &out] (std::vector<item_ptr>&& items) {
+            scattered_message<char> msg;
+            this_type::append_multi_items<true, false>(msg, std::move(items));
+            return out.write(std::move(msg));
+        });
+    });
+    // HVALS
+    regist_handler("HVALS", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->hgetall(args).then([this, &out] (std::vector<item_ptr>&& items) {
+            scattered_message<char> msg;
+            this_type::append_multi_items<false, true>(msg, std::move(items));
+            return out.write(std::move(msg));
+        });
+    });
+    // HMGET
+    regist_handler("HMGET", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->hmget(args).then([this, &out] (std::vector<item_ptr>&& items) {
+            scattered_message<char> msg;
+            this_type::append_multi_items(msg, std::move(items));
+            return out.write(std::move(msg));
+        });
+    });
+    // HGETALL
+    regist_handler("HGETALL", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->hgetall(args).then([this, &out] (std::vector<item_ptr>&& items) {
+            scattered_message<char> msg;
+            this_type::append_multi_items<true, true>(msg, std::move(items));
+            return out.write(std::move(msg));
+        });
+    });
+}
 }
 
-}
