@@ -81,5 +81,5 @@ Hardware:
 
 * Memory: 128GB
 * SSD: 500GB
-* CPU: 24 Intel(R) Xeon(R) CPU E5-2630 0 @ 2.30GHz
-* NIC: Intel Corporation I350 Gigabit Network Connection 
+* CPU: 24 logical cores 
+* NIC: 1000Mb 
