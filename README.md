@@ -66,10 +66,12 @@ Latest Results(Sep. 2016)
 
 ![](https://github.com/fastio/pedis/blob/master/docs/benchmark.png)
 
+Pedis's latency was less then 0.5ms for 99% of all requests.
+
 Test bed:
 
 * Server 1: Pedis/Redis Server
-* Server 2: MBENCHMARK Client
+* Server 2: memtier_benchmark tool
 
 Software:
 
