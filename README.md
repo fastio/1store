@@ -45,6 +45,9 @@ sudo apt-get install gcc-4.9-multilib g++-4.9-multilib
 
 To compile Seastar explicitly using gcc 4.9, use:
 ```
+git clone https://github.com/fastio/pedis.git
+cd pedis
+git submodule update --init --recursive
 ./configure.py --compiler=g++-4.9
 ninja 
 ```
