@@ -1,3 +1,6 @@
 [submodule "seastar"]
 	path = seastar
 	url = git@github.com:scylladb/seastar.git
+[submodule "googletest"]
+	path = gtest
+	url = git@github.com:google/googletest.git
