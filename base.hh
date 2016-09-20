@@ -16,7 +16,7 @@
  * under the License.
  */
 /*  This file copy from Seastar's apps/memcached.
- *  * Copyright (C) 2014 Cloudius Systems, Ltd.
+ *  Copyright (C) 2014 Cloudius Systems, Ltd.
  *
  **/
 #pragma once

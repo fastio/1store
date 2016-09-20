@@ -15,7 +15,7 @@
  * specific language governing permissions and limitations
  * under the License.
  *
- *  Copyright (c) 2006-2010, Peng Jian, pstack@163.com. All rights reserved.
+ *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
  *
  */
 #pragma once
