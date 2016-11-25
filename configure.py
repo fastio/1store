@@ -311,12 +311,18 @@ deps = {
       'redis.cc',
       'dict.cc',
       'list.cc',
+      'set.cc',
+      'sorted_set.cc',
       'main.cc',
       'redis_commands.cc',
       'db.cc',
       'system_stats.cc',
       'redis_protocol_parser.rl',
       'redis_protocol.cc',
+      'storage.cc',
+      'misc_storage.cc',
+      'list_storage.cc',
+      'dict_storage.cc',
       ] + libnet + core,
 }
 
