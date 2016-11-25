@@ -25,7 +25,7 @@
 #include "redis_commands.hh"
 namespace redis {
 
-redis_protocol::redis_protocol(sharded_redis& redis) : _redis(redis)
+redis_protocol::redis_protocol(redis_service& redis) : _redis(redis)
 {
 }
 

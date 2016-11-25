@@ -32,483 +32,178 @@
 #include "base.hh"
 #include "dict.hh"
 #include "list.hh"
+#include "misc_storage.hh"
+#include "list_storage.hh"
+#include "dict_storage.hh"
 namespace redis {
 
 namespace stdx = std::experimental;
 using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
 
-struct remote_origin_tag {
-    template <typename T>
-    static inline
-    T move_if_local(T& ref) {
-        return ref;
-    }
-};
-
-struct local_origin_tag {
-    template <typename T>
-    static inline
-    T move_if_local(T& ref) {
-        return std::move(ref);
-    }
-};
-
 
 class db {
-private:
-    dict* _store;
-    seastar::timer_set<item, &item::_timer_link> _alive;
-    timer<clock_type> _timer;
-    clock_type::duration _wc_to_clock_type_delta;
 public:
     db();
     ~db();
 
-    /** COUNTER API **/
-    template <typename origin = local_origin_tag>
-    uint64_t counter_by(sstring& key, size_t key_hash, uint64_t step, bool incr)
+    template  <typename origin = local_origin_tag> inline
+    int set(redis_key& key, sstring& val, long expire, uint32_t flag)
     {
-        auto it = _store->fetch_raw(key, key_hash);
-        if (it != nullptr) {
-            if (it->type() != REDIS_RAW_UINT64) {
-                return REDIS_ERR;
-            }
-            return it->incr(incr ? step : -step);
-        } else {
-            const size_t item_size = item::item_size_for_uint64(key.size());
-            auto new_item = local_slab().create(item_size, key, key_hash, step);
-            intrusive_ptr_add_ref(new_item);
-            if (_store->set(key, key_hash, new_item) != REDIS_OK)
-                return REDIS_ERR;
-            return step;
-        }
+        return _misc_storage.set<origin>(key, val, expire, flag);
+    }
+    template  <typename origin = local_origin_tag> inline
+    uint64_t counter_by(redis_key& key, uint64_t step, bool incr)
+    {
+        return _misc_storage.counter_by<origin>(key, step, incr);
     }
 
-    /** STRING API **/
-    template <typename origin = local_origin_tag>
-    int set(sstring& key, size_t key_hash, sstring& val, long expire, uint32_t flag)
+
+    template  <typename origin = local_origin_tag> inline
+    int append(redis_key& key, sstring& val)
     {
-        _store->remove(key, key_hash);
-        const size_t item_size = item::item_size_for_string(key.size(), val.size());
-        auto new_item = local_slab().create(item_size, key, key_hash, origin::move_if_local(val));
-        intrusive_ptr_add_ref(new_item);
-        return _store->set(key, key_hash, new_item);
+        return _misc_storage.append<origin>(key, val);
     }
 
-    template <typename origin = local_origin_tag>
-    int append(sstring& key, size_t key_hash, sstring& val)
+    inline int del(redis_key& key)
     {
-        size_t current_size = -1;
-        auto it = _store->fetch_raw(key, key_hash);
-        if (it != nullptr) {
-            auto exist_val = it->value();
-            current_size = exist_val.size() + val.size();
-            const size_t item_size = item::item_size_for_row_string_append(key.size(), val.size(), exist_val.size());
-            auto new_item = local_slab().create(item_size,
-                    key, key_hash,
-                    origin::move_if_local(exist_val),
-                    origin::move_if_local(val));
-            intrusive_ptr_add_ref(new_item);
-            intrusive_ptr_release(it);
-            if (_store->replace(key, key_hash, new_item) != 0) {
-                intrusive_ptr_release(new_item);
-                return -1;
-            }
-        }
-        else {
-            current_size = val.size();
-            const size_t item_size = item::item_size_for_string(key.size(), val.size());
-            auto new_item = local_slab().create(item_size, key, key_hash, origin::move_if_local(val));
-            intrusive_ptr_add_ref(new_item);
-            if (_store->set(key, key_hash, new_item) != 0) {
-                intrusive_ptr_release(new_item);
-                return -1;
-            }
-        }
-        return current_size;
+        return _misc_storage.del(key);
     }
 
-    template <typename origin = local_origin_tag>
-    int del(const sstring& key, size_t key_hash)
+    inline int exists(redis_key& key)
     {
-        return _store->remove(key, key_hash) == REDIS_OK ? 1 : 0;
+        return _misc_storage.exists(key);
     }
 
-    template <typename origin = local_origin_tag>
-    int exists(const sstring& key, size_t key_hash)
+    inline item_ptr get(redis_key& key)
     {
-        return _store->exists(key, key_hash);
+        return _misc_storage.get(key);
     }
 
-    template <typename origin = local_origin_tag>
-    item_ptr get(const sstring& key, size_t key_hash)
+    inline int strlen(redis_key& key)
     {
-        return _store->fetch(key, key_hash);
+        return _misc_storage.strlen(key);
     }
 
-    template <typename origin = local_origin_tag>
-    int strlen(const sstring& key, size_t key_hash)
+    inline int expire(redis_key& key, long expired)
     {
-        auto i = _store->fetch(key, key_hash);
-        if (i) {
-            return i->value_size();
-        }
-        return 0;
+        return _misc_storage.expire(key, expired);
     }
 
-    template<typename origin = local_origin_tag>
-    int expire(const sstring& key, size_t key_hash, long expired)
+    
+    template <typename origin = local_origin_tag> inline
+    int push(redis_key& key, sstring& value, bool force, bool left)
     {
-      auto it = _store->fetch_raw(key, key_hash);
-      if (it == nullptr) {
-        return REDIS_ERR;
-      }
-      //auto exp = expiration(get_wc_to_clock_type_delta(), expired);
-      //it->update_expired_point(exp);
-      return REDIS_OK;
+        return _list_storage.push<origin>(key, value, force, left);
     }
 
-    /** LIST API **/
-    inline list* fetch_list(const sstring& key, size_t key_hash)
+    inline item_ptr pop(redis_key& key, bool left)
     {
-        auto it = _store->fetch_raw(key, key_hash);
-        if (it != nullptr && it->type() == REDIS_LIST) {
-            return static_cast<list*>(it->ptr());
-        }
-        return nullptr;
-    }
-    template<typename origin = local_origin_tag>
-    int push(const sstring& key, size_t key_hash, sstring& value, bool force, bool left)
-    {
-        list* l = fetch_list(key, key_hash);
-        if (l == nullptr) {
-            if (!force) {
-                return -1;
-            }
-            const size_t list_size = item::item_size_for_list(key.size());
-            l = new list();
-            auto list_item = local_slab().create(list_size, key, key_hash, l, REDIS_LIST);
-            intrusive_ptr_add_ref(list_item);
-            if (_store->set(key, key_hash, list_item) != 0) {
-                intrusive_ptr_release(list_item);
-                return -1;
-            }
-        }
-        const size_t item_size = item::item_size_for_row_string(static_cast<size_t>(value.size()));
-        auto new_item = local_slab().create(item_size, origin::move_if_local(value));
-        intrusive_ptr_add_ref(new_item);
-        return (left ? l->add_head(new_item) : l->add_tail(new_item)) == 0 ? static_cast<int>(l->length()) : 0;
+        return _list_storage.pop(key, left);
     }
 
-    template<typename origin = local_origin_tag>
-    item_ptr pop(const sstring& key, size_t key_hash, bool left)
+    inline int llen(redis_key& key)
     {
-        list* l = fetch_list(key, key_hash);
-        if (l != nullptr) {
-            auto it = left ? l->pop_head() : l->pop_tail();
-            if (l->length() == 0) {
-                _store->remove(key, key_hash);
-            }
-            return it;
-        } 
-        return nullptr;
+        return _list_storage.llen(key);
     }
 
-    template<typename origin = local_origin_tag>
-    int llen(const sstring& key, size_t key_hash)
+    inline item_ptr lindex(redis_key& key, int idx)
     {
-        list* l = fetch_list(key, key_hash);
-        if (l != nullptr) {
-            return l->length();
-        } 
-        return 0;
+        return _list_storage.lindex(key, idx);
     }
 
-    template<typename origin = local_origin_tag>
-    item_ptr lindex(const sstring& key, size_t key_hash, int idx)
+    template <typename origin = local_origin_tag> inline
+    int linsert(redis_key& key, sstring& pivot, sstring& value, bool after)
     {
-        list* l = fetch_list(key, key_hash);
-        if (l != nullptr) {
-            return l->index(idx);
-        } 
-        return nullptr;
-    }
-  
-    template<typename origin = local_origin_tag>
-    int linsert(const sstring& key, size_t key_hash, sstring& pivot, sstring& value, bool after)
-    {
-        list* l = fetch_list(key, key_hash);
-        if (l != nullptr) {
-            const size_t item_size = item::item_size_for_row_string(value.size());
-            auto new_item = local_slab().create(item_size, origin::move_if_local(value));
-            intrusive_ptr_add_ref(new_item);
-            return (after ? l->insert_after(pivot, new_item) : l->insert_before(pivot, new_item)) == 0 ? 1 : 0;
-        } 
-        return 0;
+        return _list_storage.linsert<origin>(key, pivot, value, after);
     }
 
-    template<typename origin = local_origin_tag>
-    std::vector<item_ptr> lrange(const sstring& key, size_t key_hash, int start, int end)
+    inline std::vector<item_ptr> lrange(redis_key& key, int start, int end)
     {
-        list* l = fetch_list(key, key_hash);
-        std::vector<item_ptr> result;
-        if (l != nullptr) {
-            return l->range(start, end);
-        } 
-        return std::move(result); 
-    }
-    template<typename origin = local_origin_tag>
-    int lset(const sstring& key, size_t key_hash, int idx, sstring& value)
-    {
-        list* l = fetch_list(key, key_hash);
-        if (l != nullptr) {
-            const size_t item_size = item::item_size_for_row_string(value.size());
-            auto new_item = local_slab().create(item_size, origin::move_if_local(value));
-            intrusive_ptr_add_ref(new_item);
-            if (l->set(idx, new_item) == REDIS_OK)
-                return 1;
-            else {
-                intrusive_ptr_release(new_item);
-            }
-        } 
-        return 0;
+        return _list_storage.lrange(key, start, end);
     }
 
-    template<typename origin = local_origin_tag>
-    int lrem(const sstring& key, size_t key_hash, int count, sstring& value)
+    template <typename origin = local_origin_tag> inline
+    int lset(redis_key& key, int idx, sstring& value)
     {
-        list* l = fetch_list(key, key_hash);
-        if (l != nullptr) {
-            return l->trem(count, value);
-        }
-        return 0;
+        return _list_storage.lset<origin>(key, idx, value);
     }
 
-    template<typename origin = local_origin_tag>
-    int ltrim(const sstring& key, size_t key_hash, int start, int end)
+    int lrem(redis_key& key, int count, sstring& value)
     {
-        list* l = fetch_list(key, key_hash);
-        if (l != nullptr) {
-            return l->trim(start, end);
-        }
-        return 0;
+        return _list_storage.lrem(key, count, value);
     }
 
-    /** HASH API **/
-    inline dict* fetch_dict(const sstring& key, size_t key_hash)
+    int ltrim(redis_key& key, int start, int end)
     {
-        auto it = _store->fetch_raw(key, key_hash);
-        if (it != nullptr && it->type() == REDIS_DICT) {
-            return static_cast<dict*>(it->ptr());
-        }
-        return nullptr;
+        return _list_storage.ltrim(key, start, end);
     }
 
-    // HSET
-    template<typename origin = local_origin_tag>
-    int hset(const sstring& key, size_t key_hash, sstring& field, sstring& value)
+
+    template <typename origin = local_origin_tag> inline
+    int hset(redis_key& key, sstring& field, sstring& value)
     {
-        dict* d = fetch_dict(key, key_hash);
-        if (d == nullptr) {
-            const size_t dict_size = item::item_size_for_dict(key.size());
-            d = new dict();
-            auto dict_item = local_slab().create(dict_size, key, key_hash, d, REDIS_DICT);
-            intrusive_ptr_add_ref(dict_item);
-            if (_store->set(key, key_hash, dict_item) != 0) {
-                intrusive_ptr_release(dict_item);
-                return -1;
-            }
-        }
-        const size_t item_size = item::item_size_for_string(field.size(), value.size());
-        auto field_hash = std::hash<sstring>()(field);
-        auto new_item = local_slab().create(item_size, field, field_hash, origin::move_if_local(value));
-        intrusive_ptr_add_ref(new_item);
-        return d->replace(field, field_hash, new_item);
+        return _dict_storage.hset<origin>(key, field, value);
     }
 
-    // HMSET
-    template<typename origin = local_origin_tag>
-    int hmset(const sstring& key, size_t key_hash, std::unordered_map<sstring, sstring>& kv)
+    template <typename origin = local_origin_tag> inline
+    int hmset(redis_key& key, std::unordered_map<sstring, sstring>& kv)
     {
-        dict* d = fetch_dict(key, key_hash);
-        if (d == nullptr) {
-            const size_t dict_size = item::item_size_for_dict(key.size());
-            d = new dict();
-            auto dict_item = local_slab().create(dict_size, key, key_hash, d, REDIS_DICT);
-            intrusive_ptr_add_ref(dict_item);
-            if (_store->set(key, key_hash, dict_item) != 0) {
-                intrusive_ptr_release(dict_item);
-                return -1;
-            }
-        }
-        for (auto& p : kv) {
-            const sstring& field = p.first;
-            sstring& value = p.second;
-            const size_t item_size = item::item_size_for_string(field.size(), value.size());
-            auto field_hash = std::hash<sstring>()(field);
-            auto new_item = local_slab().create(item_size, field, field_hash, origin::move_if_local(value));
-            intrusive_ptr_add_ref(new_item);
-            if (d->replace(field, field_hash, new_item) != -1) {
-                intrusive_ptr_release(new_item);
-                return -1;
-            }
-        }
-        return 0;
+        return _dict_storage.hmset<origin>(key, kv);
     }
 
-    // HGET
-    template<typename origin = local_origin_tag>
-    item_ptr hget(const sstring& key, size_t key_hash, sstring& field)
+    inline item_ptr hget(redis_key& key, sstring& field)
     {
-        dict* d = fetch_dict(key, key_hash);
-        if (d != nullptr) {
-            auto field_hash = std::hash<sstring>()(field);
-            return d->fetch(field, field_hash);
-        }
-        return nullptr;
+        return _dict_storage.hget(key, field);
     }
 
-    // HDEL
-    template<typename origin = local_origin_tag>
-    int hdel(const sstring& key, size_t key_hash, sstring& field)
+    inline int hdel(redis_key& key, sstring& field)
     {
-        dict* d = fetch_dict(key, key_hash);
-        if (d != nullptr) {
-            auto field_hash = std::hash<sstring>()(field);
-            return d->remove(field, field_hash);
-        }
-        return 0;
+        return _dict_storage.hdel(key, field);
     }
 
-    // HEXISTS
-    template<typename origin = local_origin_tag>
-    int hexists(const sstring& key, size_t key_hash, sstring& field)
+    inline int hexists(redis_key& key, sstring& field)
     {
-        dict* d = fetch_dict(key, key_hash);
-        if (d != nullptr) {
-            auto field_hash = std::hash<sstring>()(field);
-            return d->exists(field, field_hash);
-        }
-        return REDIS_ERR;
+        return _dict_storage.hexists(key, field);
     }
 
-    // HSTRLEN
-    template<typename origin = local_origin_tag>
-    int hstrlen(const sstring& key, size_t key_hash, sstring& field)
+    inline int hstrlen(redis_key& key, sstring& field)
     {
-        dict* d = fetch_dict(key, key_hash);
-        if (d != nullptr) {
-            auto field_hash = std::hash<sstring>()(field);
-            auto it = d->fetch(field, field_hash);
-            if (it && it->type() == REDIS_RAW_STRING) {
-                return static_cast<int>(it->value_size());
-            }
-        }
-        return 0;
+        return _dict_storage.hstrlen(key, field);
     }
 
-    // HLEN
-    template<typename origin = local_origin_tag>
-    int hlen(const sstring& key, size_t key_hash)
+    inline int hlen(redis_key& key)
     {
-        dict* d = fetch_dict(key, key_hash);
-        if (d != nullptr) {
-            return d->size();
-        }
-        return 0;
+        return _dict_storage.hlen(key);
     }
 
-    // HINCRBY
-    template<typename origin = local_origin_tag>
-    int hincrby(const sstring& key, size_t key_hash, sstring& field, int delta)
+    template <typename origin = local_origin_tag> inline
+    int hincrby(redis_key& key, sstring& field, int delta)
     {
-        dict* d = fetch_dict(key, key_hash);
-        if (d == nullptr) {
-            const size_t dict_size = item::item_size_for_dict(key.size());
-            d = new dict();
-            auto dict_item = local_slab().create(dict_size, key, key_hash, d, REDIS_DICT);
-            intrusive_ptr_add_ref(dict_item);
-            if (_store->set(key, key_hash, dict_item) != 0) {
-                intrusive_ptr_release(dict_item);
-                return -1;
-            }
-        }
-        auto field_hash = std::hash<sstring>()(field);
-        auto it = d->fetch(field, field_hash);
-        if (!it) {
-            const size_t item_size = item::item_size_for_int64(field.size());
-            auto new_item = local_slab().create(item_size, field, field_hash, static_cast<int64_t>(delta));
-            intrusive_ptr_add_ref(new_item);
-            if (d->set(field, field_hash, new_item) == -1) {
-                intrusive_ptr_release(new_item);
-                return -1;
-            }
-            return delta;
-        }
-        if (it->type() == REDIS_RAW_INT64) {
-            return it->incr(static_cast<int64_t>(delta));
-        }
-        return -1;
+        return _dict_storage.hincrby<origin>(key, field, delta);
     }
 
-    // HINCRBYFLOAT
-    template<typename origin = local_origin_tag>
-    double hincrbyfloat(const sstring& key, size_t key_hash, sstring& field, double delta)
+    template <typename origin = local_origin_tag> inline
+    double hincrbyfloat(redis_key& key, sstring& field, double delta)
     {
-        dict* d = fetch_dict(key, key_hash);
-        if (d == nullptr) {
-            const size_t dict_size = item::item_size_for_dict(key.size());
-            d = new dict();
-            auto dict_item = local_slab().create(dict_size, key, key_hash, d, REDIS_DICT);
-            intrusive_ptr_add_ref(dict_item);
-            if (_store->set(key, key_hash, dict_item) != 0) {
-                intrusive_ptr_release(dict_item);
-                return -1;
-            }
-        }
-        auto field_hash = std::hash<sstring>()(field);
-        auto it = d->fetch(field, field_hash);
-        if (!it) {
-            const size_t item_size = item::item_size_for_double(field.size());
-            auto new_item = local_slab().create(item_size, field, field_hash, delta);
-            intrusive_ptr_add_ref(new_item);
-            if (d->set(field, field_hash, new_item) == -1) {
-                intrusive_ptr_release(new_item);
-                return -1;
-            }
-            return delta;
-        }
-        if (it->type() == REDIS_RAW_DOUBLE) {
-            return it->incr(delta);
-        }
-        return -1;
+        return _dict_storage.hincrbyfloat<origin>(key, field, delta);
     }
 
-    // HGETALL
-    template<typename origin = local_origin_tag>
-    std::vector<item_ptr> hgetall(const sstring& key, size_t key_hash)
+    inline std::vector<item_ptr> hgetall(redis_key& key)
     {
-        dict* d = fetch_dict(key, key_hash);
-        if (d != nullptr) {
-            return d->fetch();
-        }
-        std::vector<item_ptr> empty;
-        return std::move(empty);
+        return _dict_storage.hgetall(key);
     }
 
-    // HMGET
-    template<typename origin = local_origin_tag>
-    std::vector<item_ptr> hmget(const sstring& key, size_t key_hash, std::unordered_set<sstring>& keys)
+    inline std::vector<item_ptr> hmget(redis_key& key, std::unordered_set<sstring>& keys)
     {
-        dict* d = fetch_dict(key, key_hash);
-        if (d != nullptr) {
-            return d->fetch(keys);
-        }
-        std::vector<item_ptr> empty;
-        return std::move(empty);
+        return _dict_storage.hmget(key, keys);
     }
 
     future<> stop() { return make_ready_future<>(); }
+private:
+    dict* _store;
+    misc_storage _misc_storage;
+    list_storage _list_storage;
+    dict_storage _dict_storage;
 };
 }
 

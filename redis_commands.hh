@@ -44,7 +44,7 @@
 #include <sstream>
 #include "base.hh"
 namespace redis {
-class sharded_redis;
+class redis_service;
 class args_collection;
 //class item;
 using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
@@ -57,7 +57,7 @@ private:
     void regist_handler(sstring command, handler_type handler) {
         _handlers[command] = handler;
     }
-    sharded_redis* _redis;
+    redis_service* _redis;
     static std::vector<sstring> _number_str;
     static std::vector<sstring> _multi_number_str;
     static std::vector<sstring> _content_number_str;
@@ -173,7 +173,7 @@ private:
 public:
     redis_commands();
     ~redis_commands() {} 
-    void set_redis(sharded_redis* r) { _redis = r; }
+    void attach_redis(redis_service* r) { _redis = r; }
     handler_type& get(sstring& command) {
         auto it = _handlers.find(command);
         if (it != _handlers.end()) {

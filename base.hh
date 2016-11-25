@@ -127,6 +127,20 @@ struct expiration {
 };
 
 class db;
+struct redis_key {
+    sstring _key;
+    size_t  _hash;
+    redis_key() = default;
+    redis_key(redis_key&) = default;
+    redis_key(sstring key) : _key(key), _hash(std::hash<sstring>()(_key)) {}
+    redis_key(sstring&& key, size_t&& hash) : _key(std::move(key)), _hash(std::move(hash)) {}
+    redis_key(redis_key&& rk) : _key(std::move(rk._key)), _hash(rk._hash) {}
+    inline const size_t hash() const { return _hash; }
+    inline const sstring& key() const { return _key; }
+    inline const size_t size() const { return _key.size(); }
+    inline const char* data() const { return _key.c_str(); }
+};
+
 // The defination of `item was copied from apps/memcached
 class item : public slab_item_base {
 public:
@@ -149,7 +163,7 @@ private:
       uint64_t _uint64;
       int64_t  _int64;
       double   _double;
-      char     _data[];
+      char     _data[0];
     } _u;
     friend class dict;
     static constexpr uint32_t field_alignment = alignof(void*);
@@ -182,10 +196,10 @@ public:
         return sizeof(item) + align_up(static_cast<uint32_t>(key_size), field_alignment) + sizeof(double);
     }
 public:
-    item(uint32_t slab_page_index, const sstring& key, size_t kh, sstring&& value)
+    item(uint32_t slab_page_index, const redis_key& key, sstring&& value)
         : _value_size(value.size())
         , _key_size(key.size())
-        , _key_hash(kh)
+        , _key_hash(key.hash())
         , _slab_page_index(slab_page_index)
         , _ref_count(0U)
         , _type(REDIS_RAW_STRING)
@@ -193,14 +207,14 @@ public:
     {
         memcpy(_u._data, value.c_str(), _value_size);
         if (_key_size > 0) {
-            memcpy(_u._data + align_up(_value_size, field_alignment), key.c_str(), _key_size);
+            memcpy(_u._data + align_up(_value_size, field_alignment), key.data(), _key_size);
         }
     }
 
-    item(uint32_t slab_page_index, const sstring& key, size_t kh, const std::experimental::string_view& value, sstring&& append)
+    item(uint32_t slab_page_index, const redis_key& key, const std::experimental::string_view& value, sstring&& append)
         : _value_size(value.size())
         , _key_size(key.size())
-        , _key_hash(kh)
+        , _key_hash(key.hash())
         , _slab_page_index(slab_page_index)
         , _ref_count(0U)
         , _type(REDIS_RAW_STRING)
@@ -210,7 +224,7 @@ public:
         memcpy(_u._data + _value_size, append.c_str(), append.size());
         _value_size += append.size();
         if (_key_size > 0) {
-            memcpy(_u._data + align_up(_value_size, field_alignment), key.c_str(), _key_size);
+            memcpy(_u._data + align_up(_value_size, field_alignment), key.data(), _key_size);
         }
     }
 
@@ -226,10 +240,10 @@ public:
         memcpy(_u._data, value.c_str(), _value_size);
     }
 
-    item(uint32_t slab_page_index, const sstring& key, size_t kh, uint64_t value)
+    item(uint32_t slab_page_index, const redis_key& key, uint64_t value)
         : _value_size(sizeof(uint64_t))
         , _key_size(key.size())
-        , _key_hash(kh)
+        , _key_hash(key.hash())
         , _slab_page_index(slab_page_index)
         , _ref_count(0U)
         , _type(REDIS_RAW_UINT64)
@@ -237,14 +251,14 @@ public:
     {
         _u._uint64 = value;
         if (_key_size > 0) {
-            memcpy(_u._data + align_up(_value_size, field_alignment), key.c_str(), _key_size);
+            memcpy(_u._data + align_up(_value_size, field_alignment), key.data(), _key_size);
         }
     }
 
-    item(uint32_t slab_page_index, const sstring& key, size_t kh, double value)
+    item(uint32_t slab_page_index, const redis_key& key, double value)
         : _value_size(sizeof(double))
         , _key_size(key.size())
-        , _key_hash(kh)
+        , _key_hash(key.hash())
         , _slab_page_index(slab_page_index)
         , _ref_count(0U)
         , _type(REDIS_RAW_DOUBLE)
@@ -252,14 +266,14 @@ public:
     {
         _u._double = value;
         if (_key_size > 0) {
-            memcpy(_u._data + align_up(_value_size, field_alignment), key.c_str(), _key_size);
+            memcpy(_u._data + align_up(_value_size, field_alignment), key.data(), _key_size);
         }
     }
 
-    item(uint32_t slab_page_index, const sstring& key, size_t kh, int64_t value)
+    item(uint32_t slab_page_index, const redis_key& key, int64_t value)
         : _value_size(sizeof(int64_t))
         , _key_size(key.size())
-        , _key_hash(kh)
+        , _key_hash(key.hash())
         , _slab_page_index(slab_page_index)
         , _ref_count(0U)
         , _type(REDIS_RAW_INT64)
@@ -267,14 +281,14 @@ public:
     {
         _u._int64 = value;
         if (_key_size > 0) {
-            memcpy(_u._data + align_up(_value_size, field_alignment), key.c_str(), _key_size);
+            memcpy(_u._data + align_up(_value_size, field_alignment), key.data(), _key_size);
         }
     }
 
-    item(uint32_t slab_page_index, const sstring& key, size_t kh, object* ptr, uint8_t type)
+    item(uint32_t slab_page_index, const redis_key& key, object* ptr, uint8_t type)
         : _value_size(sizeof(void*))
         , _key_size(key.size())
-        , _key_hash(kh)
+        , _key_hash(key.hash())
         , _slab_page_index(slab_page_index)
         , _ref_count(0U)
         , _type(type)
@@ -282,7 +296,7 @@ public:
     {
         _u._ptr = ptr;
         if (_key_size > 0) {
-            memcpy(_u._data + align_up(_value_size, field_alignment), key.c_str(), _key_size);
+            memcpy(_u._data + align_up(_value_size, field_alignment), key.data(), _key_size);
         }
     }
 
@@ -352,6 +366,7 @@ public:
         assert(it->_ref_count >= 0);
     }
 };
+
 static const sstring msg_crlf {"\r\n"};
 static const sstring msg_ok {"+OK\r\n"};
 static const sstring msg_pong {"+PONG\r\n"};

@@ -53,24 +53,24 @@ struct dict::rep
     ~rep();
 
     int expand_room(unsigned long size);
-    int add(const sstring& key, size_t kh, item* val);
-    int replace(const sstring& key, size_t kh, item* val);
-    int remove(const sstring& key, size_t kh);
+    int add(const redis_key& key, item* val);
+    int replace(const redis_key& key, item* val);
+    int remove(const redis_key& key);
 
 
-    dict_node *add_raw(const sstring& key, size_t kh);
-    dict_node *replace_raw(const sstring& key, size_t kh);
-    int remove_no_free(const sstring& key, size_t kh);
+    dict_node *add_raw(const redis_key& key);
+    dict_node *replace_raw(const redis_key& key);
+    int remove_no_free(const redis_key& key);
     void dict_release();
-    dict_node * find(const sstring& key, size_t kh);
-    item* fetch_value(const sstring& key, size_t kh);
+    dict_node * find(const redis_key& key);
+    item* fetch_value(const redis_key& key);
     int resize_room();
     dict_node *random_fetch();
     unsigned int fetch_some_keys(dict_node **des, unsigned int count);
     int do_rehash(int n);
     unsigned long dict_next_size(unsigned long size);
     void do_rehash_step();
-    int generic_delete(const sstring& key, size_t kh, int nofree);
+    int generic_delete(const redis_key& key, int nofree);
     int clear(dict_hash_table *ht);
     size_t size();
     std::vector<item_ptr> fetch();
@@ -111,7 +111,7 @@ private:
         return _rehash_idx != -1;
     }
     inline int expend_if_needed();
-    inline int key_index(const sstring& key, size_t kh);
+    inline int key_index(const redis_key& key);
     inline void hash_table_reset(dict_hash_table* ht) {
         ht->_table = nullptr;
         ht->_size = 0;
@@ -313,15 +313,15 @@ void dict::rep::do_rehash_step()
     if (_iterators == 0) do_rehash(1);
 }
 
-int dict::rep::add(const sstring& key, size_t kh, item *val)
+int dict::rep::add(const redis_key& key, item *val)
 {
-    dict_node *entry = add_raw(key, kh);
+    dict_node *entry = add_raw(key);
     if (!entry) return REDIS_ERR;
     entry->_val = val;
     return REDIS_OK;
 }
 
-dict_node* dict::rep::add_raw(const sstring& key, size_t kh)
+dict_node* dict::rep::add_raw(const redis_key& key)
 {
     int index;
     dict_node *entry;
@@ -329,7 +329,7 @@ dict_node* dict::rep::add_raw(const sstring& key, size_t kh)
 
     if (dict_is_rehashing()) do_rehash_step();
 
-    if ((index = key_index(key, kh)) == -1)
+    if ((index = key_index(key)) == -1)
         return nullptr;
 
     ht = dict_is_rehashing() ? &_ht[1] : &_ht[0];
@@ -341,14 +341,14 @@ dict_node* dict::rep::add_raw(const sstring& key, size_t kh)
     return entry;
 }
 
-int dict::rep::replace(const sstring& key, size_t kh, item *val)
+int dict::rep::replace(const redis_key& key, item *val)
 {
     dict_node *entry, auxentry;
 
-    if (add(key, kh, val) == REDIS_OK)
+    if (add(key, val) == REDIS_OK)
         return 1;
 
-    entry = find(key, kh);
+    entry = find(key);
     auxentry = *entry;
 
     entry->_val = val;
@@ -358,13 +358,13 @@ int dict::rep::replace(const sstring& key, size_t kh, item *val)
     return 0;
 }
 
-dict_node* dict::rep::replace_raw(const sstring& key, size_t kh)
+dict_node* dict::rep::replace_raw(const redis_key& key)
 {
-    dict_node *entry = find(key, kh);
-    return entry ? entry : add_raw(key, kh);
+    dict_node *entry = find(key);
+    return entry ? entry : add_raw(key);
 }
 
-int dict::rep::generic_delete(const sstring& key, size_t kh, int nofree)
+int dict::rep::generic_delete(const redis_key& key, int nofree)
 {
     unsigned int h, idx;
     dict_node *he, *prevHe;
@@ -372,14 +372,14 @@ int dict::rep::generic_delete(const sstring& key, size_t kh, int nofree)
 
     if (_ht[0]._size == 0) return REDIS_ERR;
     if (dict_is_rehashing()) do_rehash_step();
-    h = kh;
+    h = key.hash();
 
     for (table = 0; table <= 1; table++) {
         idx = h & _ht[table]._size_mask;
         he = _ht[table]._table[idx];
         prevHe = nullptr;
         while(he) {
-            if (key_equal(&key, kh, he->_val)) {
+            if (key_equal(&key.key(), key.hash(), he->_val)) {
                 if (prevHe)
                     prevHe->_next = he->_next;
                 else
@@ -399,12 +399,12 @@ int dict::rep::generic_delete(const sstring& key, size_t kh, int nofree)
     return REDIS_ERR;
 }
 
-int dict::rep::remove(const sstring& key, size_t kh) {
-    return generic_delete(key, kh, 0);
+int dict::rep::remove(const redis_key& key) {
+    return generic_delete(key, 0);
 }
 
-int dict::rep::remove_no_free(const sstring& key, size_t kh) {
-    return generic_delete(key, kh, 1);
+int dict::rep::remove_no_free(const redis_key& key) {
+    return generic_delete(key, 1);
 }
 
 std::vector<item_ptr> dict::rep::fetch(const std::unordered_set<sstring>& keys)
@@ -464,19 +464,19 @@ dict::rep::~rep()
     clear(&_ht[1]);
 }
 
-dict_node* dict::rep::find(const sstring& key, size_t kh)
+dict_node* dict::rep::find(const redis_key& key)
 {
     dict_node *he;
     size_t h, idx, table;
 
     if (_ht[0]._used + _ht[1]._used == 0) return nullptr;
     if (dict_is_rehashing()) do_rehash_step();
-    h = kh; 
+    h = key.hash(); 
     for (table = 0; table <= 1; table++) {
         idx = h & _ht[table]._size_mask;
         he = _ht[table]._table[idx];
         while(he) {
-            if (key_equal(&key, kh, he->_val))
+            if (key_equal(&key.key(), key.hash(), he->_val))
                 return he;
             he = he->_next;
         }
@@ -485,10 +485,10 @@ dict_node* dict::rep::find(const sstring& key, size_t kh)
     return nullptr;
 }
 
-item* dict::rep::fetch_value(const sstring& key, size_t kh)
+item* dict::rep::fetch_value(const redis_key& key)
 {
     dict_node *he;
-    he = find(key, kh);
+    he = find(key);
     return he ? he->_val : nullptr;
 }
 
@@ -519,19 +519,19 @@ unsigned long dict::rep::dict_next_size(unsigned long size)
     }
 }
 
-int dict::rep::key_index(const sstring& key, size_t kh)
+int dict::rep::key_index(const redis_key& key)
 {
     unsigned int h, idx, table;
     dict_node *he;
 
     if (expend_if_needed() == REDIS_ERR)
         return -1;
-    h = kh;
+    h = key.hash();
     for (table = 0; table <= 1; table++) {
         idx = h & _ht[table]._size_mask;
         he = _ht[table]._table[idx];
         while(he) {
-            if (key_equal(&key, kh, he->_val) == true)
+            if (key_equal(&key.key(), key.hash(), he->_val) == true)
                 return -1;
             he = he->_next;
         }
@@ -560,24 +560,24 @@ dict::~dict()
     }
 }
 
-int dict::set(const sstring& key, size_t kh, item* val)
+int dict::set(const redis_key& key, item* val)
 {
-    return _rep->add(key, kh, val);
+    return _rep->add(key, val);
 }
 
-int dict::replace(const sstring& key, size_t kh, item* val)
+int dict::replace(const redis_key& key, item* val)
 {
-    return _rep->replace(key, kh, val);
+    return _rep->replace(key, val);
 }
 
-int dict::remove(const sstring& key, size_t kh)
+int dict::remove(const redis_key& key)
 {
-    return _rep->remove(key, kh);
+    return _rep->remove(key);
 }
 
-int dict::exists(const sstring& key, size_t kh)
+int dict::exists(const redis_key& key)
 {
-    return _rep->find(key, kh) != nullptr ? 1 : 0; 
+    return _rep->find(key) != nullptr ? 1 : 0; 
 }
 
 size_t dict::size()
@@ -585,14 +585,14 @@ size_t dict::size()
   return _rep->size();
 }
 
-item* dict::fetch_raw(const sstring& key, size_t kh)
+item* dict::fetch_raw(const redis_key& key)
 {
-    return _rep->fetch_value(key, kh);
+    return _rep->fetch_value(key);
 }
 
-item_ptr dict::fetch(const sstring& key, size_t kh)
+item_ptr dict::fetch(const redis_key& key)
 {
-    return item_ptr(_rep->fetch_value(key, kh));
+    return item_ptr(_rep->fetch_value(key));
 }
 
 std::vector<item_ptr> dict::fetch(const std::unordered_set<sstring>& keys)

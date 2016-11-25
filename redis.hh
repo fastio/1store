@@ -55,14 +55,16 @@ struct args_collection;
 class db;
 class item;
 using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
-class sharded_redis {
+class redis_service {
 private:
-    distributed<db>& _peers;
     inline unsigned get_cpu(const size_t h) {
         return h % smp::count;
     }
+    distributed<db>& _db_peers;
 public:
-    sharded_redis(distributed<db>& peers) : _peers(peers) {}
+    redis_service(distributed<db>& db) : _db_peers(db) 
+    {
+    }
 
     // [TEST APIs]
     future<sstring> echo(args_collection& args);
@@ -73,8 +75,8 @@ public:
     future<uint64_t> decrby(args_collection& args);
 
     // [STRING APIs]
-    future<int> set(args_collection& args);
     future<int> mset(args_collection& args);
+    future<int> set(args_collection& args);
     future<int> del(args_collection& args);
     future<int> exists(args_collection& args);
     future<int> append(args_collection& args);
@@ -112,10 +114,10 @@ public:
 private:
     future<item_ptr> pop_impl(args_collection& args, bool left);
     future<int> push_impl(args_collection& arg, bool force, bool left);
-    future<int> push_impl(sstring& key, sstring& value, bool force, bool left);
-    future<int> set_impl(sstring& key, size_t hk, sstring& value, long expir, uint8_t flag);
-    future<item_ptr> get_impl(const sstring& key, size_t hk);
-    future<int> remove_impl(const sstring& key, size_t hash);
+    future<int> push_impl(redis_key& key, sstring& value, bool force, bool left);
+    future<int> set_impl(redis_key key, sstring& value, long expir, uint8_t flag);
+    future<item_ptr> get_impl(redis_key& key);
+    future<int> remove_impl(redis_key& key);
     future<uint64_t> counter_by(args_collection& args, bool incr, bool with_step);
 };
 

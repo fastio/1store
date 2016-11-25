@@ -29,7 +29,7 @@ namespace redis {
 class server {
 private:
     lw_shared_ptr<server_socket> _listener;
-    sharded_redis& _redis;
+    redis_service& _redis;
     distributed<system_stats>& _system_stats;
     uint16_t _port;
     struct connection {
@@ -39,7 +39,7 @@ private:
         output_stream<char> _out;
         redis_protocol _proto;
         distributed<system_stats>& _system_stats;
-        connection(connected_socket&& socket, socket_address addr, sharded_redis& redis, distributed<system_stats>& system_stats)
+        connection(connected_socket&& socket, socket_address addr, redis_service& redis, distributed<system_stats>& system_stats)
             : _socket(std::move(socket))
               , _addr(addr)
               , _in(_socket.input())
@@ -55,7 +55,7 @@ private:
         }
     };
 public:
-    server(sharded_redis& db, distributed<system_stats>& system_stats, uint16_t port = 6379)
+    server(redis_service& db, distributed<system_stats>& system_stats, uint16_t port = 6379)
         : _redis(db)
           , _system_stats(system_stats)
           , _port(port)
@@ -65,7 +65,7 @@ public:
         listen_options lo;
         lo.reuse_address = true;
         _listener = engine().listen(make_ipv4_address({_port}), lo);
-        redis_commands_ptr()->set_redis(&_redis);
+        redis_commands_ptr()->attach_redis(&_redis);
         keep_doing([this] {
                 return _listener->accept().then([this] (connected_socket fd, socket_address addr) mutable {
                     auto conn = make_lw_shared<connection>(std::move(fd), addr, _redis, _system_stats);
@@ -95,7 +95,7 @@ int main(int ac, char** av) {
     distributed<redis::system_stats> system_stats;
     distributed<redis::server> server;
 
-    redis::sharded_redis redis(db_peers);
+    redis::redis_service redis(db_peers);
 
     namespace bpo = boost::program_options;
     app_template app;

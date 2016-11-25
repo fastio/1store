@@ -39,13 +39,13 @@ private:
 public:
     dict();
     virtual ~dict();
-    int set(const sstring& key, size_t kh, item* val);
-    int exists(const sstring& key, size_t kh);
-    item* fetch_raw(const sstring& key, size_t kh);
-    int replace(const sstring& key, size_t kh, item* val);
-    int remove(const sstring& key, size_t kh);
+    int set(const redis_key& key, item* val);
+    int exists(const redis_key& key);
+    item* fetch_raw(const redis_key& key);
+    int replace(const redis_key& key, item* val);
+    int remove(const redis_key& key);
     size_t size();
-    item_ptr fetch(const sstring& key, size_t kh);
+    item_ptr fetch(const redis_key& key);
     std::vector<item_ptr> fetch();
     std::vector<item_ptr> fetch(const std::unordered_set<sstring>& keys);
 };
