@@ -391,4 +391,5 @@ static const sstring msg_not_found = {"+(nil)\r\n"};
 static const sstring msg_nil = {"+(nil)\r\n"};
 static constexpr const int REDIS_OK = 0;
 static constexpr const int REDIS_ERR = 1;
+static constexpr const int REDIS_NONE = -1;
 } /* namespace redis */
