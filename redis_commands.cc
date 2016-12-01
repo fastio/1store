@@ -37,7 +37,6 @@ redis_commands::redis_commands()
     };
     // [TEST]
     // ECHO
-    /*
     regist_handler("ECHO", [this] (args_collection& args, output_stream<char>& out) -> future<> {
         return _redis->echo(args).then([this, &out] (sstring message) {
             scattered_message<char> msg;
@@ -87,14 +86,12 @@ redis_commands::redis_commands()
             return out.write(std::move(msg));
         });
     });
-*/
     // SET
     regist_handler(sstring("SET"), [this] (args_collection& args, output_stream<char>& out) -> future<> {
         return _redis->set(args).then([this, &out] (int r) {
             return out.write(r == 0 ? msg_ok : msg_err);
         });
     });
-/*
     // MSET
     regist_handler(sstring("MSET"), [this] (args_collection& args, output_stream<char>& out) -> future<> {
         return _redis->mset(args).then([this, &out] (int r) {
@@ -374,7 +371,6 @@ redis_commands::redis_commands()
             return out.write(std::move(msg));
         });
     });
-*/
 }
 }
 
