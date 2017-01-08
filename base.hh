@@ -380,7 +380,8 @@ public:
         assert(it->_ref_count >= 0);
     }
 };
-
+using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
+bool item_equal(item_ptr& l, item_ptr& r);
 static const sstring msg_crlf {"\r\n"};
 static const sstring msg_ok {"+OK\r\n"};
 static const sstring msg_pong {"+PONG\r\n"};

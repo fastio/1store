@@ -203,6 +203,10 @@ public:
     {
         return _set_storage.sadd(key, member);
     }
+    inline int sadds(redis_key& key, std::vector<sstring>&& members)
+    {
+        return _set_storage.sadds(key, std::move(members));
+    }
     inline int scard(redis_key& key)
     {
         return _set_storage.scard(key);
@@ -218,6 +222,10 @@ public:
     inline int srem(redis_key& key, sstring& member)
     {
         return _set_storage.srem(key, member);
+    }
+    inline int srems(redis_key& key, std::vector<sstring>&& members)
+    {
+        return _set_storage.srems(key, std::move(members));
     }
     future<> stop() { return make_ready_future<>(); }
 private:

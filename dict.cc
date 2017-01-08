@@ -22,6 +22,15 @@
 #include <functional>
 #include "iterator.hh"
 namespace redis {
+bool item_equal(item_ptr& l, item_ptr& r)
+{
+    if (!l || !r)
+        return false;
+
+    return l->key_size() == r->key_size() &&
+           l->key() == r->key();
+}
+
 struct dict_node
 {
     item* _val;

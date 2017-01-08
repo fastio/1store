@@ -412,6 +412,14 @@ redis_commands::redis_commands()
             return out.write(std::move(msg));
         });
     });
+    // SDIFF
+    regist_handler("SDIFF", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->sdiff(args).then([this, &out] (std::vector<item_ptr>&& items) {
+            scattered_message<char> msg;
+            this_type::append_multi_items<true, false>(msg, std::move(items));
+            return out.write(std::move(msg));
+        });
+    });
 }
 }
 
