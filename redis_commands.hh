@@ -86,18 +86,18 @@ private:
             msg.append_static(msg_batch_tag);
             if (item->type() == REDIS_RAW_UINT64 || item->type() == REDIS_RAW_INT64) {
                 std::string s = std::to_string(item->int64());
-                msg.append_static(std::to_string(s.size()).c_str());
+                msg.append(to_sstring(s.size()));
                 msg.append_static(msg_crlf);
                 msg.append_static(s.c_str());
                 msg.append_static(msg_crlf);
             } else if (item->type() == REDIS_RAW_ITEM || item->type() == REDIS_RAW_STRING) {
-                msg.append_static(std::to_string(item->value_size()).c_str());
+                msg.append(to_sstring(item->value_size()));
                 msg.append_static(msg_crlf);
                 msg.append_static(item->value());
                 msg.append_static(msg_crlf);
             } else if (item->type() == REDIS_RAW_DOUBLE) {
                 std::string s = std::to_string(item->Double());
-                msg.append_static(std::to_string(s.size()).c_str());
+                msg.append(to_sstring(s.size()));
                 msg.append_static(msg_crlf);
                 msg.append_static(s.c_str());
                 msg.append_static(msg_crlf);
