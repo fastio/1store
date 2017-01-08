@@ -778,7 +778,6 @@ future<int> redis_service::srem(args_collection& args)
 
 future<std::vector<item_ptr>> redis_service::sdiff_store(args_collection& args)
 {
-    /*
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return make_ready_future<std::vector<item_ptr>>();
     }
@@ -787,20 +786,28 @@ future<std::vector<item_ptr>> redis_service::sdiff_store(args_collection& args)
     for (size_t i = 1; i < args._command_args.size(); ++i) {
         keys.emplace_back(std::move(args._command_args[i]));
     }
-    return sdiff_impl(std::move(keys)).then([this, &dest] (auto&& items) {
-        std::vector<sstring> members;
-        for (item_ptr& item : items) {
-            sstring member(item->key().data(), item->key().size());
-            members.emplace_back(std::move(member));
+    struct diff_store_state {
+        std::vector<item_ptr> result;
+        std::vector<sstring> keys;
+        sstring dest;
+    };
+    return do_with(diff_store_state{{}, std::move(keys), std::move(dest)}, [this] (auto& state) {
+        return this->sdiff_impl(std::move(state.keys)).then([this, &state] (auto&& items) {
+            std::vector<sstring> members;
+            for (item_ptr& item : items) {
+               sstring member(item->key().data(), item->key().size());
+               members.emplace_back(std::move(member));
             }
-            auto hash = std::hash<sstring>()(dest);
-            redis_key rk{std::move(dest), std::move(hash)};
-            return this->sadds_impl(rk, std::move(members)).then([result = std::move(items)] {
+            state.result = std::move(items);
+            auto hash = std::hash<sstring>()(state.dest);
+            redis_key rk{std::move(state.dest), std::move(hash)};
+            return this->sadds_impl(rk, std::move(members)).then([&state] (int discard) {
+                (void) discard;
+                auto&& result = std::move(state.result);
                 return make_ready_future<std::vector<item_ptr>>(std::move(result));
             });
+        });
     });
-    */
-    return make_ready_future<std::vector<item_ptr>>();
 }
 
 
@@ -818,12 +825,11 @@ future<std::vector<item_ptr>> redis_service::sdiff(args_collection& args)
 future<std::vector<item_ptr>> redis_service::sdiff_impl(std::vector<sstring>&& keys)
 {
     struct sdiff_state {
-        std::vector<item_ptr> result;
         std::unordered_map<unsigned, std::vector<item_ptr>> items_set;
         std::vector<sstring> keys;
     };
     uint32_t count = static_cast<uint32_t>(keys.size());
-    return do_with(sdiff_state{{}, {}, std::move(keys)}, [this, count] (auto& state) {
+    return do_with(sdiff_state{{}, std::move(keys)}, [this, count] (auto& state) {
         return parallel_for_each(boost::irange<unsigned>(0, count), [this, &state] (unsigned k) {
             sstring& key = state.keys[k];
             auto hash = std::hash<sstring>()(key);
