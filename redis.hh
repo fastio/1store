@@ -121,10 +121,16 @@ public:
     future<std::vector<item_ptr>> smembers(args_collection& args);
     future<std::vector<item_ptr>> sdiff(args_collection& args);
     future<std::vector<item_ptr>> sdiff_store(args_collection& args);
+    future<std::vector<item_ptr>> sinter(args_collection& args);
+    future<std::vector<item_ptr>> sinter_store(args_collection& args);
+    future<std::vector<item_ptr>> sunion(args_collection& args);
+    future<std::vector<item_ptr>> sunion_store(args_collection& args);
 private:
     future<int> sadd_impl(redis_key& rk, sstring&& member);
     future<int> sadds_impl(redis_key& rk, std::vector<sstring>&& members);
     future<std::vector<item_ptr>> sdiff_impl(std::vector<sstring>&& keys);
+    future<std::vector<item_ptr>> sinter_impl(std::vector<sstring>&& keys);
+    future<std::vector<item_ptr>> sunion_impl(std::vector<sstring>&& keys);
     future<std::vector<item_ptr>> smembers_impl(redis_key& key);
     future<item_ptr> pop_impl(args_collection& args, bool left);
     future<int> push_impl(args_collection& arg, bool force, bool left);

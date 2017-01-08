@@ -428,6 +428,38 @@ redis_commands::redis_commands()
             return out.write(std::move(msg));
         });
     });
+    // SINTER
+    regist_handler("SINTER", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->sinter(args).then([this, &out] (std::vector<item_ptr>&& items) {
+            scattered_message<char> msg;
+            this_type::append_multi_items<true, false>(msg, std::move(items));
+            return out.write(std::move(msg));
+        });
+    });
+    // SDIFFSTORE
+    regist_handler("SINTERSTORE", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->sinter_store(args).then([this, &out] (std::vector<item_ptr>&& items) {
+            scattered_message<char> msg;
+            this_type::append_multi_items<true, false>(msg, std::move(items));
+            return out.write(std::move(msg));
+        });
+    });
+    // SUNION
+    regist_handler("SUNION", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->sunion(args).then([this, &out] (std::vector<item_ptr>&& items) {
+            scattered_message<char> msg;
+            this_type::append_multi_items<true, false>(msg, std::move(items));
+            return out.write(std::move(msg));
+        });
+    });
+    // SUNIONSTORE
+    regist_handler("SUNIONSTORE", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->sunion_store(args).then([this, &out] (std::vector<item_ptr>&& items) {
+            scattered_message<char> msg;
+            this_type::append_multi_items<true, false>(msg, std::move(items));
+            return out.write(std::move(msg));
+        });
+    });
 }
 }
 

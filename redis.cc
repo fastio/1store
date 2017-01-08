@@ -853,4 +853,163 @@ future<std::vector<item_ptr>> redis_service::sdiff_impl(std::vector<sstring>&& k
        });
    });
 }
+
+future<std::vector<item_ptr>> redis_service::sinter_impl(std::vector<sstring>&& keys)
+{
+    struct sinter_state {
+        std::unordered_map<unsigned, std::vector<item_ptr>> items_set;
+        std::vector<sstring> keys;
+    };
+    uint32_t count = static_cast<uint32_t>(keys.size());
+    return do_with(sinter_state{{}, std::move(keys)}, [this, count] (auto& state) {
+        return parallel_for_each(boost::irange<unsigned>(0, count), [this, &state] (unsigned k) {
+            sstring& key = state.keys[k];
+            auto hash = std::hash<sstring>()(key);
+            redis_key rk{std::move(key), std::move(hash)};
+            return this->smembers_impl(rk).then([&state, index = k] (auto&& sub) {
+                state.items_set[index] = std::move(sub);
+            });
+        }).then([&state, count] {
+            auto&& result = std::move(state.items_set[0]);
+            for (uint32_t i = 1; i < count; ++i) {
+                std::vector<item_ptr> temp;    
+                auto&& next_items = std::move(state.items_set[i]);
+                if (result.empty() || next_items.empty()) {
+                    return make_ready_future<std::vector<item_ptr>>();
+                }
+                for (item_ptr& item : next_items) {
+                    if (std::find_if(result.begin(), result.end(), [&item] (item_ptr& o) {
+                        return item->key_size() == o->key_size() && item->key() == o->key();
+                    }) != result.end()) {
+                        temp.emplace_back(std::move(item));
+                    }
+                }
+                result = std::move(temp);
+            }
+            return make_ready_future<std::vector<item_ptr>>(std::move(result));
+       });
+   });
+}
+
+future<std::vector<item_ptr>> redis_service::sinter(args_collection& args)
+{
+    if (args._command_args_count < 1 || args._command_args.empty()) {
+        return make_ready_future<std::vector<item_ptr>>();
+    }
+    if (args._command_args_count == 1) {
+        return smembers(args);
+    }
+    return sinter_impl(std::move(args._command_args));
+}
+
+future<std::vector<item_ptr>> redis_service::sinter_store(args_collection& args)
+{
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return make_ready_future<std::vector<item_ptr>>();
+    }
+    sstring& dest = args._command_args[0];
+    std::vector<sstring> keys;
+    for (size_t i = 1; i < args._command_args.size(); ++i) {
+        keys.emplace_back(std::move(args._command_args[i]));
+    }
+    struct inter_store_state {
+        std::vector<item_ptr> result;
+        std::vector<sstring> keys;
+        sstring dest;
+    };
+    return do_with(inter_store_state{{}, std::move(keys), std::move(dest)}, [this] (auto& state) {
+        return this->sinter_impl(std::move(state.keys)).then([this, &state] (auto&& items) {
+            std::vector<sstring> members;
+            for (item_ptr& item : items) {
+               sstring member(item->key().data(), item->key().size());
+               members.emplace_back(std::move(member));
+            }
+            state.result = std::move(items);
+            auto hash = std::hash<sstring>()(state.dest);
+            redis_key rk{std::move(state.dest), std::move(hash)};
+            return this->sadds_impl(rk, std::move(members)).then([&state] (int discard) {
+                (void) discard;
+                auto&& result = std::move(state.result);
+                return make_ready_future<std::vector<item_ptr>>(std::move(result));
+            });
+        });
+    });
+}
+
+future<std::vector<item_ptr>> redis_service::sunion_impl(std::vector<sstring>&& keys)
+{
+    struct union_state {
+        std::unordered_map<unsigned, std::vector<item_ptr>> items_set;
+        std::vector<sstring> keys;
+    };
+    uint32_t count = static_cast<uint32_t>(keys.size());
+    return do_with(union_state{{}, std::move(keys)}, [this, count] (auto& state) {
+        return parallel_for_each(boost::irange<unsigned>(0, count), [this, &state] (unsigned k) {
+            sstring& key = state.keys[k];
+            auto hash = std::hash<sstring>()(key);
+            redis_key rk{std::move(key), std::move(hash)};
+            return this->smembers_impl(rk).then([&state, index = k] (auto&& sub) {
+                state.items_set[index] = std::move(sub);
+            });
+        }).then([&state, count] {
+            auto&& result = std::move(state.items_set[0]);
+            for (uint32_t i = 1; i < count; ++i) {
+                auto&& next_items = std::move(state.items_set[i]);
+                for (item_ptr& item : next_items) {
+                    if (std::find_if(result.begin(), result.end(), [&item] (item_ptr& o) {
+                        return item->key_size() == o->key_size() && item->key() == o->key();
+                    }) == result.end()) {
+                        result.emplace_back(std::move(item));
+                    }
+                }
+            }
+            return make_ready_future<std::vector<item_ptr>>(std::move(result));
+       });
+   });
+}
+
+future<std::vector<item_ptr>> redis_service::sunion(args_collection& args)
+{
+    if (args._command_args_count < 1 || args._command_args.empty()) {
+        return make_ready_future<std::vector<item_ptr>>();
+    }
+    if (args._command_args_count == 1) {
+        return smembers(args);
+    }
+    return sunion_impl(std::move(args._command_args));
+}
+
+future<std::vector<item_ptr>> redis_service::sunion_store(args_collection& args)
+{
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return make_ready_future<std::vector<item_ptr>>();
+    }
+    sstring& dest = args._command_args[0];
+    std::vector<sstring> keys;
+    for (size_t i = 1; i < args._command_args.size(); ++i) {
+        keys.emplace_back(std::move(args._command_args[i]));
+    }
+    struct union_store_state {
+        std::vector<item_ptr> result;
+        std::vector<sstring> keys;
+        sstring dest;
+    };
+    return do_with(union_store_state{{}, std::move(keys), std::move(dest)}, [this] (auto& state) {
+        return this->sunion_impl(std::move(state.keys)).then([this, &state] (auto&& items) {
+            std::vector<sstring> members;
+            for (item_ptr& item : items) {
+               sstring member(item->key().data(), item->key().size());
+               members.emplace_back(std::move(member));
+            }
+            state.result = std::move(items);
+            auto hash = std::hash<sstring>()(state.dest);
+            redis_key rk{std::move(state.dest), std::move(hash)};
+            return this->sadds_impl(rk, std::move(members)).then([&state] (int discard) {
+                (void) discard;
+                auto&& result = std::move(state.result);
+                return make_ready_future<std::vector<item_ptr>>(std::move(result));
+            });
+        });
+    });
+}
 } /* namespace redis */
