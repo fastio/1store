@@ -662,4 +662,77 @@ future<std::vector<item_ptr>> redis_service::hmget(args_collection& args)
     }
     return _db_peers.invoke_on(cpu, &db::hmget, std::ref(rk), std::ref(fields));
 }
+future<std::vector<item_ptr>> redis_service::smembers(args_collection& args)
+{
+    if (args._command_args_count < 1 || args._command_args.empty()) {
+        return make_ready_future<std::vector<item_ptr>>();
+    }
+    sstring& key = args._command_args[0];
+    auto hash = std::hash<sstring>()(key);
+    redis_key rk{std::move(key), std::move(hash)};
+    auto cpu = get_cpu(hash);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<std::vector<item_ptr>>(_db_peers.local().smembers(rk));
+    }
+    return _db_peers.invoke_on(cpu, &db::smembers, std::ref(rk));
+}
+future<int> redis_service::sadd(args_collection& args)
+{
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return make_ready_future<int>();
+    }
+    sstring& key = args._command_args[0];
+    auto hash = std::hash<sstring>()(key);
+    redis_key rk{std::move(key), std::move(hash)};
+    sstring& member = args._command_args[1];
+    auto cpu = get_cpu(hash);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<int>(_db_peers.local().sadd(rk, member));
+    }
+    return _db_peers.invoke_on(cpu, &db::sadd, std::ref(rk), std::ref(member));
+}
+future<int> redis_service::scard(args_collection& args)
+{
+    if (args._command_args_count < 1 || args._command_args.empty()) {
+        return make_ready_future<int>();
+    }
+    sstring& key = args._command_args[0];
+    auto hash = std::hash<sstring>()(key);
+    redis_key rk{std::move(key), std::move(hash)};
+    auto cpu = get_cpu(hash);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<int>(_db_peers.local().scard(rk));
+    }
+    return _db_peers.invoke_on(cpu, &db::scard, std::ref(rk));
+}
+future<int> redis_service::sismember(args_collection& args)
+{
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return make_ready_future<int>();
+    }
+    sstring& key = args._command_args[0];
+    auto hash = std::hash<sstring>()(key);
+    redis_key rk{std::move(key), std::move(hash)};
+    sstring& member = args._command_args[1];
+    auto cpu = get_cpu(hash);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<int>(_db_peers.local().sismember(rk, member));
+    }
+    return _db_peers.invoke_on(cpu, &db::sismember, std::ref(rk), std::ref(member));
+}
+future<int> redis_service::srem(args_collection& args)
+{
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return make_ready_future<int>();
+    }
+    sstring& key = args._command_args[0];
+    auto hash = std::hash<sstring>()(key);
+    redis_key rk{std::move(key), std::move(hash)};
+    sstring& member = args._command_args[1];
+    auto cpu = get_cpu(hash);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<int>(_db_peers.local().srem(rk, member));
+    }
+    return _db_peers.invoke_on(cpu, &db::srem, std::ref(rk), std::ref(member));
+}
 } /* namespace redis */

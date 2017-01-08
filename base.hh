@@ -64,6 +64,8 @@ enum {
     REDIS_RAW_ITEM,   // for data item
     REDIS_LIST,
     REDIS_DICT,
+    REDIS_SET,
+    REDIS_ZSET,
 };
 
 struct args_collection {
@@ -171,13 +173,13 @@ private:
         return sizeof(item) + align_up(static_cast<uint32_t>(key_size), field_alignment) + sizeof(void*);
     }
 public:
-    inline static size_t item_size_for_row_string(size_t value_size) {
+    inline static size_t item_size_for_raw_string(size_t value_size) {
         return sizeof(item) + value_size;
     }
     inline static size_t item_size_for_string(size_t key_size, size_t val_size) {
         return sizeof(item) + align_up(static_cast<uint32_t>(key_size), field_alignment) + val_size;
     }
-    inline static size_t item_size_for_row_string_append(size_t key_size, size_t val_size, size_t append_size) {
+    inline static size_t item_size_for_raw_string_append(size_t key_size, size_t val_size, size_t append_size) {
         return sizeof(item) + align_up(static_cast<uint32_t>(key_size), field_alignment) + val_size + append_size;
     }
     inline static size_t item_size_for_list(size_t key_size) {
@@ -227,7 +229,19 @@ public:
             memcpy(_u._data + align_up(_value_size, field_alignment), key.data(), _key_size);
         }
     }
-
+    item(uint32_t slab_page_index, const redis_key& data)
+        : _value_size(0)
+        , _key_size(data.size())
+        , _key_hash(data.hash())
+        , _slab_page_index(slab_page_index)
+        , _ref_count(0U)
+        , _type(REDIS_RAW_ITEM)
+        , _expire(0)
+    {
+        if (_key_size > 0) {
+            memcpy(_u._data + align_up(_value_size, field_alignment), data.data(), _key_size);
+        }
+    }
     item(uint32_t slab_page_index, sstring&& value)
         : _value_size(value.size())
         , _key_size(0)

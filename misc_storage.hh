@@ -54,7 +54,7 @@ public:
         if (it != nullptr) {
             auto exist_val = it->value();
             current_size = exist_val.size() + val.size();
-            const size_t item_size = item::item_size_for_row_string_append(key.size(), val.size(), exist_val.size());
+            const size_t item_size = item::item_size_for_raw_string_append(key.size(), val.size(), exist_val.size());
             auto new_item = local_slab().create(item_size,
                     key,
                     origin::move_if_local(exist_val),
@@ -91,7 +91,8 @@ public:
 
     item_ptr get(redis_key& key)
     {
-        return _store->fetch(key);
+        auto a = _store->fetch(key);
+        return a;
     }
 
     int strlen(redis_key& key)

@@ -32,7 +32,7 @@ public:
                 return -1;
             }
         }
-        const size_t item_size = item::item_size_for_row_string(static_cast<size_t>(value.size()));
+        const size_t item_size = item::item_size_for_raw_string(static_cast<size_t>(value.size()));
         auto new_item = local_slab().create(item_size, origin::move_if_local(value));
         intrusive_ptr_add_ref(new_item);
         return (left ? l->add_head(new_item) : l->add_tail(new_item)) == 0 ? static_cast<int>(l->length()) : 0;
@@ -74,7 +74,7 @@ public:
     {
         list* l = fetch_list(key);
         if (l != nullptr) {
-            const size_t item_size = item::item_size_for_row_string(value.size());
+            const size_t item_size = item::item_size_for_raw_string(value.size());
             auto new_item = local_slab().create(item_size, origin::move_if_local(value));
             intrusive_ptr_add_ref(new_item);
             return (after ? l->insert_after(pivot, new_item) : l->insert_before(pivot, new_item)) == 0 ? 1 : 0;
@@ -97,7 +97,7 @@ public:
     {
         list* l = fetch_list(key);
         if (l != nullptr) {
-            const size_t item_size = item::item_size_for_row_string(value.size());
+            const size_t item_size = item::item_size_for_raw_string(value.size());
             auto new_item = local_slab().create(item_size, origin::move_if_local(value));
             intrusive_ptr_add_ref(new_item);
             if (l->set(idx, new_item) == REDIS_OK)

@@ -37,6 +37,7 @@ db::db() : _store(new dict())
          , _misc_storage(MISC, _store)
          , _list_storage(LIST, _store)
          , _dict_storage(DICT, _store)
+         , _set_storage(SET, _store)
 {
     _slab = new slab_allocator<item>(default_slab_growth_factor,
             default_per_cpu_slab_size, default_slab_page_size,

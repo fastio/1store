@@ -64,8 +64,9 @@ struct dict::rep
     void dict_release();
     dict_node * find(const redis_key& key);
     item* fetch_value(const redis_key& key);
+
     int resize_room();
-    dict_node *random_fetch();
+    dict_node *random_fetch(); 
     unsigned int fetch_some_keys(dict_node **des, unsigned int count);
     int do_rehash(int n);
     unsigned long dict_next_size(unsigned long size);
@@ -476,8 +477,9 @@ dict_node* dict::rep::find(const redis_key& key)
         idx = h & _ht[table]._size_mask;
         he = _ht[table]._table[idx];
         while(he) {
-            if (key_equal(&key.key(), key.hash(), he->_val))
+            if (key_equal(&key.key(), key.hash(), he->_val)) {
                 return he;
+            }
             he = he->_next;
         }
         if (!dict_is_rehashing()) return nullptr;

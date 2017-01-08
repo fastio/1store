@@ -55,6 +55,7 @@ struct args_collection;
 class db;
 class item;
 using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
+
 class redis_service {
 private:
     inline unsigned get_cpu(const size_t h) {
@@ -111,6 +112,13 @@ public:
     future<item_ptr> hget(args_collection& args);
     future<std::vector<item_ptr>> hgetall(args_collection& args);
     future<std::vector<item_ptr>> hmget(args_collection& args);
+
+    // [SET]
+    future<int> sadd(args_collection& args);
+    future<int> scard(args_collection& args);
+    future<int> srem(args_collection& args);
+    future<int> sismember(args_collection& args);
+    future<std::vector<item_ptr>> smembers(args_collection& args);
 private:
     future<item_ptr> pop_impl(args_collection& args, bool left);
     future<int> push_impl(args_collection& arg, bool force, bool left);

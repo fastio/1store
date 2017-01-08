@@ -35,6 +35,7 @@
 #include "misc_storage.hh"
 #include "list_storage.hh"
 #include "dict_storage.hh"
+#include "set_storage.hh"
 namespace redis {
 
 namespace stdx = std::experimental;
@@ -198,12 +199,33 @@ public:
         return _dict_storage.hmget(key, keys);
     }
 
+    inline int sadd(redis_key& key, sstring& member)
+    {
+        return _set_storage.sadd(key, member);
+    }
+    inline int scard(redis_key& key)
+    {
+        return _set_storage.scard(key);
+    }
+    inline int sismember(redis_key& key, sstring& member)
+    {
+        return _set_storage.sismember(key, member);
+    }
+    inline std::vector<item_ptr> smembers(redis_key& key)
+    {
+        return _set_storage.smembers(key);
+    }
+    inline int srem(redis_key& key, sstring& member)
+    {
+        return _set_storage.srem(key, member);
+    }
     future<> stop() { return make_ready_future<>(); }
 private:
     dict* _store;
     misc_storage _misc_storage;
     list_storage _list_storage;
     dict_storage _dict_storage;
+    set_storage  _set_storage;
 };
 }
 

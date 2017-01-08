@@ -75,7 +75,7 @@ public:
                             });
                         }).finally([conn] {
                             return conn->_out.close().finally([conn]{});
-                            });
+                        });
                     });
                 }).or_terminate();
     }

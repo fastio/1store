@@ -46,6 +46,7 @@ public:
     int remove(const redis_key& key);
     size_t size();
     item_ptr fetch(const redis_key& key);
+    item_ptr random_fetch_and_remove() { return nullptr; }
     std::vector<item_ptr> fetch();
     std::vector<item_ptr> fetch(const std::unordered_set<sstring>& keys);
 };

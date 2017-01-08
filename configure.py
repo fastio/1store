@@ -311,7 +311,6 @@ deps = {
       'redis.cc',
       'dict.cc',
       'list.cc',
-      'set.cc',
       'sorted_set.cc',
       'main.cc',
       'redis_commands.cc',
@@ -323,6 +322,7 @@ deps = {
       'misc_storage.cc',
       'list_storage.cc',
       'dict_storage.cc',
+      'set_storage.cc',
       ] + libnet + core,
 }
 

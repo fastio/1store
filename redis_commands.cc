@@ -101,9 +101,10 @@ redis_commands::redis_commands()
 
     // GET
     regist_handler("GET", [this] (args_collection& args, output_stream<char>& out) -> future<> {
-        return _redis->get(args).then([this, &out] (item_ptr it) {
+        return _redis->get(args).then([this, &out] (auto it) {
             scattered_message<char> msg;
             this_type::append_item(msg, std::move(it));
+            //std::string a = "$6\r\nfoobar\r\n";
             return out.write(std::move(msg));
         });
     });
@@ -368,6 +369,46 @@ redis_commands::redis_commands()
         return _redis->hgetall(args).then([this, &out] (std::vector<item_ptr>&& items) {
             scattered_message<char> msg;
             this_type::append_multi_items<true, true>(msg, std::move(items));
+            return out.write(std::move(msg));
+        });
+    });
+    // SADD
+    regist_handler("SADD", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->sadd(args).then([this, &out] (int count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
+            return out.write(std::move(msg));
+        });
+    });
+    // SCARD
+    regist_handler("SCARD", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->scard(args).then([this, &out] (int count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
+            return out.write(std::move(msg));
+        });
+    });
+    // SISMEMBER
+    regist_handler("SISMEMBER", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->sismember(args).then([this, &out] (int count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
+            return out.write(std::move(msg));
+        });
+    });
+    // SMEMBERS
+    regist_handler("SMEMBERS", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->smembers(args).then([this, &out] (std::vector<item_ptr>&& items) {
+            scattered_message<char> msg;
+            this_type::append_multi_items<true, false>(msg, std::move(items));
+            return out.write(std::move(msg));
+        });
+    });
+    // SREM
+    regist_handler("SREM", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->srem(args).then([this, &out] (int count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
             return out.write(std::move(msg));
         });
     });
