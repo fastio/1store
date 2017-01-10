@@ -27,7 +27,7 @@ public:
             l = new list();
             auto list_item = local_slab().create(list_size, key, l, REDIS_LIST);
             intrusive_ptr_add_ref(list_item);
-            if (_store->set(origin::move_if_local(key), list_item) != 0) {
+            if (_store->set(key, list_item) != 0) {
                 intrusive_ptr_release(list_item);
                 return -1;
             }

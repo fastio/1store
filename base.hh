@@ -27,6 +27,7 @@
 #include <boost/optional.hpp>
 #include <iomanip>
 #include <sstream>
+#include <functional>
 #include <vector>
 #include "core/app-template.hh"
 #include "core/future-util.hh"
@@ -132,11 +133,22 @@ class db;
 struct redis_key {
     sstring _key;
     size_t  _hash;
-    redis_key() = default;
-    redis_key(redis_key&) = default;
     redis_key(sstring key) : _key(key), _hash(std::hash<sstring>()(_key)) {}
-    redis_key(sstring&& key, size_t&& hash) : _key(std::move(key)), _hash(std::move(hash)) {}
-    redis_key(redis_key&& rk) : _key(std::move(rk._key)), _hash(rk._hash) {}
+    redis_key(sstring key, size_t hash) : _key(key), _hash(hash) {}
+    redis_key(redis_key&& other) : _key(other._key), _hash(other._hash) {}
+    redis_key(const redis_key& o) : _key(o._key), _hash(o._hash) {}
+    redis_key& operator=(const redis_key& o) {
+        _key = o._key;
+        _hash = o._hash;
+        return *this;
+    }
+    redis_key& operator=(redis_key&& o) {
+        _key = std::move(o._key);
+        _hash = o._hash;
+        o._hash = 0;
+        return *this;
+    }
+
     inline const size_t hash() const { return _hash; }
     inline const sstring& key() const { return _key; }
     inline const size_t size() const { return _key.size(); }
@@ -362,13 +374,23 @@ public:
     friend inline void intrusive_ptr_add_ref(item* it) {
         assert(it->_ref_count >= 0);
         ++it->_ref_count;
+        std::cout << "item: " << it->key() << ", refcount: " << it->_ref_count << ", addref\n";
         if (it->_ref_count == 2) {
             local_slab().lock_item(it);
         }
     }
 
+    inline void intrusive_ptr_add_ref() {
+        assert(_ref_count >= 0);
+        ++_ref_count;
+        std::cout << "item: " << key() << ", refcount: " << _ref_count << ", addref\n";
+        if (_ref_count == 2) {
+            local_slab().lock_item(this);
+        }
+    }
     friend inline void intrusive_ptr_release(item* it) {
         --it->_ref_count;
+        std::cout << "item: " << it->key() << ", refcount: " << it->_ref_count << ", release\n";
         if (it->_ref_count == 1) {
             local_slab().unlock_item(it);
         } else if (it->_ref_count == 0) {

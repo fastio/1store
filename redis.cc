@@ -26,6 +26,7 @@
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
+#include <unordered_set>
 #include "core/app-template.hh"
 #include "core/future-util.hh"
 #include "core/timer-set.hh"
@@ -62,7 +63,7 @@ future<sstring> redis_service::echo(args_collection& args)
     return make_ready_future<sstring>(std::move(message));
 }
 
-future<int> redis_service::set_impl(redis_key key, sstring& val, long expir, uint8_t flag)
+future<int> redis_service::set_impl(redis_key& key, sstring& val, long expir, uint8_t flag)
 {
     auto cpu = get_cpu(key.hash());
     if (engine().cpu_id() == cpu) {
@@ -112,8 +113,8 @@ future<int> redis_service::set(args_collection& args)
             }
         }
     }
-    redis_key rk{std::move(key), std::move(hash)};
-    return set_impl(std::move(rk), val, expir, flag);
+    redis_key rk{std::ref(key), hash};
+    return set_impl(rk, val, expir, flag);
 }
 
 future<int> redis_service::remove_impl(redis_key& key) {
@@ -132,7 +133,7 @@ future<int> redis_service::del(args_collection& args)
     if (args._command_args.size() == 1) {
         sstring& key = args._command_args[0];
         auto hash = std::hash<sstring>()(key); 
-        redis_key rk{std::move(key), std::move(hash)};
+        redis_key rk{std::ref(key), hash};
         return remove_impl(rk);
     }
     else {
@@ -155,7 +156,7 @@ future<int> redis_service::mset(args_collection& args)
         sstring& key = args._command_args[i * 2];
         sstring& val = args._command_args[i * 2 + 1];
         auto hash = std::hash<sstring>()(key);
-        redis_key rk{std::move(key), std::move(hash)};
+        redis_key rk{std::ref(key), hash};
         return this->set_impl(rk, val, 0, 0).then([this, &success_count] (auto r) {
             if (r) success_count++;
         });
@@ -181,7 +182,7 @@ future<item_ptr> redis_service::get(args_collection& args)
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key); 
 
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     return get_impl(rk);
 }
 
@@ -197,7 +198,7 @@ future<int> redis_service::strlen(args_collection& args)
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key); 
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().strlen(rk));
@@ -213,7 +214,7 @@ future<int> redis_service::exists(args_collection& args)
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key); 
     auto cpu = get_cpu(hash);
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().exists(rk));
     }
@@ -228,7 +229,7 @@ future<int> redis_service::append(args_collection& args)
     sstring& key = args._command_args[0];
     sstring& val = args._command_args[1];
     auto hash = std::hash<sstring>()(key); 
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().append(rk, val));
@@ -252,7 +253,7 @@ future<int> redis_service::push_impl(args_collection& args, bool force, bool lef
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key); 
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     if (args._command_args_count == 2) {
         sstring& value = args._command_args[1];
         return push_impl(rk, value, force, left);
@@ -306,7 +307,7 @@ future<item_ptr> redis_service::pop_impl(args_collection& args, bool left)
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key); 
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<item_ptr>(_db_peers.local().pop(rk, left));
@@ -322,7 +323,7 @@ future<item_ptr> redis_service::lindex(args_collection& args)
     sstring& key = args._command_args[0];
     int idx = std::atoi(args._command_args[1].c_str());
     auto hash = std::hash<sstring>()(key); 
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<item_ptr>(_db_peers.local().lindex(rk, idx));
@@ -337,7 +338,7 @@ future<int> redis_service::llen(args_collection& args)
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key); 
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().llen(rk));
@@ -355,7 +356,7 @@ future<int> redis_service::linsert(args_collection& args)
     sstring& dir = args._command_args[1];
     sstring& pivot = args._command_args[2];
     sstring& value = args._command_args[3];
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     std::transform(dir.begin(), dir.end(), dir.begin(), ::toupper);
     bool after = true;
     if (dir == "BEFORE") after = false;
@@ -377,7 +378,7 @@ future<std::vector<item_ptr>> redis_service::lrange(args_collection& args)
     sstring& e = args._command_args[2];
     int start = std::atoi(s.c_str());
     int end = std::atoi(e.c_str());
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<std::vector<item_ptr>>(_db_peers.local().lrange(rk, start, end));
@@ -395,7 +396,7 @@ future<int> redis_service::lset(args_collection& args)
     sstring& index = args._command_args[1];
     sstring& value = args._command_args[2];
     int idx = std::atoi(index.c_str());
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().lset(rk, idx, value));
@@ -412,7 +413,7 @@ future<int> redis_service::ltrim(args_collection& args)
     int start =  std::atoi(args._command_args[1].c_str());
     int stop = std::atoi(args._command_args[2].c_str());
     auto hash = std::hash<sstring>()(key); 
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().ltrim(rk, start, stop));
@@ -429,7 +430,7 @@ future<int> redis_service::lrem(args_collection& args)
     int count = std::atoi(args._command_args[1].c_str());
     sstring& value = args._command_args[2];
     auto hash = std::hash<sstring>()(key); 
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().lrem(rk, count, value));
@@ -467,7 +468,7 @@ future<uint64_t> redis_service::counter_by(args_collection& args, bool incr, boo
         sstring& s = args._command_args[1];
         step = std::atol(s.c_str());
     }
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<uint64_t>(_db_peers.local().counter_by(rk, step, incr));
@@ -482,7 +483,7 @@ future<int> redis_service::hdel(args_collection& args)
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key); 
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     sstring& field = args._command_args[1];
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
@@ -498,7 +499,7 @@ future<int> redis_service::hexists(args_collection& args)
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key); 
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     sstring& field = args._command_args[1];
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
@@ -516,7 +517,7 @@ future<int> redis_service::hset(args_collection& args)
     auto hash = std::hash<sstring>()(key); 
     sstring& field = args._command_args[1];
     sstring& val = args._command_args[2];
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().hset(rk, field, val));
@@ -539,7 +540,7 @@ future<int> redis_service::hmset(args_collection& args)
     for (unsigned int i = 0; i < field_count; ++i) {
         key_values_collection.emplace(std::make_pair(args._command_args[i], args._command_args[i + 1]));
     }
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().hmset(rk, key_values_collection));
@@ -557,7 +558,7 @@ future<int> redis_service::hincrby(args_collection& args)
     sstring& field = args._command_args[1];
     sstring& val = args._command_args[2];
     int delta = std::atoi(val.c_str());
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().hincrby(rk, field, delta));
@@ -575,7 +576,7 @@ future<double> redis_service::hincrbyfloat(args_collection& args)
     sstring& field = args._command_args[1];
     sstring& val = args._command_args[2];
     double delta = std::atof(val.c_str());
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<double>(_db_peers.local().hincrbyfloat(rk, field, delta));
@@ -590,7 +591,7 @@ future<int> redis_service::hlen(args_collection& args)
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key);
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().hlen(rk));
@@ -606,7 +607,7 @@ future<int> redis_service::hstrlen(args_collection& args)
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key);
     sstring& field = args._command_args[1];
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().hstrlen(rk, field));
@@ -622,7 +623,7 @@ future<item_ptr> redis_service::hget(args_collection& args)
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key);
     sstring& field = args._command_args[1];
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<item_ptr>(_db_peers.local().hget(rk, field));
@@ -637,7 +638,7 @@ future<std::vector<item_ptr>> redis_service::hgetall(args_collection& args)
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key);
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<std::vector<item_ptr>>(_db_peers.local().hgetall(rk));
@@ -656,7 +657,7 @@ future<std::vector<item_ptr>> redis_service::hmget(args_collection& args)
     for (unsigned int i = 1; i < args._command_args_count; ++i) {
       fields.emplace(std::move(args._command_args[i]));
     }
-    redis_key rk{std::move(key), std::move(hash)};
+    redis_key rk{std::ref(key), hash};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<std::vector<item_ptr>>(_db_peers.local().hmget(rk, fields));
@@ -664,13 +665,13 @@ future<std::vector<item_ptr>> redis_service::hmget(args_collection& args)
     return _db_peers.invoke_on(cpu, &db::hmget, std::ref(rk), std::ref(fields));
 }
 
-future<std::vector<item_ptr>> redis_service::smembers_impl(redis_key& rk)
+future<std::vector<item_ptr>> redis_service::smembers_impl(sstring& key, size_t& hash)
 {
-    auto cpu = get_cpu(rk.hash());
+    auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<std::vector<item_ptr>>(_db_peers.local().smembers(rk));
+        return make_ready_future<std::vector<item_ptr>>(_db_peers.local().smembers(key, hash));
     }
-    return _db_peers.invoke_on(cpu, &db::smembers, std::ref(rk));
+    return _db_peers.invoke_on(cpu, &db::smembers, std::ref(key), std::ref(hash));
 }
 future<std::vector<item_ptr>> redis_service::smembers(args_collection& args)
 {
@@ -679,26 +680,16 @@ future<std::vector<item_ptr>> redis_service::smembers(args_collection& args)
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key);
-    redis_key rk{std::move(key), std::move(hash)};
-    return smembers_impl(rk);
+    return smembers_impl(key, hash);
 }
 
-future<int> redis_service::sadd_impl(redis_key& rk, sstring&& member)
+future<int> redis_service::sadds_impl(sstring& key, size_t& hash, std::vector<sstring>&& members)
 {
-    auto cpu = get_cpu(rk.hash());
+    auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db_peers.local().sadd(rk, member));
+        return make_ready_future<int>(_db_peers.local().sadds(key, std::move(members)));
     }
-    return _db_peers.invoke_on(cpu, &db::sadd, std::ref(rk), std::ref(member));
-}
-
-future<int> redis_service::sadds_impl(redis_key& rk, std::vector<sstring>&& members)
-{
-    auto cpu = get_cpu(rk.hash());
-    if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db_peers.local().sadds(rk, std::move(members)));
-    }
-    return _db_peers.invoke_on(cpu, &db::sadds, std::ref(rk), std::move(members));
+    return _db_peers.invoke_on(cpu, &db::sadds, std::ref(key), std::move(members));
 }
 
 future<int> redis_service::sadd(args_collection& args)
@@ -708,16 +699,9 @@ future<int> redis_service::sadd(args_collection& args)
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key);
-    redis_key rk{std::move(key), std::move(hash)};
-    if (args._command_args_count == 2) {
-        sstring& member = args._command_args[1];
-        return sadd_impl(rk, std::move(member));
-    }
-    else {
-       std::vector<sstring> members;
-       for (uint32_t i = 1; i < args._command_args_count; ++i) members.emplace_back(std::move(args._command_args[i]));
-       return sadds_impl(rk, std::move(members));
-    }
+    std::vector<sstring> members;
+    for (uint32_t i = 1; i < args._command_args_count; ++i) members.emplace_back(std::move(args._command_args[i]));
+    return sadds_impl(key, hash, std::move(members));
 }
 
 future<int> redis_service::scard(args_collection& args)
@@ -727,12 +711,11 @@ future<int> redis_service::scard(args_collection& args)
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key);
-    redis_key rk{std::move(key), std::move(hash)};
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db_peers.local().scard(rk));
+        return make_ready_future<int>(_db_peers.local().scard(key, hash));
     }
-    return _db_peers.invoke_on(cpu, &db::scard, std::ref(rk));
+    return _db_peers.invoke_on(cpu, &db::scard, std::ref(key), std::ref(hash));
 }
 future<int> redis_service::sismember(args_collection& args)
 {
@@ -741,13 +724,12 @@ future<int> redis_service::sismember(args_collection& args)
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key);
-    redis_key rk{std::move(key), std::move(hash)};
     sstring& member = args._command_args[1];
     auto cpu = get_cpu(hash);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db_peers.local().sismember(rk, member));
+        return make_ready_future<int>(_db_peers.local().sismember(key, hash, std::move(member)));
     }
-    return _db_peers.invoke_on(cpu, &db::sismember, std::ref(rk), std::ref(member));
+    return _db_peers.invoke_on(cpu, &db::sismember, std::ref(key), std::ref(hash), std::move(member));
 }
 
 future<int> redis_service::srem(args_collection& args)
@@ -757,22 +739,21 @@ future<int> redis_service::srem(args_collection& args)
     }
     sstring& key = args._command_args[0];
     auto hash = std::hash<sstring>()(key);
-    redis_key rk{std::move(key), std::move(hash)};
     sstring& member = args._command_args[1];
     auto cpu = get_cpu(hash);
     if (args._command_args_count == 2) {
         if (engine().cpu_id() == cpu) {
-            return make_ready_future<int>(_db_peers.local().srem(rk, member));
+            return make_ready_future<int>(_db_peers.local().srem(key, hash, std::move(member)));
         }
-        return _db_peers.invoke_on(cpu, &db::srem, std::ref(rk), std::ref(member));
+        return _db_peers.invoke_on(cpu, &db::srem, std::ref(key), std::ref(hash), std::move(member));
     }
     else {
        std::vector<sstring> members;
        for (uint32_t i = 1; i < args._command_args_count; ++i) members.emplace_back(std::move(args._command_args[i]));
        if (engine().cpu_id() == cpu) {
-            return make_ready_future<int>(_db_peers.local().srems(rk, std::move(members)));
+            return make_ready_future<int>(_db_peers.local().srems(key, hash, std::move(members)));
        }
-       return _db_peers.invoke_on(cpu, &db::srems, std::ref(rk), std::move(members));
+       return _db_peers.invoke_on(cpu, &db::srems, std::ref(key), std::ref(hash), std::move(members));
     }
 }
 
@@ -800,8 +781,7 @@ future<std::vector<item_ptr>> redis_service::sdiff_store(args_collection& args)
             }
             state.result = std::move(items);
             auto hash = std::hash<sstring>()(state.dest);
-            redis_key rk{std::move(state.dest), std::move(hash)};
-            return this->sadds_impl(rk, std::move(members)).then([&state] (int discard) {
+            return this->sadds_impl(state.dest, hash, std::move(members)).then([&state] (int discard) {
                 (void) discard;
                 auto&& result = std::move(state.result);
                 return make_ready_future<std::vector<item_ptr>>(std::move(result));
@@ -824,31 +804,52 @@ future<std::vector<item_ptr>> redis_service::sdiff(args_collection& args)
 
 future<std::vector<item_ptr>> redis_service::sdiff_impl(std::vector<sstring>&& keys)
 {
-    struct sdiff_state {
+    struct sinter_state {
         std::unordered_map<unsigned, std::vector<item_ptr>> items_set;
         std::vector<sstring> keys;
     };
     uint32_t count = static_cast<uint32_t>(keys.size());
-    return do_with(sdiff_state{{}, std::move(keys)}, [this, count] (auto& state) {
+    return do_with(sinter_state{{}, std::move(keys)}, [this, count] (auto& state) {
         return parallel_for_each(boost::irange<unsigned>(0, count), [this, &state] (unsigned k) {
             sstring& key = state.keys[k];
             auto hash = std::hash<sstring>()(key);
-            redis_key rk{std::move(key), std::move(hash)};
-            return this->smembers_impl(rk).then([&state, index = k] (auto&& sub) {
+            return this->smembers_impl(key, hash).then([&state, index = k] (auto&& sub) {
                 state.items_set[index] = std::move(sub);
             });
         }).then([&state, count] {
-            auto&& result = std::move(state.items_set[0]);
-            for (uint32_t i = 0; i < count - 1 && !result.empty(); ++i) {
-                auto&& next_items = std::move(state.items_set[i + 1]);
-                if (!next_items.empty()) {
-                    for (item_ptr& item : next_items) {
-                        result.erase(std::remove_if(result.begin(), result.end(), [&item] (item_ptr& o) { 
-                            return item->key_size() == o->key_size() && item->key() == o->key(); 
-                        }), result.end());
+            auto& temp = state.items_set[0];
+            std::unordered_map<std::experimental::string_view, unsigned> tokens;
+            for (item_ptr& item : temp) {
+                tokens[item->key()] = 1;
+            }
+            for (uint32_t i = 1; i < count; ++i) {
+                auto&& next_items = std::move(state.items_set[i]);
+                for (item_ptr& item : next_items) {
+                     if (std::find_if(temp.begin(), temp.end(), [&item] (auto& o) { return item->key() == o->key(); }) != temp.end()) {
+                        tokens[item->key()]++; 
+                     }
+                }
+            }
+            std::vector<item_ptr> result;
+            for (item_ptr& item : temp) {
+                if (tokens[item->key()] == 1) {
+                    result.emplace_back(std::move(item));
+                }
+            }
+            /*
+            auto&& result = state.items_set[0];
+            for (uint32_t i = 1; i < count && !result.empty(); ++i) {
+                auto&& next_items = std::move(state.items_set[i]);
+                for (item_ptr& item : next_items) {
+                    auto removed = std::remove_if(result.begin(), result.end(), [&item] (auto& o) { return item->key() == o->key(); });
+                    if (removed != result.end()) {
+                        (*removed)->intrusive_ptr_add_ref();
+                        result.erase(removed, result.end());
                     }
                 }
             }
+            */
+
             return make_ready_future<std::vector<item_ptr>>(std::move(result));
        });
    });
@@ -865,8 +866,7 @@ future<std::vector<item_ptr>> redis_service::sinter_impl(std::vector<sstring>&& 
         return parallel_for_each(boost::irange<unsigned>(0, count), [this, &state] (unsigned k) {
             sstring& key = state.keys[k];
             auto hash = std::hash<sstring>()(key);
-            redis_key rk{std::move(key), std::move(hash)};
-            return this->smembers_impl(rk).then([&state, index = k] (auto&& sub) {
+            return this->smembers_impl(key, hash).then([&state, index = k] (auto&& sub) {
                 state.items_set[index] = std::move(sub);
             });
         }).then([&state, count] {
@@ -926,8 +926,7 @@ future<std::vector<item_ptr>> redis_service::sinter_store(args_collection& args)
             }
             state.result = std::move(items);
             auto hash = std::hash<sstring>()(state.dest);
-            redis_key rk{std::move(state.dest), std::move(hash)};
-            return this->sadds_impl(rk, std::move(members)).then([&state] (int discard) {
+            return this->sadds_impl(state.dest, hash, std::move(members)).then([&state] (int discard) {
                 (void) discard;
                 auto&& result = std::move(state.result);
                 return make_ready_future<std::vector<item_ptr>>(std::move(result));
@@ -939,7 +938,7 @@ future<std::vector<item_ptr>> redis_service::sinter_store(args_collection& args)
 future<std::vector<item_ptr>> redis_service::sunion_impl(std::vector<sstring>&& keys)
 {
     struct union_state {
-        std::unordered_map<unsigned, std::vector<item_ptr>> items_set;
+        std::vector<item_ptr> result;
         std::vector<sstring> keys;
     };
     uint32_t count = static_cast<uint32_t>(keys.size());
@@ -947,23 +946,16 @@ future<std::vector<item_ptr>> redis_service::sunion_impl(std::vector<sstring>&& 
         return parallel_for_each(boost::irange<unsigned>(0, count), [this, &state] (unsigned k) {
             sstring& key = state.keys[k];
             auto hash = std::hash<sstring>()(key);
-            redis_key rk{std::move(key), std::move(hash)};
-            return this->smembers_impl(rk).then([&state, index = k] (auto&& sub) {
-                state.items_set[index] = std::move(sub);
-            });
-        }).then([&state, count] {
-            auto&& result = std::move(state.items_set[0]);
-            for (uint32_t i = 1; i < count; ++i) {
-                auto&& next_items = std::move(state.items_set[i]);
-                for (item_ptr& item : next_items) {
-                    if (std::find_if(result.begin(), result.end(), [&item] (item_ptr& o) {
-                        return item->key_size() == o->key_size() && item->key() == o->key();
-                    }) == result.end()) {
-                        result.emplace_back(std::move(item));
+            return this->smembers_impl(key, hash).then([&state] (auto&& sub) {
+                auto& result = state.result;
+                for (auto& i : sub) {
+                    if (std::find_if(result.begin(), result.end(), [&i] (auto& o) { return i->key_size() == o->key_size() && i->key() == o->key(); }) == result.end()) {
+                        result.emplace_back(std::move(i));
                     }
                 }
-            }
-            return make_ready_future<std::vector<item_ptr>>(std::move(result));
+            });
+        }).then([&state] {
+            return make_ready_future<std::vector<item_ptr>>(std::move(state.result));
        });
    });
 }
@@ -1003,8 +995,7 @@ future<std::vector<item_ptr>> redis_service::sunion_store(args_collection& args)
             }
             state.result = std::move(items);
             auto hash = std::hash<sstring>()(state.dest);
-            redis_key rk{std::move(state.dest), std::move(hash)};
-            return this->sadds_impl(rk, std::move(members)).then([&state] (int discard) {
+            return this->sadds_impl(state.dest, hash, std::move(members)).then([&state] (int discard) {
                 (void) discard;
                 auto&& result = std::move(state.result);
                 return make_ready_future<std::vector<item_ptr>>(std::move(result));

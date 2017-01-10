@@ -29,7 +29,7 @@ public:
             const size_t item_size = item::item_size_for_uint64(key.size());
             auto new_item = local_slab().create(item_size, key, step);
             intrusive_ptr_add_ref(new_item);
-            if (_store->set(origin::move_if_local(key), new_item) != REDIS_OK)
+            if (_store->set(key, new_item) != REDIS_OK)
                 return REDIS_ERR;
             return step;
         }
@@ -43,7 +43,7 @@ public:
         const size_t item_size = item::item_size_for_string(key.size(), val.size());
         auto new_item = local_slab().create(item_size, key, origin::move_if_local(val));
         intrusive_ptr_add_ref(new_item);
-        return _store->set(origin::move_if_local(key), new_item);
+        return _store->set(key, new_item);
     }
 
     template <typename origin = local_origin_tag>
@@ -61,7 +61,7 @@ public:
                     origin::move_if_local(val));
             intrusive_ptr_add_ref(new_item);
             intrusive_ptr_release(it);
-            if (_store->replace(origin::move_if_local(key), new_item) != 0) {
+            if (_store->replace(key, new_item) != 0) {
                 intrusive_ptr_release(new_item);
                 return -1;
             }
@@ -71,7 +71,7 @@ public:
             const size_t item_size = item::item_size_for_string(key.size(), val.size());
             auto new_item = local_slab().create(item_size, key, origin::move_if_local(val));
             intrusive_ptr_add_ref(new_item);
-            if (_store->set(origin::move_if_local(key), new_item) != 0) {
+            if (_store->set(key, new_item) != 0) {
                 intrusive_ptr_release(new_item);
                 return -1;
             }

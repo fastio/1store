@@ -32,7 +32,7 @@ public:
         }
         const size_t item_size = item::item_size_for_string(field.size(), value.size());
         auto field_hash = std::hash<sstring>()(field);
-        redis_key field_key{std::move(field), std::move(field_hash)};
+        redis_key field_key{std::ref(field), field_hash};
         auto new_item = local_slab().create(item_size, field_key, origin::move_if_local(value));
         intrusive_ptr_add_ref(new_item);
         return d->replace(field_key, new_item);
@@ -57,7 +57,7 @@ public:
             sstring field = p->first;
             auto hash = std::hash<sstring>()(field);
             sstring& value = p->second;
-            redis_key field_key{std::move(field), std::move(hash)};
+            redis_key field_key{std::ref(field), std::move(hash)};
             const size_t item_size = item::item_size_for_string(field.size(), value.size());
             auto new_item = local_slab().create(item_size, field_key, origin::move_if_local(value));
             intrusive_ptr_add_ref(new_item);
@@ -75,7 +75,7 @@ public:
         dict* d = fetch_dict(key);
         if (d != nullptr) {
             auto hash = std::hash<sstring>()(field);
-            redis_key field_key{std::move(field), std::move(hash)};
+            redis_key field_key{std::ref(field), hash};
             return d->fetch(field_key);
         }
         return nullptr;
@@ -87,7 +87,7 @@ public:
         dict* d = fetch_dict(key);
         if (d != nullptr) {
             auto hash = std::hash<sstring>()(field);
-            redis_key field_key{std::move(field), std::move(hash)};
+            redis_key field_key{std::ref(field), hash};
             return d->remove(field_key);
         }
         return 0;
@@ -99,7 +99,7 @@ public:
         dict* d = fetch_dict(key);
         if (d != nullptr) {
             auto hash = std::hash<sstring>()(field);
-            redis_key field_key{std::move(field), std::move(hash)};
+            redis_key field_key{std::ref(field), hash};
             return d->exists(field_key);
         }
         return REDIS_ERR;
@@ -111,7 +111,7 @@ public:
         dict* d = fetch_dict(key);
         if (d != nullptr) {
             auto hash = std::hash<sstring>()(field);
-            redis_key field_key{std::move(field), std::move(hash)};
+            redis_key field_key{std::ref(field), hash};
             auto it = d->fetch(field_key);
             if (it && it->type() == REDIS_RAW_STRING) {
                 return static_cast<int>(it->value_size());
@@ -146,7 +146,7 @@ public:
             }
         }
         auto hash = std::hash<sstring>()(field);
-        redis_key field_key{std::move(field), std::move(hash)};
+        redis_key field_key{std::ref(field), hash};
         auto it = d->fetch(field_key);
         if (!it) {
             const size_t item_size = item::item_size_for_int64(field.size());
@@ -180,7 +180,7 @@ public:
             }
         }
         auto hash = std::hash<sstring>()(field);
-        redis_key field_key{std::move(field), std::move(hash)};
+        redis_key field_key{std::ref(field), hash};
         auto it = d->fetch(field_key);
         if (!it) {
             const size_t item_size = item::item_size_for_double(field.size());

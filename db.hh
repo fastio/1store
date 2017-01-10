@@ -199,33 +199,29 @@ public:
         return _dict_storage.hmget(key, keys);
     }
 
-    inline int sadd(redis_key& key, sstring& member)
+    inline int sadds(sstring& key, std::vector<sstring>&& members)
     {
-        return _set_storage.sadd(key, member);
+        return _set_storage.sadds(key, std::hash<sstring>()(key), std::move(members));
     }
-    inline int sadds(redis_key& key, std::vector<sstring>&& members)
+    inline int scard(sstring& key, size_t hash)
     {
-        return _set_storage.sadds(key, std::move(members));
+        return _set_storage.scard(redis_key{key, hash});
     }
-    inline int scard(redis_key& key)
+    inline int sismember(sstring& key, size_t hash, sstring&& member)
     {
-        return _set_storage.scard(key);
+        return _set_storage.sismember(redis_key{key, hash}, std::move(member));
     }
-    inline int sismember(redis_key& key, sstring& member)
+    inline std::vector<item_ptr> smembers(sstring& key, size_t hash)
     {
-        return _set_storage.sismember(key, member);
+        return _set_storage.smembers(key, std::hash<sstring>()(key));
     }
-    inline std::vector<item_ptr> smembers(redis_key& key)
+    inline int srem(sstring& key, size_t hash, sstring&& member)
     {
-        return _set_storage.smembers(key);
+        return _set_storage.srem(redis_key{key, hash}, std::move(member));
     }
-    inline int srem(redis_key& key, sstring& member)
+    inline int srems(sstring& key, size_t hash, std::vector<sstring>&& members)
     {
-        return _set_storage.srem(key, member);
-    }
-    inline int srems(redis_key& key, std::vector<sstring>&& members)
-    {
-        return _set_storage.srems(key, std::move(members));
+        return _set_storage.srems(redis_key{key, hash}, std::move(members));
     }
     future<> stop() { return make_ready_future<>(); }
 private:
@@ -236,4 +232,3 @@ private:
     set_storage  _set_storage;
 };
 }
-
