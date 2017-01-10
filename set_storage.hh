@@ -16,9 +16,9 @@ public:
         uint64_t set_node_count_ = 0;
     };
     template<typename origin = local_origin_tag>
-    int sadds(sstring& key, size_t hash, std::vector<sstring>&& members)
+    int sadds(sstring& key, std::vector<sstring>&& members)
     {
-        redis_key rk{key, hash};
+        redis_key rk{key};
         dict* d = fetch_set(key);
         if (d == nullptr) {
             const size_t dict_size = item::item_size_for_dict(key.size());
@@ -46,15 +46,17 @@ public:
 
     // SCARD
     template<typename origin = local_origin_tag>
-    int scard(redis_key&& key)
+    int scard(sstring& key)
     {
-        dict* d = fetch_set(key);
+        redis_key rk{key}; 
+        dict* d = fetch_set(rk);
         return d != nullptr ? d->size() : 0;
     }
 
     // SISMEMBER
-    int sismember(redis_key&& key, sstring&& member)
+    int sismember(sstring& key, sstring&& member)
     {
+        redis_key rk{key};
         dict* d = fetch_set(key);
         if (d != nullptr) {
             auto member_hash = std::hash<sstring>()(member);
@@ -65,9 +67,9 @@ public:
     }
 
     // SMEMBERS
-    std::vector<item_ptr> smembers(sstring& key, size_t hash)
+    std::vector<item_ptr> smembers(sstring& key)
     {
-        redis_key rk{key, hash};
+        redis_key rk{key};
         dict* d = fetch_set(rk);
         if (d == nullptr) {
             return std::vector<item_ptr>();
@@ -76,17 +78,19 @@ public:
     }
 
     // SPOP
-    item_ptr spop(redis_key&& key)
+    item_ptr spop(sstring& key)
     {
-        dict* d = fetch_set(key);
+        redis_key rk{key};
+        dict* d = fetch_set(rk);
         if (d == nullptr) return nullptr;
         return d->random_fetch_and_remove();
     }
 
     // SRANDMEMBER
-    item_ptr srandmember(redis_key&& key, sstring&& member)
+    item_ptr srandmember(sstring& key, sstring&& member)
     {
-        dict* d = fetch_set(key);
+        redis_key rk{key};
+        dict* d = fetch_set(rk);
         if (d != nullptr) {
             auto member_hash = std::hash<sstring>()(member);
             redis_key member_data {std::ref(member), std::ref(member_hash)};
@@ -94,9 +98,11 @@ public:
         }
         return nullptr;
     }
+
     // SREM
-    int srem(redis_key&& key, sstring&& member)
+    int srem(sstring& key, sstring&& member)
     {
+        redis_key rk{key};
         dict* d = fetch_set(key);
         if (d != nullptr) {
             auto member_hash = std::hash<sstring>()(member);
@@ -105,8 +111,9 @@ public:
         }
         return 0;
     }
-    int srems(redis_key&& key, std::vector<sstring>&& members)
+    int srems(sstring& key, std::vector<sstring>&& members)
     {
+        redis_key rk{key};
         dict* d = fetch_set(key);
         int count = 0;
         if (d != nullptr) {

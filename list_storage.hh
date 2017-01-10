@@ -16,9 +16,10 @@ public:
         uint64_t list_node_count_ = 0;
     };
     template<typename origin = local_origin_tag>
-    int push(redis_key& key, sstring& value, bool force, bool left)
+    int push(sstring& key, sstring& value, bool force, bool left)
     {
-        list* l = fetch_list(key);
+        redis_key rk{key};
+        list* l = fetch_list(rk);
         if (l == nullptr) {
             if (!force) {
                 return -1;
@@ -27,7 +28,7 @@ public:
             l = new list();
             auto list_item = local_slab().create(list_size, key, l, REDIS_LIST);
             intrusive_ptr_add_ref(list_item);
-            if (_store->set(key, list_item) != 0) {
+            if (_store->set(rk, list_item) != 0) {
                 intrusive_ptr_release(list_item);
                 return -1;
             }
@@ -38,31 +39,34 @@ public:
         return (left ? l->add_head(new_item) : l->add_tail(new_item)) == 0 ? static_cast<int>(l->length()) : 0;
     }
 
-    item_ptr pop(redis_key& key, bool left)
+    item_ptr pop(sstring& key, bool left)
     {
-        list* l = fetch_list(key);
+        redis_key rk{key};
+        list* l = fetch_list(rk);
         if (l != nullptr) {
             auto it = left ? l->pop_head() : l->pop_tail();
             if (l->length() == 0) {
-                _store->remove(key);
+                _store->remove(rk);
             }
             return it;
         } 
         return nullptr;
     }
 
-    int llen(redis_key& key)
+    int llen(sstring& key)
     {
-        list* l = fetch_list(key);
+        redis_key rk{key};
+        list* l = fetch_list(rk);
         if (l != nullptr) {
             return l->length();
         } 
         return 0;
     }
 
-    item_ptr lindex(redis_key& key, int idx)
+    item_ptr lindex(sstring& key, int idx)
     {
-        list* l = fetch_list(key);
+        redis_key rk{key};
+        list* l = fetch_list(rk);
         if (l != nullptr) {
             return l->index(idx);
         } 
@@ -70,9 +74,10 @@ public:
     }
   
     template<typename origin = local_origin_tag>
-    int linsert(redis_key& key, sstring& pivot, sstring& value, bool after)
+    int linsert(sstring& key, sstring& pivot, sstring& value, bool after)
     {
-        list* l = fetch_list(key);
+        redis_key rk{key};
+        list* l = fetch_list(rk);
         if (l != nullptr) {
             const size_t item_size = item::item_size_for_raw_string(value.size());
             auto new_item = local_slab().create(item_size, origin::move_if_local(value));
@@ -82,9 +87,10 @@ public:
         return 0;
     }
 
-    std::vector<item_ptr> lrange(redis_key& key, int start, int end)
+    std::vector<item_ptr> lrange(sstring& key, int start, int end)
     {
-        list* l = fetch_list(key);
+        redis_key rk{key};
+        list* l = fetch_list(rk);
         std::vector<item_ptr> result;
         if (l != nullptr) {
             return l->range(start, end);
@@ -93,9 +99,10 @@ public:
     }
 
     template<typename origin = local_origin_tag>
-    int lset(redis_key& key, int idx, sstring& value)
+    int lset(sstring& key, int idx, sstring& value)
     {
-        list* l = fetch_list(key);
+        redis_key rk{key};
+        list* l = fetch_list(rk);
         if (l != nullptr) {
             const size_t item_size = item::item_size_for_raw_string(value.size());
             auto new_item = local_slab().create(item_size, origin::move_if_local(value));
@@ -109,25 +116,27 @@ public:
         return 0;
     }
 
-    int lrem(redis_key& key, int count, sstring& value)
+    int lrem(sstring& key, int count, sstring& value)
     {
-        list* l = fetch_list(key);
+        redis_key rk{key};
+        list* l = fetch_list(rk);
         if (l != nullptr) {
             return l->trem(count, value);
         }
         return 0;
     }
 
-    int ltrim(redis_key& key, int start, int end)
+    int ltrim(sstring& key, int start, int end)
     {
-        list* l = fetch_list(key);
+        redis_key rk{key};
+        list* l = fetch_list(rk);
         if (l != nullptr) {
             return l->trim(start, end);
         }
         return 0;
     }
 protected:
-  inline list* fetch_list(redis_key& key)
+  inline list* fetch_list(const redis_key& key)
   {
     auto it = _store->fetch_raw(key);
     if (it != nullptr && it->type() == REDIS_LIST) {

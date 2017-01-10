@@ -58,8 +58,8 @@ using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
 
 class redis_service {
 private:
-    inline unsigned get_cpu(const size_t h) {
-        return h % smp::count;
+    inline unsigned get_cpu(const sstring& key) {
+        return std::hash<sstring>()(key) % smp::count;
     }
     distributed<db>& _db_peers;
 public:
@@ -126,17 +126,17 @@ public:
     future<std::vector<item_ptr>> sunion(args_collection& args);
     future<std::vector<item_ptr>> sunion_store(args_collection& args);
 private:
-    future<int> sadds_impl(sstring& key, size_t& hash, std::vector<sstring>&& members);
+    future<int> sadds_impl(sstring& key, std::vector<sstring>&& members);
     future<std::vector<item_ptr>> sdiff_impl(std::vector<sstring>&& keys);
     future<std::vector<item_ptr>> sinter_impl(std::vector<sstring>&& keys);
     future<std::vector<item_ptr>> sunion_impl(std::vector<sstring>&& keys);
-    future<std::vector<item_ptr>> smembers_impl(sstring& key, size_t& hash);
+    future<std::vector<item_ptr>> smembers_impl(sstring& key);
     future<item_ptr> pop_impl(args_collection& args, bool left);
     future<int> push_impl(args_collection& arg, bool force, bool left);
-    future<int> push_impl(redis_key& key, sstring& value, bool force, bool left);
-    future<int> set_impl(redis_key& key, sstring& value, long expir, uint8_t flag);
-    future<item_ptr> get_impl(redis_key& key);
-    future<int> remove_impl(redis_key& key);
+    future<int> push_impl(sstring& key, sstring& value, bool force, bool left);
+    future<int> set_impl(sstring& key, sstring& value, long expir, uint8_t flag);
+    future<item_ptr> get_impl(sstring& key);
+    future<int> remove_impl(sstring& key);
     future<uint64_t> counter_by(args_collection& args, bool incr, bool with_step);
 };
 

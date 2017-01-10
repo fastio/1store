@@ -17,15 +17,16 @@ public:
     };
     // HSET
     template<typename origin = local_origin_tag>
-    int hset(const redis_key& key, sstring& field, sstring& value)
+    int hset(const sstring& key, sstring& field, sstring& value)
     {
-        dict* d = fetch_dict(key);
+        redis_key rk{key};
+        dict* d = fetch_dict(rk);
         if (d == nullptr) {
             const size_t dict_size = item::item_size_for_dict(key.size());
             d = new dict();
             auto dict_item = local_slab().create(dict_size, key, d, REDIS_DICT);
             intrusive_ptr_add_ref(dict_item);
-            if (_store->set(key, dict_item) != 0) {
+            if (_store->set(rk, dict_item) != 0) {
                 intrusive_ptr_release(dict_item);
                 return -1;
             }
@@ -40,15 +41,16 @@ public:
 
     // HMSET
     template<typename origin = local_origin_tag>
-    int hmset(const redis_key& key, std::unordered_map<sstring, sstring>& kv)
+    int hmset(const sstring& key, std::unordered_map<sstring, sstring>& kv)
     {
-        dict* d = fetch_dict(key);
+        redis_key rk{key};
+        dict* d = fetch_dict(rk);
         if (d == nullptr) {
             const size_t dict_size = item::item_size_for_dict(key.size());
             d = new dict();
             auto dict_item = local_slab().create(dict_size, key, d, REDIS_DICT);
             intrusive_ptr_add_ref(dict_item);
-            if (_store->set(key, dict_item) != 0) {
+            if (_store->set(rk, dict_item) != 0) {
                 intrusive_ptr_release(dict_item);
                 return -1;
             }
@@ -70,9 +72,10 @@ public:
     }
 
     // HGET
-    item_ptr hget(const redis_key& key, sstring& field)
+    item_ptr hget(const sstring& key, sstring& field)
     {
-        dict* d = fetch_dict(key);
+        redis_key rk{key};
+        dict* d = fetch_dict(rk);
         if (d != nullptr) {
             auto hash = std::hash<sstring>()(field);
             redis_key field_key{std::ref(field), hash};
@@ -82,9 +85,10 @@ public:
     }
 
     // HDEL
-    int hdel(const redis_key& key, sstring& field)
+    int hdel(const sstring& key, sstring& field)
     {
-        dict* d = fetch_dict(key);
+        redis_key rk{key};
+        dict* d = fetch_dict(rk);
         if (d != nullptr) {
             auto hash = std::hash<sstring>()(field);
             redis_key field_key{std::ref(field), hash};
@@ -94,9 +98,10 @@ public:
     }
 
     // HEXISTS
-    int hexists(const redis_key& key, sstring& field)
+    int hexists(const sstring& key, sstring& field)
     {
-        dict* d = fetch_dict(key);
+        redis_key rk{key};
+        dict* d = fetch_dict(rk);
         if (d != nullptr) {
             auto hash = std::hash<sstring>()(field);
             redis_key field_key{std::ref(field), hash};
@@ -106,9 +111,10 @@ public:
     }
 
     // HSTRLEN
-    int hstrlen(const redis_key& key, sstring& field)
+    int hstrlen(const sstring& key, sstring& field)
     {
-        dict* d = fetch_dict(key);
+        redis_key rk{key};
+        dict* d = fetch_dict(rk);
         if (d != nullptr) {
             auto hash = std::hash<sstring>()(field);
             redis_key field_key{std::ref(field), hash};
@@ -121,9 +127,10 @@ public:
     }
 
     // HLEN
-    int hlen(const redis_key& key)
+    int hlen(const sstring& key)
     {
-        dict* d = fetch_dict(key);
+        redis_key rk{key};
+        dict* d = fetch_dict(rk);
         if (d != nullptr) {
             return d->size();
         }
@@ -132,15 +139,16 @@ public:
 
     // HINCRBY
     template<typename origin = local_origin_tag>
-    int hincrby(const redis_key& key, sstring& field, int delta)
+    int hincrby(const sstring& key, sstring& field, int delta)
     {
-        dict* d = fetch_dict(key);
+        redis_key rk{key};
+        dict* d = fetch_dict(rk);
         if (d == nullptr) {
             const size_t dict_size = item::item_size_for_dict(key.size());
             d = new dict();
             auto dict_item = local_slab().create(dict_size, key, d, REDIS_DICT);
             intrusive_ptr_add_ref(dict_item);
-            if (_store->set(key, dict_item) != 0) {
+            if (_store->set(rk, dict_item) != 0) {
                 intrusive_ptr_release(dict_item);
                 return -1;
             }
@@ -166,15 +174,16 @@ public:
 
     // HINCRBYFLOAT
     template<typename origin = local_origin_tag>
-    double hincrbyfloat(const redis_key& key, sstring& field, double delta)
+    double hincrbyfloat(const sstring& key, sstring& field, double delta)
     {
-        dict* d = fetch_dict(key);
+        redis_key rk{key};
+        dict* d = fetch_dict(rk);
         if (d == nullptr) {
             const size_t dict_size = item::item_size_for_dict(key.size());
             d = new dict();
             auto dict_item = local_slab().create(dict_size, key, d, REDIS_DICT);
             intrusive_ptr_add_ref(dict_item);
-            if (_store->set(key, dict_item) != 0) {
+            if (_store->set(rk, dict_item) != 0) {
                 intrusive_ptr_release(dict_item);
                 return -1;
             }
@@ -199,9 +208,10 @@ public:
     }
 
     // HGETALL
-    std::vector<item_ptr> hgetall(const redis_key& key)
+    std::vector<item_ptr> hgetall(const sstring& key)
     {
-        dict* d = fetch_dict(key);
+        redis_key rk{key};
+        dict* d = fetch_dict(rk);
         if (d != nullptr) {
             return d->fetch();
         }
@@ -210,9 +220,10 @@ public:
     }
 
     // HMGET
-    std::vector<item_ptr> hmget(const redis_key& key, std::unordered_set<sstring>& keys)
+    std::vector<item_ptr> hmget(const sstring& key, std::unordered_set<sstring>& keys)
     {
-        dict* d = fetch_dict(key);
+        redis_key rk{key};
+        dict* d = fetch_dict(rk);
         if (d != nullptr) {
             return d->fetch(keys);
         }

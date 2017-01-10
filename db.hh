@@ -48,180 +48,176 @@ public:
     ~db();
 
     template  <typename origin = local_origin_tag> inline
-    int set(redis_key& key, sstring& val, long expire, uint32_t flag)
+    int set(sstring& key, sstring& val, long expire, uint32_t flag)
     {
         return _misc_storage.set<origin>(key, val, expire, flag);
     }
     template  <typename origin = local_origin_tag> inline
-    uint64_t counter_by(redis_key& key, uint64_t step, bool incr)
+    uint64_t counter_by(sstring& key, uint64_t step, bool incr)
     {
         return _misc_storage.counter_by<origin>(key, step, incr);
     }
 
 
     template  <typename origin = local_origin_tag> inline
-    int append(redis_key& key, sstring& val)
+    int append(sstring& key, sstring& val)
     {
         return _misc_storage.append<origin>(key, val);
     }
 
-    inline int del(redis_key& key)
+    inline int del(sstring& key)
     {
         return _misc_storage.del(key);
     }
 
-    inline int exists(redis_key& key)
+    inline int exists(sstring& key)
     {
         return _misc_storage.exists(key);
     }
 
-    inline item_ptr get(redis_key& key)
+    inline item_ptr get(sstring& key)
     {
         return _misc_storage.get(key);
     }
 
-    inline int strlen(redis_key& key)
+    inline int strlen(sstring& key)
     {
         return _misc_storage.strlen(key);
     }
 
-    inline int expire(redis_key& key, long expired)
+    inline int expire(sstring& key, long expired)
     {
         return _misc_storage.expire(key, expired);
     }
 
     
     template <typename origin = local_origin_tag> inline
-    int push(redis_key& key, sstring& value, bool force, bool left)
+    int push(sstring& key, sstring& value, bool force, bool left)
     {
         return _list_storage.push<origin>(key, value, force, left);
     }
 
-    inline item_ptr pop(redis_key& key, bool left)
+    inline item_ptr pop(sstring& key, bool left)
     {
         return _list_storage.pop(key, left);
     }
 
-    inline int llen(redis_key& key)
+    inline int llen(sstring& key)
     {
         return _list_storage.llen(key);
     }
 
-    inline item_ptr lindex(redis_key& key, int idx)
+    inline item_ptr lindex(sstring& key, int idx)
     {
         return _list_storage.lindex(key, idx);
     }
 
     template <typename origin = local_origin_tag> inline
-    int linsert(redis_key& key, sstring& pivot, sstring& value, bool after)
+    int linsert(sstring& key, sstring& pivot, sstring& value, bool after)
     {
         return _list_storage.linsert<origin>(key, pivot, value, after);
     }
 
-    inline std::vector<item_ptr> lrange(redis_key& key, int start, int end)
+    inline std::vector<item_ptr> lrange(sstring& key, int start, int end)
     {
         return _list_storage.lrange(key, start, end);
     }
 
     template <typename origin = local_origin_tag> inline
-    int lset(redis_key& key, int idx, sstring& value)
+    int lset(sstring& key, int idx, sstring& value)
     {
         return _list_storage.lset<origin>(key, idx, value);
     }
 
-    int lrem(redis_key& key, int count, sstring& value)
+    int lrem(sstring& key, int count, sstring& value)
     {
         return _list_storage.lrem(key, count, value);
     }
 
-    int ltrim(redis_key& key, int start, int end)
+    int ltrim(sstring& key, int start, int end)
     {
         return _list_storage.ltrim(key, start, end);
     }
 
 
     template <typename origin = local_origin_tag> inline
-    int hset(redis_key& key, sstring& field, sstring& value)
+    int hset(sstring& key, sstring& field, sstring& value)
     {
         return _dict_storage.hset<origin>(key, field, value);
     }
 
     template <typename origin = local_origin_tag> inline
-    int hmset(redis_key& key, std::unordered_map<sstring, sstring>& kv)
+    int hmset(sstring& key, std::unordered_map<sstring, sstring>& kv)
     {
         return _dict_storage.hmset<origin>(key, kv);
     }
 
-    inline item_ptr hget(redis_key& key, sstring& field)
+    inline item_ptr hget(sstring& key, sstring& field)
     {
         return _dict_storage.hget(key, field);
     }
 
-    inline int hdel(redis_key& key, sstring& field)
+    inline int hdel(sstring& key, sstring& field)
     {
         return _dict_storage.hdel(key, field);
     }
 
-    inline int hexists(redis_key& key, sstring& field)
+    inline int hexists(sstring& key, sstring& field)
     {
         return _dict_storage.hexists(key, field);
     }
 
-    inline int hstrlen(redis_key& key, sstring& field)
+    inline int hstrlen(sstring& key, sstring& field)
     {
         return _dict_storage.hstrlen(key, field);
     }
 
-    inline int hlen(redis_key& key)
+    inline int hlen(sstring& key)
     {
         return _dict_storage.hlen(key);
     }
 
     template <typename origin = local_origin_tag> inline
-    int hincrby(redis_key& key, sstring& field, int delta)
+    int hincrby(sstring& key, sstring& field, int delta)
     {
         return _dict_storage.hincrby<origin>(key, field, delta);
     }
 
     template <typename origin = local_origin_tag> inline
-    double hincrbyfloat(redis_key& key, sstring& field, double delta)
+    double hincrbyfloat(sstring& key, sstring& field, double delta)
     {
         return _dict_storage.hincrbyfloat<origin>(key, field, delta);
     }
 
-    inline std::vector<item_ptr> hgetall(redis_key& key)
+    inline std::vector<item_ptr> hgetall(sstring& key)
     {
         return _dict_storage.hgetall(key);
     }
 
-    inline std::vector<item_ptr> hmget(redis_key& key, std::unordered_set<sstring>& keys)
+    inline std::vector<item_ptr> hmget(sstring& key, std::unordered_set<sstring>& keys)
     {
         return _dict_storage.hmget(key, keys);
     }
 
     inline int sadds(sstring& key, std::vector<sstring>&& members)
     {
-        return _set_storage.sadds(key, std::hash<sstring>()(key), std::move(members));
+        return _set_storage.sadds(key, std::move(members));
     }
-    inline int scard(sstring& key, size_t hash)
+    inline int scard(sstring& key)
     {
-        return _set_storage.scard(redis_key{key, hash});
+        return _set_storage.scard(key );
     }
-    inline int sismember(sstring& key, size_t hash, sstring&& member)
+    inline int sismember(sstring& key, sstring&& member)
     {
-        return _set_storage.sismember(redis_key{key, hash}, std::move(member));
+        return _set_storage.sismember(key, std::move(member));
     }
-    inline std::vector<item_ptr> smembers(sstring& key, size_t hash)
+    inline std::vector<item_ptr> smembers(sstring& key)
     {
-        return _set_storage.smembers(key, std::hash<sstring>()(key));
+        return _set_storage.smembers(key);
     }
-    inline int srem(sstring& key, size_t hash, sstring&& member)
+    inline int srems(sstring& key, std::vector<sstring>&& members)
     {
-        return _set_storage.srem(redis_key{key, hash}, std::move(member));
-    }
-    inline int srems(sstring& key, size_t hash, std::vector<sstring>&& members)
-    {
-        return _set_storage.srems(redis_key{key, hash}, std::move(members));
+        return _set_storage.srems(key, std::move(members));
     }
     future<> stop() { return make_ready_future<>(); }
 private:
