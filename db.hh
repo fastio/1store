@@ -219,6 +219,14 @@ public:
     {
         return _set_storage.srems(key, std::move(members));
     }
+    inline int srem(sstring& key, sstring& member)
+    {
+        return _set_storage.srem(key, member);
+    }
+    inline int sadd(sstring& key, sstring& member)
+    {
+        return _set_storage.sadd(key, member);
+    }
     future<> stop() { return make_ready_future<>(); }
 private:
     dict* _store;

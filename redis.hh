@@ -125,7 +125,10 @@ public:
     future<std::vector<item_ptr>> sinter_store(args_collection& args);
     future<std::vector<item_ptr>> sunion(args_collection& args);
     future<std::vector<item_ptr>> sunion_store(args_collection& args);
+    future<int> smove(args_collection& args);
 private:
+    future<int> srem_impl(sstring& key, sstring& member);
+    future<int> sadd_impl(sstring& key, sstring& member);
     future<int> sadds_impl(sstring& key, std::vector<sstring>&& members);
     future<std::vector<item_ptr>> sdiff_impl(std::vector<sstring>&& keys);
     future<std::vector<item_ptr>> sinter_impl(std::vector<sstring>&& keys);

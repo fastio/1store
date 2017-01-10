@@ -926,4 +926,45 @@ future<std::vector<item_ptr>> redis_service::sunion_store(args_collection& args)
         });
     });
 }
+
+future<int> redis_service::srem_impl(sstring& key, sstring& member)
+{
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<int>(_db_peers.local().srem(key, member));
+    }
+    return _db_peers.invoke_on(cpu, &db::srem, std::ref(key), std::ref(member));
+}
+
+future<int> redis_service::sadd_impl(sstring& key, sstring& member)
+{
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<int>(_db_peers.local().sadd(key, member));
+    }
+    return _db_peers.invoke_on(cpu, &db::sadd, std::ref(key), std::ref(member));
+}
+
+future<int> redis_service::smove(args_collection& args)
+{
+    if (args._command_args_count < 3 || args._command_args.empty()) {
+        return make_ready_future<int>(0);
+    }
+    sstring& key = args._command_args[0];
+    sstring& dest = args._command_args[1];
+    sstring& member = args._command_args[2];
+    struct smove_state {
+        sstring key;
+        sstring dest;
+        sstring member;
+    };
+    return do_with(smove_state{std::move(key), std::move(dest), std::move(member)}, [this] (auto& state) {
+        return this->srem_impl(state.key, state.member).then([this, &state] (auto r) {
+            if (r == 1) {
+                return this->sadd_impl(state.dest, state.member);
+            }
+            return make_ready_future<int>(r);
+        });
+   });
+}
 } /* namespace redis */

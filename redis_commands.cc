@@ -460,6 +460,14 @@ redis_commands::redis_commands()
             return out.write(std::move(msg));
         });
     });
+    // SMOVE 
+    regist_handler("SMOVE", [this] (args_collection& args, output_stream<char>& out) -> future<> {
+        return _redis->smove(args).then([this, &out] (int count) {
+            scattered_message<char> msg;
+            this_type::append_item(msg, std::move(count));
+            return out.write(std::move(msg));
+        });
+    });
 }
 }
 
