@@ -374,23 +374,13 @@ public:
     friend inline void intrusive_ptr_add_ref(item* it) {
         assert(it->_ref_count >= 0);
         ++it->_ref_count;
-        std::cout << "item: " << it->key() << ", refcount: " << it->_ref_count << ", addref\n";
         if (it->_ref_count == 2) {
             local_slab().lock_item(it);
         }
     }
 
-    inline void intrusive_ptr_add_ref() {
-        assert(_ref_count >= 0);
-        ++_ref_count;
-        std::cout << "item: " << key() << ", refcount: " << _ref_count << ", addref\n";
-        if (_ref_count == 2) {
-            local_slab().lock_item(this);
-        }
-    }
     friend inline void intrusive_ptr_release(item* it) {
         --it->_ref_count;
-        std::cout << "item: " << it->key() << ", refcount: " << it->_ref_count << ", release\n";
         if (it->_ref_count == 1) {
             local_slab().unlock_item(it);
         } else if (it->_ref_count == 0) {
