@@ -1,4 +1,4 @@
-#Pedis
+#Pedis (Parallel Redis)
 
 ## What's Pedis?
 

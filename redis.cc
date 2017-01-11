@@ -732,12 +732,12 @@ future<std::vector<item_ptr>> redis_service::sdiff(args_collection& args)
 
 future<std::vector<item_ptr>> redis_service::sdiff_impl(std::vector<sstring>&& keys)
 {
-    struct sinter_state {
+    struct sdiff_state {
         std::unordered_map<unsigned, std::vector<item_ptr>> items_set;
         std::vector<sstring> keys;
     };
     uint32_t count = static_cast<uint32_t>(keys.size());
-    return do_with(sinter_state{{}, std::move(keys)}, [this, count] (auto& state) {
+    return do_with(sdiff_state{{}, std::move(keys)}, [this, count] (auto& state) {
         return parallel_for_each(boost::irange<unsigned>(0, count), [this, &state] (unsigned k) {
             sstring& key = state.keys[k];
             return this->smembers_impl(key).then([&state, index = k] (auto&& sub) {
