@@ -41,7 +41,7 @@ private:
     rep* _rep;
 public:
     list();
-    ~list();
+    virtual ~list();
     int add_head(item* val);
     int add_tail(item* val);
     item_ptr pop_head();

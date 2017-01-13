@@ -90,7 +90,7 @@ class object
 {
 public:
     object() {}
-    virtual ~object() {};
+    virtual ~object() {}; 
 };
 
 using clock_type = lowres_clock;
@@ -384,7 +384,8 @@ public:
         if (it->_ref_count == 1) {
             local_slab().unlock_item(it);
         } else if (it->_ref_count == 0) {
-            if (it->_type == REDIS_LIST) {
+            auto type = it->_type;
+            if (type == REDIS_LIST || type == REDIS_DICT || type == REDIS_SET || type == REDIS_ZSET) {
                 delete it->ptr();
             }
             local_slab().free(it);

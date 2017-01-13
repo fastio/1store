@@ -32,6 +32,12 @@ struct list_node
     struct list_node* _next;
     item* _value;
     list_node() : _prev(nullptr), _next(nullptr), _value(nullptr) {}
+    ~list_node()
+    {
+        if (!_value) {
+           intrusive_ptr_release(_value);
+        }
+    }
 };
 
 struct list::rep

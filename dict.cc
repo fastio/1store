@@ -36,6 +36,12 @@ struct dict_node
     item* _val;
     struct dict_node *_next;
     dict_node() : _val(nullptr), _next(nullptr) {}
+    ~dict_node()
+    {
+        if (_val) {
+            intrusive_ptr_release(_val);
+        }
+    }
 };
 
 struct dict_hash_table

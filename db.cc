@@ -50,6 +50,9 @@ db::~db()
     if (_store != nullptr) {
         delete _store;
     }
+    if (_redis_commands_ptr) {
+        delete _redis_commands_ptr;
+    }
 }
 
 }
