@@ -169,7 +169,7 @@ private:
       uint64_t _uint64;
       int64_t  _int64;
       double   _double;
-    } _u;
+    } _u { 0 };
     char* _appends = nullptr;
     friend class dict;
     static constexpr uint32_t field_alignment = alignof(void*);
@@ -180,6 +180,9 @@ public:
     }
     ~item()
     {
+        if (_type == REDIS_LIST || _type == REDIS_DICT || _type == REDIS_SET || _type == REDIS_ZSET) {
+           delete ptr();
+        }
         if (_appends) delete[] _appends;
     }
     item(const redis_key& key, sstring&& value)

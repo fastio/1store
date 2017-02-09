@@ -205,7 +205,6 @@ public:
                             _status = REDIS_ERR;
                             break;
                         }
-
                     }
                     else {
                         // we iteratored all nodes.
@@ -263,7 +262,6 @@ int dict::rep::expand_room(unsigned long size)
 
     n._size = realsize;
     n._size_mask = realsize-1;
-
     n._table = new dict_node*[realsize * sizeof(dict_node*)];
     n._used = 0;
     for (unsigned long i = 0; i < realsize; ++i) n._table[i] = nullptr;
@@ -284,7 +282,6 @@ int dict::rep::do_rehash(int n)
 
     while(n-- && _ht[0]._used != 0) {
         dict_node *de, *nextde;
-
         assert(_ht[0]._size > (unsigned long)_rehash_idx);
         while(_ht[0]._table[_rehash_idx] == nullptr) {
             _rehash_idx++;
@@ -293,7 +290,6 @@ int dict::rep::do_rehash(int n)
         de = _ht[0]._table[_rehash_idx];
         while(de) {
             unsigned int h;
-
             nextde = de->_next;
             h = de->_val->key_hash() & _ht[1]._size_mask;
             de->_next = _ht[1]._table[h];
