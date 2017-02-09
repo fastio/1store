@@ -53,7 +53,6 @@ namespace bi = boost::intrusive;
 namespace redis {
 
 namespace stdx = std::experimental;
-using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
 future<sstring> redis_service::echo(args_collection& args)
 {
     if (args._command_args_count < 1) {
@@ -162,9 +161,6 @@ future<int> redis_service::mset(args_collection& args)
 future<item_ptr> redis_service::get_impl(sstring& key)
 {
     auto cpu = get_cpu(key);
-    if (engine().cpu_id() == cpu) {
-        return make_ready_future<item_ptr>(_db_peers.local().get(key));
-    }
     return _db_peers.invoke_on(cpu, &db::get, std::ref(key));
 }
 
@@ -631,7 +627,7 @@ future<int> redis_service::sadds_impl(sstring& key, std::vector<sstring>&& membe
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db_peers.local().sadds(key, std::move(members)));
     }
-    return _db_peers.invoke_on(cpu, &db::sadds, std::ref(key), std::move(members));
+    return _db_peers.invoke_on(cpu, &db::sadds<remote_origin_tag>, std::ref(key), std::move(members));
 }
 
 future<int> redis_service::sadd(args_collection& args)

@@ -116,7 +116,7 @@ int main(int ac, char** av) {
             return db_peers.start().then([&system_stats] {
                 return system_stats.start(redis::clock_type::now());
                 }).then([&] {
-                    std::cout << PLATFORM << " pedis " << VERSION << "\n";
+                    std::cout << PLATFORM << " Parallel Redis " << VERSION << "\n";
                     return make_ready_future<>();
                 }).then([&, port] {
                     return server.start(std::ref(redis), std::ref(system_stats), port);

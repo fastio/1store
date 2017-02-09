@@ -3,6 +3,7 @@
 #include "base.hh"
 #include "dict.hh"
 namespace redis {
+using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 class dict_storage : public storage {
 public:
     dict_storage(const sstring& name, dict* store) : storage(name, store)
@@ -22,20 +23,15 @@ public:
         redis_key rk{key};
         dict* d = fetch_dict(rk);
         if (d == nullptr) {
-            const size_t dict_size = item::item_size_for_dict(key.size());
             d = new dict();
-            auto dict_item = local_slab().create(dict_size, key, d, REDIS_DICT);
-            intrusive_ptr_add_ref(dict_item);
+            auto dict_item = item::create(key, d, REDIS_DICT);
             if (_store->set(rk, dict_item) != 0) {
-                intrusive_ptr_release(dict_item);
                 return -1;
             }
         }
-        const size_t item_size = item::item_size_for_string(field.size(), value.size());
         auto field_hash = std::hash<sstring>()(field);
         redis_key field_key{std::ref(field), field_hash};
-        auto new_item = local_slab().create(item_size, field_key, origin::move_if_local(value));
-        intrusive_ptr_add_ref(new_item);
+        auto new_item = item::create(origin::move_if_local(field_key), origin::move_if_local(value));
         return d->replace(field_key, new_item);
     }
 
@@ -46,12 +42,9 @@ public:
         redis_key rk{key};
         dict* d = fetch_dict(rk);
         if (d == nullptr) {
-            const size_t dict_size = item::item_size_for_dict(key.size());
             d = new dict();
-            auto dict_item = local_slab().create(dict_size, key, d, REDIS_DICT);
-            intrusive_ptr_add_ref(dict_item);
+            auto dict_item = item::create(key, d, REDIS_DICT);
             if (_store->set(rk, dict_item) != 0) {
-                intrusive_ptr_release(dict_item);
                 return -1;
             }
         }
@@ -60,11 +53,8 @@ public:
             auto hash = std::hash<sstring>()(field);
             sstring& value = p->second;
             redis_key field_key{std::ref(field), std::move(hash)};
-            const size_t item_size = item::item_size_for_string(field.size(), value.size());
-            auto new_item = local_slab().create(item_size, field_key, origin::move_if_local(value));
-            intrusive_ptr_add_ref(new_item);
+            auto new_item = item::create(origin::move_if_local(field_key), origin::move_if_local(value));
             if (d->replace(field_key, new_item) != -1) {
-                intrusive_ptr_release(new_item);
                 return -1;
             }
         }
@@ -144,12 +134,9 @@ public:
         redis_key rk{key};
         dict* d = fetch_dict(rk);
         if (d == nullptr) {
-            const size_t dict_size = item::item_size_for_dict(key.size());
             d = new dict();
-            auto dict_item = local_slab().create(dict_size, key, d, REDIS_DICT);
-            intrusive_ptr_add_ref(dict_item);
+            auto dict_item = item::create(key, d, REDIS_DICT);
             if (_store->set(rk, dict_item) != 0) {
-                intrusive_ptr_release(dict_item);
                 return -1;
             }
         }
@@ -157,11 +144,8 @@ public:
         redis_key field_key{std::ref(field), hash};
         auto it = d->fetch(field_key);
         if (!it) {
-            const size_t item_size = item::item_size_for_int64(field.size());
-            auto new_item = local_slab().create(item_size, field_key, static_cast<int64_t>(delta));
-            intrusive_ptr_add_ref(new_item);
+            auto new_item = item::create(origin::move_if_local(field_key), static_cast<int64_t>(delta));
             if (d->set(field_key, new_item) == -1) {
-                intrusive_ptr_release(new_item);
                 return -1;
             }
             return delta;
@@ -179,12 +163,9 @@ public:
         redis_key rk{key};
         dict* d = fetch_dict(rk);
         if (d == nullptr) {
-            const size_t dict_size = item::item_size_for_dict(key.size());
             d = new dict();
-            auto dict_item = local_slab().create(dict_size, key, d, REDIS_DICT);
-            intrusive_ptr_add_ref(dict_item);
+            auto dict_item = item::create(key, d, REDIS_DICT);
             if (_store->set(rk, dict_item) != 0) {
-                intrusive_ptr_release(dict_item);
                 return -1;
             }
         }
@@ -192,11 +173,8 @@ public:
         redis_key field_key{std::ref(field), hash};
         auto it = d->fetch(field_key);
         if (!it) {
-            const size_t item_size = item::item_size_for_double(field.size());
-            auto new_item = local_slab().create(item_size, field_key, delta);
-            intrusive_ptr_add_ref(new_item);
+            auto new_item = item::create(origin::move_if_local(field_key), delta);
             if (d->set(field_key, new_item) == -1) {
-                intrusive_ptr_release(new_item);
                 return -1;
             }
             return delta;
@@ -227,7 +205,7 @@ public:
         if (d != nullptr) {
             return d->fetch(keys);
         }
-        std::vector<item_ptr> empty;
+        std::vector<item_ptr> empty {};
         return std::move(empty);
     }
 
@@ -236,7 +214,7 @@ protected:
     inline dict* fetch_dict(const redis_key& key)
     {
         auto it = _store->fetch_raw(key);
-        if (it != nullptr && it->type() == REDIS_DICT) {
+        if (it && it->type() == REDIS_DICT) {
             return static_cast<dict*>(it->ptr());
         }
         return nullptr;

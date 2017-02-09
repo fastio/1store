@@ -3,6 +3,7 @@
 #include "base.hh"
 
 namespace redis {
+using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 class misc_storage : public storage {
 public:
     misc_storage(const sstring& name, dict* store) : storage(name, store)
@@ -21,15 +22,13 @@ public:
     {
         redis_key rk{key};
         auto it = _store->fetch_raw(rk);
-        if (it != nullptr) {
+        if (it) {
             if (it->type() != REDIS_RAW_UINT64) {
                 return REDIS_ERR;
             }
             return it->incr(incr ? step : -step);
         } else {
-            const size_t item_size = item::item_size_for_uint64(key.size());
-            auto new_item = local_slab().create(item_size, key, step);
-            intrusive_ptr_add_ref(new_item);
+            auto new_item = item::create(key, step);
             if (_store->set(rk, new_item) != REDIS_OK)
                 return REDIS_ERR;
             return step;
@@ -42,9 +41,7 @@ public:
     {
         redis_key rk{key};
         _store->remove(key);
-        const size_t item_size = item::item_size_for_string(key.size(), val.size());
-        auto new_item = local_slab().create(item_size, key, origin::move_if_local(val));
-        intrusive_ptr_add_ref(new_item);
+        auto new_item = item::create(key, origin::move_if_local(val));
         return _store->set(rk, new_item);
     }
 
@@ -54,28 +51,20 @@ public:
         redis_key rk{key};
         size_t current_size = -1;
         auto it = _store->fetch_raw(rk);
-        if (it != nullptr) {
+        if (it) {
             auto exist_val = it->value();
             current_size = exist_val.size() + val.size();
-            const size_t item_size = item::item_size_for_raw_string_append(key.size(), val.size(), exist_val.size());
-            auto new_item = local_slab().create(item_size,
-                    key,
+            auto new_item = item::create(key,
                     origin::move_if_local(exist_val),
                     origin::move_if_local(val));
-            intrusive_ptr_add_ref(new_item);
-            intrusive_ptr_release(it);
             if (_store->replace(rk, new_item) != 0) {
-                intrusive_ptr_release(new_item);
                 return -1;
             }
         }
         else {
             current_size = val.size();
-            const size_t item_size = item::item_size_for_string(key.size(), val.size());
-            auto new_item = local_slab().create(item_size, key, origin::move_if_local(val));
-            intrusive_ptr_add_ref(new_item);
+            auto new_item = item::create(key, origin::move_if_local(val));
             if (_store->set(rk, new_item) != 0) {
-                intrusive_ptr_release(new_item);
                 return -1;
             }
         }
@@ -113,11 +102,11 @@ public:
     int expire(sstring& key, long expired)
     {
         redis_key rk{key};
-      auto it = _store->fetch_raw(rk);
-      if (it == nullptr) {
-        return REDIS_ERR;
-      }
-      return REDIS_OK;
+        auto it = _store->fetch_raw(rk);
+        if (!it) {
+            return REDIS_ERR;
+        }
+        return REDIS_OK;
     }
 protected:
     stats _stats;

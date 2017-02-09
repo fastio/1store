@@ -39,7 +39,7 @@
 namespace redis {
 
 namespace stdx = std::experimental;
-using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
+using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 
 
 class db {
@@ -52,12 +52,12 @@ public:
     {
         return _misc_storage.set<origin>(key, val, expire, flag);
     }
+
     template  <typename origin = local_origin_tag> inline
     uint64_t counter_by(sstring& key, uint64_t step, bool incr)
     {
         return _misc_storage.counter_by<origin>(key, step, incr);
     }
-
 
     template  <typename origin = local_origin_tag> inline
     int append(sstring& key, sstring& val)
@@ -199,31 +199,39 @@ public:
         return _dict_storage.hmget(key, keys);
     }
 
-    inline int sadds(sstring& key, std::vector<sstring>&& members)
+    template <typename origin = local_origin_tag> inline
+    int sadds(sstring& key, std::vector<sstring>&& members)
     {
         return _set_storage.sadds(key, std::move(members));
     }
+
     inline int scard(sstring& key)
     {
         return _set_storage.scard(key );
     }
+
     inline int sismember(sstring& key, sstring&& member)
     {
         return _set_storage.sismember(key, std::move(member));
     }
+
     inline std::vector<item_ptr> smembers(sstring& key)
     {
         return _set_storage.smembers(key);
     }
+
     inline int srems(sstring& key, std::vector<sstring>&& members)
     {
         return _set_storage.srems(key, std::move(members));
     }
+
     inline int srem(sstring& key, sstring& member)
     {
         return _set_storage.srem(key, member);
     }
-    inline int sadd(sstring& key, sstring& member)
+
+    template <typename origin = local_origin_tag> inline
+    int sadd(sstring& key, sstring& member)
     {
         return _set_storage.sadd(key, member);
     }

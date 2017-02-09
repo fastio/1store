@@ -30,7 +30,6 @@
 namespace redis {
 class item;
 class dict_iterator;
-using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
 class dict : public object {
 private:
     friend class dict_iterator;
@@ -39,16 +38,16 @@ private:
 public:
     dict();
     virtual ~dict();
-    int set(const redis_key& key, item* val);
+    int set(const redis_key& key, lw_shared_ptr<item> val);
     int exists(const redis_key& key);
-    item* fetch_raw(const redis_key& key);
-    int replace(const redis_key& key, item* val);
+    lw_shared_ptr<item> fetch_raw(const redis_key& key);
+    int replace(const redis_key& key, lw_shared_ptr<item> val);
     int remove(const redis_key& key);
     size_t size();
-    item_ptr fetch(const redis_key& key);
-    item_ptr random_fetch_and_remove() { return nullptr; }
-    std::vector<item_ptr> fetch();
-    std::vector<item_ptr> fetch(const std::unordered_set<sstring>& keys);
+    foreign_ptr<lw_shared_ptr<item>> fetch(const redis_key& key);
+    foreign_ptr<lw_shared_ptr<item>> random_fetch_and_remove() { return nullptr; }
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch();
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch(const std::unordered_set<sstring>& keys);
 };
 
 } // namespace redis

@@ -46,7 +46,6 @@
 namespace redis {
 class redis_commands;
 class redis_service;
-using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
 class redis_protocol {
 private:
     redis_service& _redis;

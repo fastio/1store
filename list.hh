@@ -30,8 +30,6 @@
 #include <vector>
 namespace redis {
 class item;
-using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
-
 class list_iterator;
 
 class list : public object {
@@ -42,16 +40,16 @@ private:
 public:
     list();
     virtual ~list();
-    int add_head(item* val);
-    int add_tail(item* val);
-    item_ptr pop_head();
-    item_ptr pop_tail();
-    int insert_before(const sstring& pivot, item *value);
-    int insert_after(const sstring& pivot, item *value);
-    int set(long idx, item *value);
+    int add_head(lw_shared_ptr<item> val);
+    int add_tail(lw_shared_ptr<item> val);
+    foreign_ptr<lw_shared_ptr<item>> pop_head();
+    foreign_ptr<lw_shared_ptr<item>> pop_tail();
+    int insert_before(const sstring& pivot, lw_shared_ptr<item> value);
+    int insert_after(const sstring& pivot, lw_shared_ptr<item> value);
+    int set(long idx, lw_shared_ptr<item> value);
     void remove(const sstring& target);
-    item_ptr index(long index);
-    std::vector<item_ptr> range(int start, int end);
+    foreign_ptr<lw_shared_ptr<item>> index(long index);
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> range(int start, int end);
     int trim(int start, int end);
     int trem(int count, sstring& value);
     long length();

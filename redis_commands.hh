@@ -47,7 +47,7 @@ namespace redis {
 class redis_service;
 class args_collection;
 //class item;
-using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
+using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 using handler_type = std::function<future<> (args_collection&, output_stream<char>&)>;
 class redis_commands {
 private:
@@ -58,16 +58,13 @@ private:
         _handlers[command] = handler;
     }
     redis_service* _redis;
-    static std::vector<sstring> _number_str;
-    static std::vector<sstring> _multi_number_str;
-    static std::vector<sstring> _content_number_str;
     static void init_number_str_array(std::vector<sstring>& numbers, const char* park) {
         for (size_t i = 0; i < 64; ++i) {
             sstring s(park, 1);
             sstring n(std::to_string(i).c_str());
             s.append(n.c_str(), n.size());
             s.append(msg_crlf.data(), msg_crlf.size());
-            numbers.emplace_back(std::move(s));
+            numbers.push_back(s);
         }
     }
 private:
@@ -118,13 +115,9 @@ private:
         msg.append_static(msg_crlf);
     }
     static void  append_item(scattered_message<char>& msg, int c) {
-        if (c < 32) {
-            msg.append_static(_number_str[c]);
-        } else {
-            msg.append_static(msg_num_tag);
-            msg.append_static(std::to_string(c).c_str());
-            msg.append_static(msg_crlf);
-        }
+        msg.append_static(msg_num_tag);
+        msg.append_static(std::to_string(c).c_str());
+        msg.append_static(msg_crlf);
     }
     template<bool key = false, bool value = true>
     static void  append_multi_items(scattered_message<char>& msg, std::vector<item_ptr>&& items) {

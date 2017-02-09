@@ -22,7 +22,7 @@
 #include <functional>
 #include "iterator.hh"
 namespace redis {
-bool item_equal(item_ptr& l, item_ptr& r)
+bool item_equal(lw_shared_ptr<item>& l,  lw_shared_ptr<item>& r)
 {
     if (!l || !r)
         return false;
@@ -33,13 +33,12 @@ bool item_equal(item_ptr& l, item_ptr& r)
 
 struct dict_node
 {
-    item* _val;
+    lw_shared_ptr<item> _val;
     struct dict_node *_next;
     dict_node() : _val(nullptr), _next(nullptr) {}
     ~dict_node()
     {
         if (_val) {
-            intrusive_ptr_release(_val);
         }
     }
 };
@@ -62,14 +61,14 @@ struct dict::rep
     static const int dict_can_resize = 1;
     static const unsigned int dict_force_resize_ratio = 5;
     static const int DICT_HT_INITIAL_SIZE = 64;
-    std::function<void(item* val)> _free_value_fn;
+    std::function<void(lw_shared_ptr<item> val)> _free_value_fn;
 
     rep();
     ~rep();
 
     int expand_room(unsigned long size);
-    int add(const redis_key& key, item* val);
-    int replace(const redis_key& key, item* val);
+    int add(const redis_key& key, lw_shared_ptr<item> val);
+    int replace(const redis_key& key, lw_shared_ptr<item> val);
     int remove(const redis_key& key);
 
 
@@ -78,7 +77,7 @@ struct dict::rep
     int remove_no_free(const redis_key& key);
     void dict_release();
     dict_node * find(const redis_key& key);
-    item* fetch_value(const redis_key& key);
+    lw_shared_ptr<item> fetch_value(const redis_key& key);
 
     int resize_room();
     dict_node *random_fetch(); 
@@ -89,8 +88,8 @@ struct dict::rep
     int generic_delete(const redis_key& key, int nofree);
     int clear(dict_hash_table *ht);
     size_t size();
-    std::vector<item_ptr> fetch();
-    std::vector<item_ptr> fetch(const std::unordered_set<sstring>& keys);
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch();
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch(const std::unordered_set<sstring>& keys);
 private:
     static const int DICT_HT_INITAL_SIZE = 4;
     inline bool key_equal(std::experimental::string_view& k, const sstring& key) {
@@ -99,8 +98,8 @@ private:
         }
         return memcmp(k.data(), key.data(), k.size()) == 0;
     }
-    inline bool key_equal(std::experimental::string_view& k, size_t kh, item* val) {
-        if (val == nullptr) {
+    inline bool key_equal(std::experimental::string_view& k, size_t kh, lw_shared_ptr<item> val) {
+        if (!val) {
             return false;
         }
         if (kh != val->key_hash()) {
@@ -111,8 +110,8 @@ private:
         }
         return memcmp(k.data(), val->key().data(), val->key_size()) == 0;
     }
-    inline bool key_equal(const sstring* l, size_t kh, item* val) {
-        if (l == nullptr || val == nullptr) {
+    inline bool key_equal(const sstring* l, size_t kh, lw_shared_ptr<item> val) {
+        if (l == nullptr || !val) {
             return false;
         }
         if (kh != val->key_hash()) {
@@ -238,7 +237,6 @@ public:
 dict::rep::rep()
    : _rehash_idx(-1)
    , _iterators(0)
-   , _free_value_fn([](item* it) { if (it) intrusive_ptr_release(it); })
 {
 }
 
@@ -329,7 +327,7 @@ void dict::rep::do_rehash_step()
     if (_iterators == 0) do_rehash(1);
 }
 
-int dict::rep::add(const redis_key& key, item *val)
+int dict::rep::add(const redis_key& key, lw_shared_ptr<item> val)
 {
     dict_node *entry = add_raw(key);
     if (!entry) return REDIS_ERR;
@@ -357,20 +355,15 @@ dict_node* dict::rep::add_raw(const redis_key& key)
     return entry;
 }
 
-int dict::rep::replace(const redis_key& key, item *val)
+int dict::rep::replace(const redis_key& key, lw_shared_ptr<item> val)
 {
-    dict_node *entry, auxentry;
+    dict_node *entry;
 
     if (add(key, val) == REDIS_OK)
         return 1;
 
     entry = find(key);
-    auxentry = *entry;
-
     entry->_val = val;
-    if (_free_value_fn) {
-        _free_value_fn(auxentry._val);
-    }
     return 0;
 }
 
@@ -423,30 +416,30 @@ int dict::rep::remove_no_free(const redis_key& key) {
     return generic_delete(key, 1);
 }
 
-std::vector<item_ptr> dict::rep::fetch(const std::unordered_set<sstring>& keys)
+std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::rep::fetch(const std::unordered_set<sstring>& keys)
 {
-    std::vector<item_ptr> items;
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> items;
     dict_iterator iter(this);
     iter.seek_to_first();
     while (iter.status() == REDIS_OK) {
         auto n = iter.value();
         auto k = n->_val->key();
         if (std::find_if(keys.begin(), keys.end(), [this, &k] (const sstring& key) { return key_equal(k, key); }) != keys.end()) {
-            items.emplace_back(item_ptr(n->_val));
+            items.emplace_back(foreign_ptr<lw_shared_ptr<item>>(lw_shared_ptr<item>(n->_val)));
         }
         iter.next();
     }
     return std::move(items);
 }
 
-std::vector<item_ptr> dict::rep::fetch()
+std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::rep::fetch()
 {
-    std::vector<item_ptr> items;
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> items;
     dict_iterator iter(this);
     iter.seek_to_first();
     while (iter.status() == REDIS_OK) {
         auto n = iter.value();
-        items.emplace_back(item_ptr(n->_val));
+        items.emplace_back(foreign_ptr<lw_shared_ptr<item>>(lw_shared_ptr<item>(n->_val)));
         iter.next();
     }
     return std::move(items);
@@ -502,7 +495,7 @@ dict_node* dict::rep::find(const redis_key& key)
     return nullptr;
 }
 
-item* dict::rep::fetch_value(const redis_key& key)
+lw_shared_ptr<item> dict::rep::fetch_value(const redis_key& key)
 {
     dict_node *he;
     he = find(key);
@@ -577,12 +570,12 @@ dict::~dict()
     }
 }
 
-int dict::set(const redis_key& key, item* val)
+int dict::set(const redis_key& key, lw_shared_ptr<item> val)
 {
     return _rep->add(key, val);
 }
 
-int dict::replace(const redis_key& key, item* val)
+int dict::replace(const redis_key& key, lw_shared_ptr<item> val)
 {
     return _rep->replace(key, val);
 }
@@ -602,22 +595,22 @@ size_t dict::size()
   return _rep->size();
 }
 
-item* dict::fetch_raw(const redis_key& key)
+lw_shared_ptr<item> dict::fetch_raw(const redis_key& key)
 {
     return _rep->fetch_value(key);
 }
 
-item_ptr dict::fetch(const redis_key& key)
+foreign_ptr<lw_shared_ptr<item>> dict::fetch(const redis_key& key)
 {
-    return item_ptr(_rep->fetch_value(key));
+    return foreign_ptr<lw_shared_ptr<item>>(_rep->fetch_value(key));
 }
 
-std::vector<item_ptr> dict::fetch(const std::unordered_set<sstring>& keys)
+std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::fetch(const std::unordered_set<sstring>& keys)
 {
   return _rep->fetch(keys);
 }
 
-std::vector<item_ptr> dict::fetch()
+std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::fetch()
 {
   return _rep->fetch();
 }

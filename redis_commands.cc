@@ -24,14 +24,8 @@
 #include <sstream>
 
 namespace redis {
-std::vector<sstring> redis_commands::_number_str;
-std::vector<sstring> redis_commands::_multi_number_str;
-std::vector<sstring> redis_commands::_content_number_str;
 redis_commands::redis_commands()
 {
-    init_number_str_array(_number_str, ":");
-    init_number_str_array(_multi_number_str, "*");
-    init_number_str_array(_content_number_str, "$");
     _dummy = [] (args_collection&, output_stream<char>& out) {
         return out.write("+Not Implemented\r\n");
     };

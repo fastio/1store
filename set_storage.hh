@@ -3,6 +3,7 @@
 #include "base.hh"
 #include "dict.hh"
 namespace redis {
+using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 class set_storage : public storage {
 public:
     set_storage(const sstring& name, dict* store) : storage(name, store)
@@ -15,54 +16,46 @@ public:
         uint64_t set_count_ = 0;
         uint64_t set_node_count_ = 0;
     };
+
     template<typename origin = local_origin_tag>
     int sadds(sstring& key, std::vector<sstring>&& members)
     {
         redis_key rk{key};
         dict* d = fetch_set(key);
         if (d == nullptr) {
-            const size_t dict_size = item::item_size_for_dict(key.size());
             d = new dict();
-            auto dict_item = local_slab().create(dict_size, key, d, REDIS_SET);
-            intrusive_ptr_add_ref(dict_item);
+            auto dict_item = item::create(key, d, REDIS_SET);
             if (_store->set(key, dict_item) != 0) {
-                intrusive_ptr_release(dict_item);
                 return -1;
             }
         }
         int count = 0;
         for (sstring& member : members) {
-            const size_t item_size = item::item_size_for_raw_string(member.size());
             auto member_hash = std::hash<sstring>()(member);
             redis_key member_data {std::ref(member), member_hash};
-            auto new_item = local_slab().create(item_size, member_data);
-            intrusive_ptr_add_ref(new_item);
+            auto new_item = item::create(member_data);
             if (d->replace(member_data, new_item)) {
                 count++;
             }
         }
         return count;
     }
+
     template<typename origin = local_origin_tag>
     int sadd(sstring& key, sstring& member)
     {
         redis_key rk{key};
         dict* d = fetch_set(key);
         if (d == nullptr) {
-            const size_t dict_size = item::item_size_for_dict(key.size());
             d = new dict();
-            auto dict_item = local_slab().create(dict_size, key, d, REDIS_SET);
-            intrusive_ptr_add_ref(dict_item);
+            auto dict_item = item::create(key, d, REDIS_SET);
             if (_store->set(key, dict_item) != 0) {
-                intrusive_ptr_release(dict_item);
                 return -1;
             }
         }
-        const size_t item_size = item::item_size_for_raw_string(member.size());
         auto member_hash = std::hash<sstring>()(member);
         redis_key member_data {std::ref(member), member_hash};
-        auto new_item = local_slab().create(item_size, member_data);
-        intrusive_ptr_add_ref(new_item);
+        auto new_item = item::create(member_data);
         if (d->replace(member_data, new_item)) {
             return 1;
         }
@@ -70,7 +63,6 @@ public:
     }
 
     // SCARD
-    template<typename origin = local_origin_tag>
     int scard(sstring& key)
     {
         redis_key rk{key}; 
@@ -136,6 +128,7 @@ public:
         }
         return 0;
     }
+
     int srems(sstring& key, std::vector<sstring>&& members)
     {
         redis_key rk{key};
@@ -171,7 +164,7 @@ protected:
     inline dict* fetch_set(const redis_key& key)
     {
         auto it = _store->fetch_raw(key);
-        if (it != nullptr && it->type() == REDIS_SET) {
+        if (it && it->type() == REDIS_SET) {
             return static_cast<dict*>(it->ptr());
         }
         return nullptr;

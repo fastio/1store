@@ -54,7 +54,7 @@ namespace stdx = std::experimental;
 struct args_collection;
 class db;
 class item;
-using item_ptr = foreign_ptr<boost::intrusive_ptr<item>>;
+using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 
 class redis_service {
 private:

@@ -30,13 +30,10 @@ struct list_node
 {
     struct list_node* _prev;
     struct list_node* _next;
-    item* _value;
+    lw_shared_ptr<item> _value;
     list_node() : _prev(nullptr), _next(nullptr), _value(nullptr) {}
     ~list_node()
     {
-        if (!_value) {
-           intrusive_ptr_release(_value);
-        }
     }
 };
 
@@ -47,28 +44,27 @@ struct list::rep
     list_node *_tail;
     unsigned long _len;
 
-    std::function<void(item* val)> _free_value_fn;
     rep() : _head(nullptr), _tail(nullptr), _len(0) {}
     ~rep();
-    int add_node_head(item *value);
-    int add_node_tail(item *value);
+    int add_node_head(lw_shared_ptr<item> value);
+    int add_node_tail(lw_shared_ptr<item> value);
     void rotate();
-    item* index(long index);
-    item* pop_head();
-    item* pop_tail();
-    int insert_node(list_node* n, item *value, int after);
+    lw_shared_ptr<item> index(long index);
+    lw_shared_ptr<item> pop_head();
+    lw_shared_ptr<item> pop_tail();
+    int insert_node(list_node* n, lw_shared_ptr<item> value, int after);
     void del_node(list_node *node);
-    item* remove_node(list_node *node);
+    lw_shared_ptr<item> remove_node(list_node *node);
     list_node* search_key(const sstring& key);
     bool node_equal(list_node* n, const sstring& key) {
-        if (n != nullptr && n->_value != nullptr) {
+        if (n != nullptr && n->_value) {
             const auto& k = n->_value->value();
             return k.size() == key.size() && memcmp(k.data(), key.c_str(), key.size()) == 0;
         }
         return false;
     }
-    int set(long idx, item* value);
-    std::vector<item_ptr> range(int start, int end);
+    int set(long idx, lw_shared_ptr<item> value);
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> range(int start, int end);
     int trim(int start, int end);
     int trem(int count, sstring& value);
     long length() { return _len; }
@@ -89,31 +85,31 @@ long list::length()
     return _rep->length();
 }
 
-int list::add_head(item* val)
+int list::add_head(lw_shared_ptr<item> val)
 {
     return _rep->add_node_head(val);
 }
 
-item_ptr list::pop_head()
+foreign_ptr<lw_shared_ptr<item>> list::pop_head()
 {
-    return item_ptr(_rep->pop_head());
+    return foreign_ptr<lw_shared_ptr<item>>(_rep->pop_head());
 }
 
-int list::add_tail(item* val)
+int list::add_tail(lw_shared_ptr<item> val)
 {
     return _rep->add_node_tail(val);
 }
 
-item_ptr list::pop_tail()
+foreign_ptr<lw_shared_ptr<item>> list::pop_tail()
 {
-    return item_ptr(_rep->pop_tail());
+    return foreign_ptr<lw_shared_ptr<item>>(_rep->pop_tail());
 }
 
-int list::set(long idx, item* value) {
+int list::set(long idx, lw_shared_ptr<item> value) {
     return _rep->set(idx, value);
 }
 
-int list::insert_after(const sstring& pivot, item *value)
+int list::insert_after(const sstring& pivot, lw_shared_ptr<item> value)
 {
     auto n = _rep->search_key(pivot);
     if (n == nullptr) {
@@ -122,7 +118,7 @@ int list::insert_after(const sstring& pivot, item *value)
     return _rep->insert_node(n, value, 1);
 }
 
-int list::insert_before(const sstring& pivot, item *value)
+int list::insert_before(const sstring& pivot, lw_shared_ptr<item> value)
 {
     auto n = _rep->search_key(pivot);
     if (n == nullptr) {
@@ -138,13 +134,13 @@ void list::remove(const sstring& target)
         _rep->del_node(n);
     }
 }
-std::vector<item_ptr> list::range(int start, int end)
+std::vector<foreign_ptr<lw_shared_ptr<item>>> list::range(int start, int end)
 {
     return _rep->range(start, end);
 }
-item_ptr list::index(long idx)
+foreign_ptr<lw_shared_ptr<item>> list::index(long idx)
 {
-    return item_ptr(_rep->index(idx));
+    return foreign_ptr<lw_shared_ptr<item>>(_rep->index(idx));
 }
 int list::trem(int count, sstring& value)
 {
@@ -218,13 +214,12 @@ list::rep::~rep()
     current = _head;
     while(_len--) {
         next = current->_next;
-        if (_free_value_fn != nullptr) _free_value_fn(current->_value);
         delete current;
         current = next;
     }
 }
 
-int list::rep::add_node_head(item *value)
+int list::rep::add_node_head(lw_shared_ptr<item> value)
 {
     list_node *node = new list_node();
 
@@ -242,7 +237,7 @@ int list::rep::add_node_head(item *value)
     return REDIS_OK;
 }
 
-int list::rep::add_node_tail(item *value)
+int list::rep::add_node_tail(lw_shared_ptr<item> value)
 {
     list_node *node = new list_node();
 
@@ -260,7 +255,7 @@ int list::rep::add_node_tail(item *value)
     return REDIS_OK;
 }
 
-int list::rep::insert_node(list_node *pivot, item *value, int after)
+int list::rep::insert_node(list_node *pivot, lw_shared_ptr<item> value, int after)
 {
     list_node *node = new list_node();
 
@@ -298,12 +293,11 @@ void list::rep::del_node(list_node *node)
         node->_next->_prev = node->_prev;
     else
         _tail = node->_prev;
-    if (_free_value_fn != nullptr) _free_value_fn(node->_value);
     delete node;
     _len--;
 }
 
-item* list::rep::remove_node(list_node *node)
+lw_shared_ptr<item> list::rep::remove_node(list_node *node)
 {
     if (node->_prev)
         node->_prev->_next = node->_next;
@@ -395,26 +389,26 @@ int list::rep::trem(int count, sstring& value)
     return removed;
 }
 
-std::vector<item_ptr> list::rep::range(int start, int end)
+std::vector<foreign_ptr<lw_shared_ptr<item>>> list::rep::range(int start, int end)
 {
     if (_len == 0) {
-        return std::move(std::vector<item_ptr>());
+        return std::move(std::vector<foreign_ptr<lw_shared_ptr<item>>>());
     }
     if (start < 0) { start += _len; }
     if (end < 0) { end += _len; }
     if (start < 0) start = 0;
     if (start > end) {
-        return std::move(std::vector<item_ptr>());
+        return std::move(std::vector<foreign_ptr<lw_shared_ptr<item>>>());
     }
     int count = end - start + 1;
     list_iterator iter(this, FROM_HEAD_TO_TAIL);
     iter.seek_to_first();
     while (start-- > 0) iter.next();
-    std::vector<item_ptr> result;
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> result;
     while (iter.status() == REDIS_OK && count-- > 0) {
         auto n = iter.value();
         if (n && n->_value)
-            result.emplace_back(item_ptr(n->_value));
+            result.emplace_back(foreign_ptr<lw_shared_ptr<item>>(n->_value));
         iter.next();
     }
     return std::move(result);
@@ -433,25 +427,25 @@ list_node* list::rep::search_key(const sstring& key)
     return nullptr;
 }
 
-item* list::rep::pop_head()
+lw_shared_ptr<item> list::rep::pop_head()
 {
-    item* n = nullptr;
+    lw_shared_ptr<item> n = nullptr;
     if (_head) {
         n = remove_node(_head);
     }
     return n;
 }
 
-item* list::rep::pop_tail()
+lw_shared_ptr<item> list::rep::pop_tail()
 {
-    item* n = nullptr;
+    lw_shared_ptr<item> n = nullptr;
     if (_tail) {
         n = remove_node(_tail);
     }
     return n;
 }
 
-int list::rep::set(long idx, item* value)
+int list::rep::set(long idx, lw_shared_ptr<item> value)
 {
     list_node *n;
 
@@ -468,13 +462,12 @@ int list::rep::set(long idx, item* value)
     if (n) {
         auto old = n->_value;
         n->_value = value;
-        if (_free_value_fn != nullptr) _free_value_fn(old);
         return REDIS_OK;
     }
     return REDIS_ERR;
 }
 
-item* list::rep::index(long idx)
+lw_shared_ptr<item> list::rep::index(long idx)
 {
     list_node *n;
 
