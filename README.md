@@ -1,6 +1,6 @@
 #Pedis (Parallel Redis)
 
-## What's Pedis?
+## What's Predis?
 
 NoSQL data store using the SEASTAR framework, compatible with REDIS.
 
@@ -11,7 +11,7 @@ For more infomation, see here: http://www.seastar-project.org/
 
 Now, the redis commands were supported as follow:
   * Key: DEL, EXISTS
-  * String: GET, SET, DECR, INCR, DECRBY, INCRBY, APPEND, STRLEN
+  * String: GET, SET, DECR, INCR, DECRBY, INCRBY, APPEND, STRLEN, MGET, MSET
   * List: LINDEX, LINSERT, LLEN, LPUSH, LPUSHX, LPOP, LRANGE, LREM, LTRIM, LSET, RPOP, RPUSH, RPUSHX
   * Hash: HSET, HDEL, HGET, HLEN, HSTRLEN, HMSET, HMGET, HKEYS, HVALS, HEXISTS, HINCRBY
   * SET: SADD, SMEMBERS, SISMEMBER, SREM, SDIFF, SDIFFSTORE, SINTER, SINTERSTORE, SUNION, SUNIONSTORE, SMOVE, SPOP

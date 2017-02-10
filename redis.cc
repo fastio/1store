@@ -139,23 +139,31 @@ future<int> redis_service::del(args_collection& args)
 future<int> redis_service::mset(args_collection& args)
 {
     if (args._command_args_count <= 1 || args._command_args.empty()) {
-        return make_ready_future<int>(0);
+        return make_ready_future<int>(-1);
     }
-    if ((args._command_args.size() - 1) % 2 != 0) {
-        return make_ready_future<int>(0);
+    if (args._command_args.size() % 2 != 0) {
+        return make_ready_future<int>(-1);
     }
-
-    size_t success_count = 0;
-    size_t pair_size = args._command_args.size() / 2;
-    return parallel_for_each(boost::irange<unsigned>(0, pair_size), [this, &args, &success_count] (unsigned i) {
-        sstring& key = args._command_args[i * 2];
-        sstring& val = args._command_args[i * 2 + 1];
-        return this->set_impl(key, val, 0, 0).then([this, &success_count] (auto r) {
-            if (r) success_count++;
+    struct mset_state {
+        std::vector<std::pair<sstring, sstring>> key_value_pairs;
+        size_t success_count;
+    };
+    std::vector<std::pair<sstring, sstring>> key_value_pairs;
+    auto pair_size = args._command_args.size() / 2;
+    for (size_t i = 0; i < pair_size; ++i) {
+        key_value_pairs.emplace_back(std::make_pair(std::move(args._command_args[i * 2]), std::move(args._command_args[i * 2 + 1])));
+    }
+    return do_with(mset_state{std::move(key_value_pairs), 0}, [this] (auto& state) {
+        return parallel_for_each(std::begin(state.key_value_pairs), std::end(state.key_value_pairs), [this, &state] (auto& entry) {
+            sstring& key = entry.first;
+            sstring& value = entry.second;
+            return this->set_impl(key, value, 0, 0).then([&state] (auto) {
+                state.success_count++ ;
+            });
+        }).then([&state] {
+            return make_ready_future<int>(state.key_value_pairs.size() == state.success_count ? 0 : 1);
         });
-    }).then([this, &success_count, pair_size] () {
-        return make_ready_future<int>(success_count == pair_size ? 1 : 0); 
-    });
+   });
 }
 
 future<item_ptr> redis_service::get_impl(sstring& key)
@@ -175,7 +183,27 @@ future<item_ptr> redis_service::get(args_collection& args)
 
 future<std::vector<item_ptr>> redis_service::mget(args_collection& args)
 {
-    return make_ready_future<std::vector<item_ptr>>(); 
+    if (args._command_args_count < 1) {
+        return make_ready_future<std::vector<item_ptr>>(); 
+    }
+    using item_vector = std::vector<item_ptr>;
+    struct mget_state {
+        item_vector items_set;
+        std::vector<sstring> keys;
+    };
+    std::vector<sstring> keys;
+    for (size_t i = 0; i < args._command_args.size(); ++i) {
+        keys.emplace_back(std::move(args._command_args[i]));
+    }
+    return do_with(mget_state{item_vector{}, std::move(keys)}, [this] (auto& state) {
+        return parallel_for_each(std::begin(state.keys), std::end(state.keys), [this, &state] (sstring& key) {
+            return this->get_impl(key).then([&state] (auto&& item) {
+                state.items_set.emplace_back(std::move(item));
+            });
+        }).then([&state] {
+            return make_ready_future<std::vector<item_ptr>>(std::move(state.items_set));
+       });
+   });
 }
 
 future<int> redis_service::strlen(args_collection& args)

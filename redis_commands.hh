@@ -137,27 +137,32 @@ private:
                 msg.append(msg_crlf);
             }
             if (value) {
-                msg.append(msg_batch_tag);
-                if (items[i]->type() == REDIS_RAW_UINT64 || items[i]->type() == REDIS_RAW_INT64) {
-                    std::string s = std::to_string(items[i]->int64());
-                    msg.append_static(std::to_string(s.size()).c_str());
-                    msg.append_static(msg_crlf);
-                    msg.append_static(s.c_str());
-                    msg.append_static(msg_crlf);
-                } else if (items[i]->type() == REDIS_RAW_ITEM || items[i]->type() == REDIS_RAW_STRING) {
-                    msg.append(std::move(to_sstring(items[i]->value_size())));
-                    msg.append(std::move(to_sstring(msg_crlf)));
-                    sstring v{items[i]->value().data(), items[i]->value().size()};
-                    msg.append(std::move(v));
-                    msg.append(msg_crlf);
-                } else if (items[i]->type() == REDIS_RAW_DOUBLE) {
-                    std::string s = std::to_string(items[i]->Double());
-                    msg.append_static(std::to_string(s.size()).c_str());
-                    msg.append_static(msg_crlf);
-                    msg.append_static(s.c_str());
-                    msg.append_static(msg_crlf);
-                } else {
-                    msg.append_static(msg_type_err);
+                if (!items[i]) {
+                    msg.append_static(msg_not_found);
+                }
+                else {
+                    msg.append(msg_batch_tag);
+                    if (items[i]->type() == REDIS_RAW_UINT64 || items[i]->type() == REDIS_RAW_INT64) {
+                        std::string s = std::to_string(items[i]->int64());
+                        msg.append_static(std::to_string(s.size()).c_str());
+                        msg.append_static(msg_crlf);
+                        msg.append_static(s.c_str());
+                        msg.append_static(msg_crlf);
+                    } else if (items[i]->type() == REDIS_RAW_ITEM || items[i]->type() == REDIS_RAW_STRING) {
+                        msg.append(std::move(to_sstring(items[i]->value_size())));
+                        msg.append(std::move(to_sstring(msg_crlf)));
+                        sstring v{items[i]->value().data(), items[i]->value().size()};
+                        msg.append(std::move(v));
+                        msg.append(msg_crlf);
+                    } else if (items[i]->type() == REDIS_RAW_DOUBLE) {
+                        std::string s = std::to_string(items[i]->Double());
+                        msg.append_static(std::to_string(s.size()).c_str());
+                        msg.append_static(msg_crlf);
+                        msg.append_static(s.c_str());
+                        msg.append_static(msg_crlf);
+                    } else {
+                        msg.append_static(msg_type_err);
+                    }
                 }
             }
         }
