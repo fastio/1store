@@ -40,9 +40,7 @@ redis_commands::redis_commands()
     });
     // PING 
     regist_handler("PING", [this] (args_collection& args, output_stream<char>& out) -> future<> {
-        return _redis->echo(args).then([this, &out] (sstring message) {
             return out.write(msg_pong);
-        });
     });
 
     // INCR
