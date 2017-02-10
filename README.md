@@ -1,6 +1,6 @@
 #Pedis (Parallel Redis)
 
-## What's Predis?
+## What's Pedis?
 
 NoSQL data store using the SEASTAR framework, compatible with REDIS.
 
