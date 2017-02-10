@@ -30,14 +30,14 @@
 namespace redis {
 class item;
 class dict_iterator;
-class dict : public object {
+class dict {
 private:
     friend class dict_iterator;
     struct rep;
     rep* _rep;
 public:
     dict();
-    virtual ~dict();
+    ~dict();
     int set(const redis_key& key, lw_shared_ptr<item> val);
     int exists(const redis_key& key);
     lw_shared_ptr<item> fetch_raw(const redis_key& key);

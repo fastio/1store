@@ -82,12 +82,6 @@ extern __thread redis_commands* _redis_commands_ptr;
 inline redis_commands* redis_commands_ptr() {
     return _redis_commands_ptr;
 }
-class object
-{
-public:
-    object() {}
-    virtual ~object() {}; 
-};
 
 using clock_type = lowres_clock;
 static constexpr clock_type::time_point never_expire_timepoint = clock_type::time_point(clock_type::duration::min());
@@ -152,6 +146,8 @@ struct redis_key {
 };
 
 // The defination of `item was copied from apps/memcached
+class list;
+class dict;
 class item {
 public:
     using time_point = expiration::time_point;
@@ -178,13 +174,7 @@ public:
     static lw_shared_ptr<item> create(Args&&... args) {
         return make_lw_shared<item>(std::forward<Args>(args)...);
     }
-    ~item()
-    {
-        if (_type == REDIS_LIST || _type == REDIS_DICT || _type == REDIS_SET || _type == REDIS_ZSET) {
-           delete ptr();
-        }
-        if (_appends) delete[] _appends;
-    }
+    ~item();
     item(const redis_key& key, sstring&& value)
         : _value_size(value.size())
         , _key_size(key.size())
@@ -298,14 +288,17 @@ public:
         }
     }
 
-    item(const redis_key& key, object* ptr, uint8_t type)
+    item(const redis_key& key, list* ptr, uint8_t type) : item(key, reinterpret_cast<uintptr_t>(ptr), type) {}
+    item(const redis_key& key, dict* ptr, uint8_t type) : item(key, reinterpret_cast<uintptr_t>(ptr), type) {}
+
+    item(const redis_key& key, uintptr_t ptr, uint8_t type)
         : _value_size(0)
         , _key_size(key.size())
         , _key_hash(key.hash())
         , _type(type)
         , _expire(0)
     {
-        _u._ptr = reinterpret_cast<uintptr_t>(ptr);
+        _u._ptr = ptr; //reinterpret_cast<uintptr_t>(ptr);
         size_t size = _key_size;
         _appends = new char[size];
         if (_key_size > 0) {
@@ -327,7 +320,8 @@ public:
     item(item&&) = delete;
 
 
-    inline object* ptr() { return reinterpret_cast<object*>(_u._ptr); }
+    inline list* list_ptr() { return reinterpret_cast<list*>(_u._ptr); }
+    inline dict* dict_ptr() { return reinterpret_cast<dict*>(_u._ptr); }
 
     inline uint64_t uint64() { return _u._uint64; }
     inline int64_t int64() { return _u._int64; }

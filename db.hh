@@ -48,7 +48,7 @@ public:
     ~db();
 
     template  <typename origin = local_origin_tag> inline
-    int set(sstring& key, sstring& val, long expire, uint32_t flag)
+    int set(const redis_key& key, sstring& val, long expire, uint32_t flag)
     {
         return _misc_storage.set<origin>(key, val, expire, flag);
     }

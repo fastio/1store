@@ -131,7 +131,7 @@ protected:
   {
       auto it = _store->fetch_raw(key);
       if (it && it->type() == REDIS_LIST) {
-          return static_cast<list*>(it->ptr());
+          return it->list_ptr();
       }
       return nullptr;
   }

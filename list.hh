@@ -32,14 +32,14 @@ namespace redis {
 class item;
 class list_iterator;
 
-class list : public object {
+class list {
 private:
     friend class list_iterator;
     struct rep;
     rep* _rep;
 public:
     list();
-    virtual ~list();
+    ~list();
     int add_head(lw_shared_ptr<item> val);
     int add_tail(lw_shared_ptr<item> val);
     foreign_ptr<lw_shared_ptr<item>> pop_head();

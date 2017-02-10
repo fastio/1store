@@ -165,7 +165,7 @@ protected:
     {
         auto it = _store->fetch_raw(key);
         if (it && it->type() == REDIS_SET) {
-            return static_cast<dict*>(it->ptr());
+            return it->dict_ptr();
         }
         return nullptr;
     }

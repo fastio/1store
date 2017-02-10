@@ -187,7 +187,7 @@ arg_parser.add_argument('--cflags', action = 'store', dest = 'user_cflags', defa
                         help = 'Extra flags for the C++ compiler')
 arg_parser.add_argument('--ldflags', action = 'store', dest = 'user_ldflags', default = '',
                         help = 'Extra flags for the linker')
-arg_parser.add_argument('--compiler', action = 'store', dest = 'cxx', default = 'g++',
+arg_parser.add_argument('--compiler', action = 'store', dest = 'cxx', default = '/usr/local/gcc-4.9.2/bin/g++',
                         help = 'C++ compiler path')
 arg_parser.add_argument('--with-osv', action = 'store', dest = 'with_osv', default = '',
                         help = 'Shortcut for compile for OSv')
@@ -308,6 +308,7 @@ deps = {
     'libseastar.a' : core + libnet + http + protobuf + prometheus,
     'seastar.pc': [],
     'pedis': [
+      'base.cc',
       'redis.cc',
       'dict.cc',
       'list.cc',

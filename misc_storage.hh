@@ -37,11 +37,10 @@ public:
 
     /** STRING API **/
     template <typename origin = local_origin_tag>
-    int set(sstring& key, sstring& val, long expire, uint32_t flag)
+    int set(const redis_key& rk, sstring& val, long expire, uint32_t flag)
     {
-        redis_key rk{key};
-        _store->remove(key);
-        auto new_item = item::create(key, origin::move_if_local(val));
+        _store->remove(rk);
+        auto new_item = item::create(rk, origin::move_if_local(val));
         return _store->set(rk, new_item);
     }
 
