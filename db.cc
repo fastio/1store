@@ -19,6 +19,7 @@
  *
  */
 #include "db.hh"
+#include "redis_commands.hh"
 namespace redis {
 
 static const sstring LIST { "list" };
@@ -26,6 +27,7 @@ static const sstring DICT { "dict" };
 static const sstring MISC { "misc" };
 static const sstring SET  { "set"  };
 
+__thread redis_commands* _redis_commands_ptr;
 
 db::db() : _store(new dict())
          , _misc_storage(MISC, _store)
@@ -33,12 +35,16 @@ db::db() : _store(new dict())
          , _dict_storage(DICT, _store)
          , _set_storage(SET, _store)
 {
+    _redis_commands_ptr = new redis_commands();
 }
 
 db::~db()
 {
     if (_store != nullptr) {
         delete _store;
+    }
+    if (_redis_commands_ptr) {
+        delete _redis_commands_ptr;
     }
 }
 
