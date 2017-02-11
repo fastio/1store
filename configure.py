@@ -159,7 +159,7 @@ modes = {
     'release': {
         'sanitize': '',
         'sanitize_libs': '',
-        'opt': '-O2',
+        'opt': '-g',
         'libs': '',
     },
 }
@@ -314,7 +314,6 @@ deps = {
       'list.cc',
       'sorted_set.cc',
       'main.cc',
-      'redis_commands.cc',
       'db.cc',
       'system_stats.cc',
       'redis_protocol_parser.rl',

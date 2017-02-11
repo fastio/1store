@@ -22,7 +22,6 @@
 #include "redis.hh"
 #include "db.hh"
 #include "redis.hh"
-#include "redis_commands.hh"
 #include "system_stats.hh"
 #include "redis_protocol.hh"
 namespace redis {
@@ -65,7 +64,6 @@ public:
         listen_options lo;
         lo.reuse_address = true;
         _listener = engine().listen(make_ipv4_address({_port}), lo);
-        redis_commands_ptr()->attach_redis(&_redis);
         keep_doing([this] {
                 return _listener->accept().then([this] (connected_socket fd, socket_address addr) mutable {
                     auto conn = make_lw_shared<connection>(std::move(fd), addr, _redis, _system_stats);
