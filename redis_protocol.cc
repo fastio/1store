@@ -349,6 +349,12 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                         this_type::append_item(msg, std::move(count));
                         return out.write(std::move(msg));
                     });
+                case redis_protocol_parser::command::type:
+                    return _redis.type(_command_args).then([&out] (int type) {
+                        scattered_message<char> msg;
+                        this_type::print_type(msg, type);
+                        return out.write(std::move(msg));
+                    });
                 default:
                     return out.write("+Not Implemented\r\n");
                 };

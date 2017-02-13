@@ -993,4 +993,17 @@ future<int> redis_service::smove(args_collection& args)
         });
    });
 }
+
+future<int> redis_service::type(args_collection& args)
+{
+    if (args._command_args_count <= 0 || args._command_args.empty()) {
+        return make_ready_future<int>(-1);
+    }
+    sstring& key = args._command_args[0];
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<int>(_db_peers.local().type(key));
+    }
+    return _db_peers.invoke_on(cpu, &db::type, std::ref(key));
+}
 } /* namespace redis */

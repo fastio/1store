@@ -126,6 +126,8 @@ public:
     future<std::vector<item_ptr>> sunion(args_collection& args);
     future<std::vector<item_ptr>> sunion_store(args_collection& args);
     future<int> smove(args_collection& args);
+
+    future<int> type(args_collection& args);
 private:
     future<int> srem_impl(sstring& key, sstring& member);
     future<int> sadd_impl(sstring& key, sstring& member);

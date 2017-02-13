@@ -235,6 +235,11 @@ public:
     {
         return _set_storage.sadd(key, member);
     }
+
+    int type(sstring& key)
+    {
+        return _misc_storage.type(key);
+    }
     future<> stop() { return make_ready_future<>(); }
 private:
     dict* _store;

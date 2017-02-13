@@ -129,7 +129,8 @@ sinterstore = "sinterstore"i ${_command = command::sinterstore;};
 sunion = "sunion"i ${_command = command::sunion;};
 sunionstore = "sunionstore"i ${_command = command::sunionstore;};
 smove = "smove"i ${_command = command::smove;};
-command = (set | get | del | mget | mset | echo | ping | incr | decr | incrby | decrby | command_ | exists | append | strlen | lpush | lpushx | lpop | llen | lindex | linsert | lrange | lset | rpush | rpushx | rpop | lrem | ltrim | hset | hget | hdel | hlen | hexists | hstrlen | hincrby | hincrbyfloat | hkeys | hvals | hmget | hgetall   | sadd | scard | sismember | smembers | srem | sdiff | sdiffstore | sinter | sinterstore | sunion | sunionstore | smove);
+type = "type"i ${_command = command::type; };
+command = (set | get | del | mget | mset | echo | ping | incr | decr | incrby | decrby | command_ | exists | append | strlen | lpush | lpushx | lpop | llen | lindex | linsert | lrange | lset | rpush | rpushx | rpop | lrem | ltrim | hset | hget | hdel | hlen | hexists | hstrlen | hincrby | hincrbyfloat | hkeys | hvals | hmget | hgetall   | sadd | scard | sismember | smembers | srem | sdiff | sdiffstore | sinter | sinterstore | sunion | sunionstore | smove | type);
 arg = '$' u32 crlf ${ _arg_size = _u32;};
 
 main := (args_count (arg (command) crlf) (arg @{fcall blob; } crlf)+) ${_state = state::ok;};
@@ -205,6 +206,7 @@ public:
         sunion,
         sunionstore,
         smove,
+        type,
     };
 
     state _state;

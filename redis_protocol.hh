@@ -107,54 +107,74 @@ protected:
         msg.append_static(msg_crlf);
     }
     template<bool key = false, bool value = true>
-        static void  append_multi_items(scattered_message<char>& msg, std::vector<item_ptr>&& items) {
-            msg.append(msg_sigle_tag);
-            if (key && value)
-                msg.append(std::move(to_sstring(items.size() * 2)));
-            else
-                msg.append(std::move(to_sstring(items.size())));
-            msg.append(std::move(to_sstring(msg_crlf)));
-            for (size_t i = 0; i < items.size(); ++i) {
-                if (key) {
-                    msg.append(msg_batch_tag);
-                    msg.append(std::move(to_sstring(items[i]->key_size())));
-                    msg.append(std::move(to_sstring(msg_crlf)));
-                    sstring v{items[i]->key().data(), items[i]->key().size()};
-                    msg.append(std::move(v));
-                    msg.append(msg_crlf);
+    static void  append_multi_items(scattered_message<char>& msg, std::vector<item_ptr>&& items) {
+        msg.append(msg_sigle_tag);
+        if (key && value)
+            msg.append(std::move(to_sstring(items.size() * 2)));
+        else
+            msg.append(std::move(to_sstring(items.size())));
+        msg.append(std::move(to_sstring(msg_crlf)));
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (key) {
+                msg.append(msg_batch_tag);
+                msg.append(std::move(to_sstring(items[i]->key_size())));
+                msg.append(std::move(to_sstring(msg_crlf)));
+                sstring v{items[i]->key().data(), items[i]->key().size()};
+                msg.append(std::move(v));
+                msg.append(msg_crlf);
+            }
+            if (value) {
+                if (!items[i]) {
+                    msg.append_static(msg_not_found);
                 }
-                if (value) {
-                    if (!items[i]) {
-                        msg.append_static(msg_not_found);
-                    }
-                    else {
-                        msg.append(msg_batch_tag);
-                        if (items[i]->type() == REDIS_RAW_UINT64 || items[i]->type() == REDIS_RAW_INT64) {
-                            std::string s = std::to_string(items[i]->int64());
-                            msg.append_static(std::to_string(s.size()).c_str());
-                            msg.append_static(msg_crlf);
-                            msg.append_static(s.c_str());
-                            msg.append_static(msg_crlf);
-                        } else if (items[i]->type() == REDIS_RAW_ITEM || items[i]->type() == REDIS_RAW_STRING) {
-                            msg.append(std::move(to_sstring(items[i]->value_size())));
-                            msg.append(std::move(to_sstring(msg_crlf)));
-                            sstring v{items[i]->value().data(), items[i]->value().size()};
-                            msg.append(std::move(v));
-                            msg.append(msg_crlf);
-                        } else if (items[i]->type() == REDIS_RAW_DOUBLE) {
-                            std::string s = std::to_string(items[i]->Double());
-                            msg.append_static(std::to_string(s.size()).c_str());
-                            msg.append_static(msg_crlf);
-                            msg.append_static(s.c_str());
-                            msg.append_static(msg_crlf);
-                        } else {
-                            msg.append_static(msg_type_err);
-                        }
+                else {
+                    msg.append(msg_batch_tag);
+                    if (items[i]->type() == REDIS_RAW_UINT64 || items[i]->type() == REDIS_RAW_INT64) {
+                        std::string s = std::to_string(items[i]->int64());
+                        msg.append_static(std::to_string(s.size()).c_str());
+                        msg.append_static(msg_crlf);
+                        msg.append_static(s.c_str());
+                        msg.append_static(msg_crlf);
+                    } else if (items[i]->type() == REDIS_RAW_ITEM || items[i]->type() == REDIS_RAW_STRING) {
+                        msg.append(std::move(to_sstring(items[i]->value_size())));
+                        msg.append(std::move(to_sstring(msg_crlf)));
+                        sstring v{items[i]->value().data(), items[i]->value().size()};
+                        msg.append(std::move(v));
+                        msg.append(msg_crlf);
+                    } else if (items[i]->type() == REDIS_RAW_DOUBLE) {
+                        std::string s = std::to_string(items[i]->Double());
+                        msg.append_static(std::to_string(s.size()).c_str());
+                        msg.append_static(msg_crlf);
+                        msg.append_static(s.c_str());
+                        msg.append_static(msg_crlf);
+                    } else {
+                        msg.append_static(msg_type_err);
                     }
                 }
             }
-            msg.on_delete([item = std::move(items)] {});
         }
+        msg.on_delete([item = std::move(items)] {});
+    }
+
+    static void  print_type(scattered_message<char>& msg, int c) {
+        if (c == static_cast<int>(REDIS_RAW_STRING)) {
+            msg.append_static(msg_type_string);
+        }
+        else if (c == static_cast<int>(REDIS_LIST)) {
+            msg.append_static(msg_type_list);
+        }
+        else if (c == static_cast<int>(REDIS_DICT)) {
+            msg.append_static(msg_type_hash);
+        }
+        else if (c == static_cast<int>(REDIS_SET)) {
+            msg.append_static(msg_type_set);
+        }
+        else if (c == static_cast<int>(REDIS_ZSET)) {
+            msg.append_static(msg_type_zset);
+        }
+        msg.append_static(msg_type_none);
+    }
+  
 public:
     redis_protocol(redis_service& redis);
     void prepare_request();

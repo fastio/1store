@@ -107,6 +107,16 @@ public:
         }
         return REDIS_OK;
     }
+
+    int type(sstring& key)
+    {
+        redis_key rk{key};
+        auto it = _store->fetch_raw(rk);
+        if (!it) {
+            return REDIS_ERR;
+        }
+        return static_cast<int>(it->type());
+    }
 protected:
     stats _stats;
 };
