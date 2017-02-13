@@ -158,8 +158,8 @@ private:
     uint32_t _key_size;
     size_t   _key_hash;
     uint8_t  _type;
-    long     _expire;
     expiration _expired;    
+    bi::list_member_hook<> _timer_link;
     union {
       uintptr_t  _ptr;
       uint64_t _uint64;
@@ -180,7 +180,6 @@ public:
         , _key_size(key.size())
         , _key_hash(key.hash())
         , _type(REDIS_RAW_STRING)
-        , _expire(0)
     {
         size_t size = align_up(_value_size, field_alignment) + _key_size;
         _appends = new char[size];
@@ -195,7 +194,6 @@ public:
         , _key_size(key.size())
         , _key_hash(key.hash())
         , _type(REDIS_RAW_STRING)
-        , _expire(0)
     {
         size_t size = align_up(_value_size, field_alignment) + _key_size;
         _appends = new char[size];
@@ -210,7 +208,6 @@ public:
         , _key_size(key.size())
         , _key_hash(key.hash())
         , _type(REDIS_RAW_ITEM)
-        , _expire(0)
     {
         size_t size = _key_size;
         _appends = new char[size];
@@ -223,7 +220,6 @@ public:
         , _key_size(key.size())
         , _key_hash(key.hash())
         , _type(REDIS_RAW_ITEM)
-        , _expire(0)
     {
         size_t size = _key_size;
         _appends = new char[size];
@@ -236,7 +232,6 @@ public:
         , _key_size(0)
         , _key_hash(0)
         , _type(REDIS_RAW_ITEM)
-        , _expire(0)
     {
         size_t size = _value_size;
         _appends = new char[size];
@@ -248,7 +243,6 @@ public:
         , _key_size(key.size())
         , _key_hash(key.hash())
         , _type(REDIS_RAW_UINT64)
-        , _expire(0)
     {
         _u._uint64 = value;
         size_t size = _key_size;
@@ -263,7 +257,6 @@ public:
         , _key_size(key.size())
         , _key_hash(key.hash())
         , _type(REDIS_RAW_DOUBLE)
-        , _expire(0)
     {
         _u._double = value;
         size_t size = _key_size;
@@ -278,7 +271,6 @@ public:
         , _key_size(key.size())
         , _key_hash(key.hash())
         , _type(REDIS_RAW_INT64)
-        , _expire(0)
     {
         _u._int64 = value;
         size_t size = _key_size;
@@ -296,7 +288,6 @@ public:
         , _key_size(key.size())
         , _key_hash(key.hash())
         , _type(type)
-        , _expire(0)
     {
         _u._ptr = ptr; //reinterpret_cast<uintptr_t>(ptr);
         size_t size = _key_size;
@@ -307,6 +298,10 @@ public:
     }
 
 public:
+    clock_type::time_point get_timeout() {
+        return _expired.to_time_point();
+    }
+    inline bool cancel() const { return false; }
     const std::experimental::string_view key() const {
         return std::experimental::string_view(_appends + align_up(_value_size, field_alignment), _key_size);
     }
@@ -316,6 +311,7 @@ public:
     const std::experimental::string_view value() const {
         return std::experimental::string_view(_appends, _value_size);
     }
+
     item(const item&) = delete;
     item(item&&) = delete;
 

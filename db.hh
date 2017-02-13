@@ -28,6 +28,7 @@
 #include <boost/intrusive_ptr.hpp>
 #include <boost/lexical_cast.hpp>
 #include "core/shared_ptr.hh"
+#include "core/timer-set.hh"
 #include "core/sharded.hh"
 #include "base.hh"
 #include "dict.hh"
@@ -242,7 +243,24 @@ public:
     }
     future<> stop() { return make_ready_future<>(); }
 private:
+    void expired_items()
+    {
+        using namespace std::chrono;
+        _wc_to_clock_type_delta = duration_cast<clock_type::duration>(clock_type::now().time_since_epoch() - system_clock::now().time_since_epoch());
+        auto exp = _alive.expire(clock_type::now());
+        while (!exp.empty()) {
+            auto item = &*exp.begin();
+            exp.pop_front();
+            // release expired item
+            _store->remove(item);
+        }
+        _timer.arm(_alive.get_next_timeout());
+    }
+private:
     dict* _store;
+    seastar::timer_set<item, &item::_timer_link> _alive;
+    timer<clock_type> _timer;
+    clock_type::duration _wc_to_clock_type_delta;
     misc_storage _misc_storage;
     list_storage _list_storage;
     dict_storage _dict_storage;
