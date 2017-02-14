@@ -1006,4 +1006,72 @@ future<int> redis_service::type(args_collection& args)
     }
     return _db_peers.invoke_on(cpu, &db::type, std::ref(key));
 }
+
+future<int> redis_service::expire(args_collection& args)
+{
+    if (args._command_args_count <= 1 || args._command_args.empty()) {
+        return make_ready_future<int>(0);
+    }
+    sstring& key = args._command_args[0];
+    long expir = std::atol(args._command_args[1].c_str());
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<int>(_db_peers.local().expire(key, expir * 1000));
+    }
+    return _db_peers.invoke_on(cpu, &db::expire, std::ref(key), expir);
+}
+
+future<int> redis_service::pexpire(args_collection& args)
+{
+    if (args._command_args_count <= 1 || args._command_args.empty()) {
+        return make_ready_future<int>(0);
+    }
+    sstring& key = args._command_args[0];
+    long expir = std::atol(args._command_args[1].c_str());
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<int>(_db_peers.local().expire(key, expir));
+    }
+    return _db_peers.invoke_on(cpu, &db::expire, std::ref(key), expir);
+}
+
+future<long> redis_service::pttl(args_collection& args)
+{
+    if (args._command_args_count <= 1 || args._command_args.empty()) {
+        return make_ready_future<long>(-2);
+    }
+    sstring& key = args._command_args[0];
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<long>(_db_peers.local().pttl(key));
+    }
+    return _db_peers.invoke_on(cpu, &db::pttl, std::ref(key));
+}
+
+future<long> redis_service::ttl(args_collection& args)
+{
+    if (args._command_args_count <= 1 || args._command_args.empty()) {
+        return make_ready_future<long>(-2);
+    }
+    sstring& key = args._command_args[0];
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<long>(_db_peers.local().ttl(key));
+    }
+    return _db_peers.invoke_on(cpu, &db::ttl, std::ref(key));
+}
+
+future<int> redis_service::persist(args_collection& args)
+{
+    if (args._command_args_count <= 1 || args._command_args.empty()) {
+        return make_ready_future<int>(0);
+    }
+    sstring& key = args._command_args[0];
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<int>(_db_peers.local().persist(key));
+    }
+    return _db_peers.invoke_on(cpu, &db::persist, std::ref(key));
+}
+
 } /* namespace redis */

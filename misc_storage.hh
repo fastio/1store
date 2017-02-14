@@ -98,14 +98,13 @@ public:
         return 0;
     }
 
-    int expire(sstring& key, long expired)
+    lw_shared_ptr<item> fetch_item(sstring& key)
     {
         redis_key rk{key};
         auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return REDIS_ERR;
+        if (it) {
         }
-        return REDIS_OK;
+        return it;
     }
 
     int type(sstring& key)
@@ -116,6 +115,20 @@ public:
             return REDIS_ERR;
         }
         return static_cast<int>(it->type());
+    }
+
+    long ttl(sstring& key)
+    {
+        redis_key rk{key};
+        auto it = _store->fetch_raw(rk);
+        if (!it) {
+            return -2;
+        }
+        if (it->ever_expires() == false) {
+            return -1;
+        }
+        auto duration = it->get_timeout() - clock_type::now(); 
+        return static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(duration).count()); 
     }
 protected:
     stats _stats;

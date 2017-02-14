@@ -128,6 +128,11 @@ public:
     future<int> smove(args_collection& args);
 
     future<int> type(args_collection& args);
+    future<int> expire(args_collection& args);
+    future<int> persist(args_collection& args);
+    future<int> pexpire(args_collection& args);
+    future<long> ttl(args_collection& args);
+    future<long> pttl(args_collection& args);
 private:
     future<int> srem_impl(sstring& key, sstring& member);
     future<int> sadd_impl(sstring& key, sstring& member);

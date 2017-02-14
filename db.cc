@@ -34,7 +34,6 @@ db::db() : _store(new dict())
          , _set_storage(SET, _store)
 {
     using namespace std::chrono;
-    _wc_to_clock_type_delta = duration_cast<clock_type::duration>(clock_type::now().time_since_epoch() - system_clock::now().time_since_epoch());
     _timer.set_callback([this] { expired_items(); });
 }
 

@@ -43,7 +43,7 @@ public:
     lw_shared_ptr<item> fetch_raw(const redis_key& key);
     int replace(const redis_key& key, lw_shared_ptr<item> val);
     int remove(const redis_key& key);
-    int remove(item* item) { return 0; }
+    int expired(lw_shared_ptr<item> item);
     size_t size();
     foreign_ptr<lw_shared_ptr<item>> fetch(const redis_key& key);
     foreign_ptr<lw_shared_ptr<item>> random_fetch_and_remove() { return nullptr; }

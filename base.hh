@@ -90,32 +90,32 @@ static constexpr clock_type::time_point never_expire_timepoint = clock_type::tim
 struct expiration {
     using time_point = clock_type::time_point;
     using duration   = time_point::duration;
-
-    static constexpr uint32_t seconds_in_a_month = 60U * 60 * 24 * 30;
     time_point _time = never_expire_timepoint;
 
     expiration() {}
 
-    expiration(clock_type::duration wc_to_clock_type_delta, uint32_t s) {
+    expiration(long s) {
         using namespace std::chrono;
 
         static_assert(sizeof(clock_type::duration::rep) >= 8, "clock_type::duration::rep must be at least 8 bytes wide");
 
         if (s == 0U) {
             return; // means never expire.
-        } else if (s <= seconds_in_a_month) {
-            _time = clock_type::now() + seconds(s); // from delta
         } else {
-            _time = time_point(seconds(s) + wc_to_clock_type_delta); // from real time
+            _time = clock_type::now() + milliseconds(s);
         }
     }
 
-    bool ever_expires() {
+    inline bool ever_expires() {
         return _time != never_expire_timepoint;
     }
 
-    time_point to_time_point() {
+    inline time_point to_time_point() {
         return _time;
+    }
+
+    inline void set_never_expired() {
+        _time = never_expire_timepoint;
     }
 };
 
@@ -158,7 +158,8 @@ private:
     uint32_t _key_size;
     size_t   _key_hash;
     uint8_t  _type;
-    expiration _expired;    
+    uint8_t _volatile = false;
+    expiration _expired;
     bi::list_member_hook<> _timer_link;
     union {
       uintptr_t  _ptr;
@@ -298,10 +299,24 @@ public:
     }
 
 public:
+    inline bool ever_expires() {
+        return _expired.ever_expires();
+    }
+
+    inline void set_never_expired() {
+        return _expired.set_never_expired();
+    }
+
+    inline void set_expiry(const expiration& expiry) {
+        _expired = expiry;
+    }
+
     clock_type::time_point get_timeout() {
         return _expired.to_time_point();
     }
+
     inline bool cancel() const { return false; }
+
     const std::experimental::string_view key() const {
         return std::experimental::string_view(_appends + align_up(_value_size, field_alignment), _key_size);
     }

@@ -355,6 +355,36 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                         this_type::print_type(msg, type);
                         return out.write(std::move(msg));
                     });
+                case redis_protocol_parser::command::expire:
+                    return _redis.expire(_command_args).then([&out] (int count) {
+                        scattered_message<char> msg;
+                        this_type::append_item(msg, std::move(count));
+                        return out.write(std::move(msg));
+                    });
+                case redis_protocol_parser::command::pexpire:
+                    return _redis.pexpire(_command_args).then([&out] (int count) {
+                        scattered_message<char> msg;
+                        this_type::append_item(msg, std::move(count));
+                        return out.write(std::move(msg));
+                    });
+                case redis_protocol_parser::command::ttl:
+                    return _redis.ttl(_command_args).then([&out] (long count) {
+                        scattered_message<char> msg;
+                        this_type::append_item(msg, std::move(count));
+                        return out.write(std::move(msg));
+                    });
+                case redis_protocol_parser::command::pttl:
+                    return _redis.pttl(_command_args).then([&out] (long count) {
+                        scattered_message<char> msg;
+                        this_type::append_item(msg, std::move(count));
+                        return out.write(std::move(msg));
+                    });
+                case redis_protocol_parser::command::persist:
+                    return _redis.persist(_command_args).then([&out] (int count) {
+                        scattered_message<char> msg;
+                        this_type::append_item(msg, std::move(count));
+                        return out.write(std::move(msg));
+                    });
                 default:
                     return out.write("+Not Implemented\r\n");
                 };

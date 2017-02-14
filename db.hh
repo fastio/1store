@@ -28,7 +28,6 @@
 #include <boost/intrusive_ptr.hpp>
 #include <boost/lexical_cast.hpp>
 #include "core/shared_ptr.hh"
-#include "core/timer-set.hh"
 #include "core/sharded.hh"
 #include "base.hh"
 #include "dict.hh"
@@ -37,11 +36,11 @@
 #include "list_storage.hh"
 #include "dict_storage.hh"
 #include "set_storage.hh"
+#include "redis_timer_set.hh"
 namespace redis {
 
 namespace stdx = std::experimental;
 using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
-
 
 class db {
 public:
@@ -88,7 +87,27 @@ public:
 
     inline int expire(sstring& key, long expired)
     {
-        return _misc_storage.expire(key, expired);
+        auto expiry = expiration(expired);
+        auto item = _misc_storage.fetch_item(key);
+        if (item) {
+            item->set_expiry(expiry);
+            if (_alive.insert(item)) {
+                _timer.rearm(item->get_timeout());
+                return 1;
+            }
+            item->set_never_expired();
+        }
+        return 0;
+    }
+
+    inline int persist(sstring& key)
+    {
+        auto item = _misc_storage.fetch_item(key);
+        if (item) {
+            item->set_never_expired();
+            return 1;
+        }
+        return 0;
     }
 
     
@@ -241,26 +260,43 @@ public:
     {
         return _misc_storage.type(key);
     }
+
+    long ttl(sstring& key)
+    {
+        auto ttl_milliseconds = _misc_storage.ttl(key);
+        if (ttl_milliseconds > 0) {
+            // convert to seconds
+            return ttl_milliseconds / 1000;
+        }
+        return ttl_milliseconds;
+    }
+
+    long pttl(sstring& key)
+    {
+        return _misc_storage.ttl(key);
+    }
+
     future<> stop() { return make_ready_future<>(); }
 private:
     void expired_items()
     {
         using namespace std::chrono;
-        _wc_to_clock_type_delta = duration_cast<clock_type::duration>(clock_type::now().time_since_epoch() - system_clock::now().time_since_epoch());
         auto exp = _alive.expire(clock_type::now());
+        std::cout << "timer size: " << exp.size() << "\n";
         while (!exp.empty()) {
-            auto item = &*exp.begin();
+            auto it = *exp.begin();
             exp.pop_front();
             // release expired item
-            _store->remove(item);
+            if (it && it->ever_expires()) { 
+                _store->expired(it);
+            }
         }
         _timer.arm(_alive.get_next_timeout());
     }
 private:
     dict* _store;
-    seastar::timer_set<item, &item::_timer_link> _alive;
+    timer_set<item> _alive;
     timer<clock_type> _timer;
-    clock_type::duration _wc_to_clock_type_delta;
     misc_storage _misc_storage;
     list_storage _list_storage;
     dict_storage _dict_storage;

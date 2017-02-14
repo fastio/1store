@@ -96,6 +96,11 @@ protected:
         msg.append_static(std::to_string(c).c_str());
         msg.append_static(msg_crlf);
     }
+    static void  append_item(scattered_message<char>& msg, long c) {
+        msg.append_static(msg_num_tag);
+        msg.append_static(std::to_string(c).c_str());
+        msg.append_static(msg_crlf);
+    }
     static void  append_item(scattered_message<char>& msg, double c) {
         msg.append_static(msg_num_tag);
         msg.append_static(std::to_string(c));

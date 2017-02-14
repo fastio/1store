@@ -70,6 +70,7 @@ struct dict::rep
     int add(const redis_key& key, lw_shared_ptr<item> val);
     int replace(const redis_key& key, lw_shared_ptr<item> val);
     int remove(const redis_key& key);
+    int expired(lw_shared_ptr<item> item);
 
 
     dict_node *add_raw(const redis_key& key);
@@ -85,20 +86,20 @@ struct dict::rep
     int do_rehash(int n);
     unsigned long dict_next_size(unsigned long size);
     void do_rehash_step();
-    int generic_delete(const redis_key& key, int nofree);
+    int generic_delete(const redis_key& key);
     int clear(dict_hash_table *ht);
     size_t size();
     std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch();
     std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch(const std::unordered_set<sstring>& keys);
 private:
     static const int DICT_HT_INITAL_SIZE = 4;
-    inline bool key_equal(std::experimental::string_view& k, const sstring& key) {
+    inline bool key_equal(const std::experimental::string_view& k, const sstring& key) {
         if (k.size() != key.size()) {
           return false;
         }
         return memcmp(k.data(), key.data(), k.size()) == 0;
     }
-    inline bool key_equal(std::experimental::string_view& k, size_t kh, lw_shared_ptr<item> val) {
+    inline bool key_equal(const std::experimental::string_view& k, size_t kh, lw_shared_ptr<item> val) {
         if (!val) {
             return false;
         }
@@ -369,7 +370,40 @@ dict_node* dict::rep::replace_raw(const redis_key& key)
     return entry ? entry : add_raw(key);
 }
 
-int dict::rep::generic_delete(const redis_key& key, int nofree)
+int dict::rep::expired(lw_shared_ptr<item> key)
+{
+    if (!key) return REDIS_ERR;
+
+    unsigned int h, idx;
+    dict_node *he, *prevHe;
+    int table;
+
+    if (_ht[0]._size == 0) return REDIS_ERR;
+    if (dict_is_rehashing()) do_rehash_step();
+    h = key->key_hash();
+
+    for (table = 0; table <= 1; table++) {
+        idx = h & _ht[table]._size_mask;
+        he = _ht[table]._table[idx];
+        prevHe = nullptr;
+        while(he) {
+            if (key_equal(key->key(), key->key_hash(), he->_val)) {
+                if (prevHe)
+                    prevHe->_next = he->_next;
+                else
+                    _ht[table]._table[idx] = he->_next;
+                delete he;
+                _ht[table]._used--;
+                return REDIS_OK;
+            }
+            prevHe = he;
+            he = he->_next;
+        }
+        if (!dict_is_rehashing()) break;
+    }
+    return REDIS_ERR;
+}
+int dict::rep::generic_delete(const redis_key& key)
 {
     unsigned int h, idx;
     dict_node *he, *prevHe;
@@ -389,9 +423,6 @@ int dict::rep::generic_delete(const redis_key& key, int nofree)
                     prevHe->_next = he->_next;
                 else
                     _ht[table]._table[idx] = he->_next;
-                if (!nofree) {
-                    if (_free_value_fn != nullptr) _free_value_fn(he->_val);
-                }
                 delete he;
                 _ht[table]._used--;
                 return REDIS_OK;
@@ -405,11 +436,11 @@ int dict::rep::generic_delete(const redis_key& key, int nofree)
 }
 
 int dict::rep::remove(const redis_key& key) {
-    return generic_delete(key, 0);
+    return generic_delete(key);
 }
 
 int dict::rep::remove_no_free(const redis_key& key) {
-    return generic_delete(key, 1);
+    return generic_delete(key);
 }
 
 std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::rep::fetch(const std::unordered_set<sstring>& keys)
@@ -609,6 +640,11 @@ std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::fetch(const std::unordered_s
 std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::fetch()
 {
   return _rep->fetch();
+}
+
+int dict::expired(lw_shared_ptr<item> item)
+{
+    return _rep->expired(item);
 }
 
 } /* namespace redis*/
