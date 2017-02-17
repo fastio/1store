@@ -150,6 +150,7 @@ int list::trim(int start, int stop)
 {
     return _rep->trim(start, stop);
 }
+
 enum
 {
     FROM_HEAD_TO_TAIL = 0,

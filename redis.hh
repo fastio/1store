@@ -133,6 +133,31 @@ public:
     future<int> pexpire(args_collection& args);
     future<long> ttl(args_collection& args);
     future<long> pttl(args_collection& args);
+
+    // [ZSET]
+    future<int> zadd(args_collection& args);
+    future<size_t> zcard(args_collection& args);
+    future<std::pair<std::vector<item_ptr>, bool>> zrange(args_collection&);
+    future<int> zcount(args_collection& args);
+    future<int> zincrby(args_collection& args);
+    future<std::vector<item_ptr>> zrangebyscore(args_collection&);
+    future<long> zrank(args_collection&);
+    future<int> zrem(args_collection&);
+    future<int> zremrangebyrank(args_collection&);
+    future<int> zremrangebyscore(args_collection&);
+    future<std::vector<item_ptr>> zrevrange(args_collection&);
+    future<std::vector<item_ptr>> zrevrangebyscore(args_collection&);
+    future<int> zrevrank(args_collection&);
+    future<double> zscore(args_collection&);
+    future<int> zunionstore(args_collection&);
+    future<int> zinterstore(args_collection&);
+    future<int> zdiffstore(args_collection&);
+    future<std::vector<item_ptr>> zunion(args_collection&);
+    future<std::vector<item_ptr>> zinter(args_collection&);
+    future<std::vector<item_ptr>> zdiff(args_collection&);
+    future<std::vector<item_ptr>> zrangebylex(args_collection&);
+    future<int> zlexcount(args_collection&);
+    future<std::vector<item_ptr>> zrevrangebylex(args_collection&);
 private:
     future<int> srem_impl(sstring& key, sstring& member);
     future<int> sadd_impl(sstring& key, sstring& member);

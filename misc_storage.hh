@@ -101,10 +101,7 @@ public:
     lw_shared_ptr<item> fetch_item(sstring& key)
     {
         redis_key rk{key};
-        auto it = _store->fetch_raw(rk);
-        if (it) {
-        }
-        return it;
+        return _store->fetch_raw(rk);
     }
 
     int type(sstring& key)

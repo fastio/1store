@@ -25,6 +25,7 @@ static const sstring LIST { "list" };
 static const sstring DICT { "dict" };
 static const sstring MISC { "misc" };
 static const sstring SET  { "set"  };
+static const sstring ZSET  { "zset"  };
 
 
 db::db() : _store(new dict())
@@ -32,6 +33,7 @@ db::db() : _store(new dict())
          , _list_storage(LIST, _store)
          , _dict_storage(DICT, _store)
          , _set_storage(SET, _store)
+         , _zset_storage(ZSET, _store)
 {
     using namespace std::chrono;
     _timer.set_callback([this] { expired_items(); });

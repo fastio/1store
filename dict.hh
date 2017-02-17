@@ -40,6 +40,7 @@ public:
     ~dict();
     int set(const redis_key& key, lw_shared_ptr<item> val);
     int exists(const redis_key& key);
+    int exists(lw_shared_ptr<item> key);
     lw_shared_ptr<item> fetch_raw(const redis_key& key);
     int replace(const redis_key& key, lw_shared_ptr<item> val);
     int remove(const redis_key& key);

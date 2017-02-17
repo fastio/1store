@@ -36,6 +36,7 @@
 #include "list_storage.hh"
 #include "dict_storage.hh"
 #include "set_storage.hh"
+#include "sorted_set_storage.hh"
 #include "redis_timer_set.hh"
 namespace redis {
 
@@ -261,28 +262,56 @@ public:
         return _misc_storage.type(key);
     }
 
-    long ttl(sstring& key)
-    {
-        auto ttl_milliseconds = _misc_storage.ttl(key);
-        if (ttl_milliseconds > 0) {
-            // convert to seconds
-            return ttl_milliseconds / 1000;
-        }
-        return ttl_milliseconds;
-    }
-
     long pttl(sstring& key)
     {
-        return _misc_storage.ttl(key);
+        auto item = _misc_storage.get(key);
+        if (item) {
+            if (item->ever_expires() == false) {
+                return -1;
+            }
+            auto duration = item->get_timeout() - clock_type::now(); 
+            return static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(duration).count()); 
+        }
+        else {
+            return -2;
+        }
     }
 
+    long ttl(sstring& key)
+    {
+        auto ret = pttl(key);
+        if (ret > 0) {
+            return ret / 1000;
+        }
+        return ret;
+    }
+
+    template <typename origin = local_origin_tag> inline
+    int zadds(sstring& key, std::unordered_map<sstring, double>& members)
+    {
+        return _zset_storage.zadds<origin>(key, members);
+    }
+
+    template <typename origin = local_origin_tag> inline
+    int zadd(sstring& key, sstring& member, double score)
+    {
+        return _zset_storage.zadd<origin>(key, member, score);
+    }
+   
+    size_t zcard(sstring& key) 
+    {
+        return _zset_storage.zcard(key);
+    }
+    std::vector<item_ptr> zrange(sstring& key, size_t begin, size_t end)
+    {
+        return _zset_storage.zrange(key, begin, end);
+    }
     future<> stop() { return make_ready_future<>(); }
 private:
     void expired_items()
     {
         using namespace std::chrono;
         auto exp = _alive.expire(clock_type::now());
-        std::cout << "timer size: " << exp.size() << "\n";
         while (!exp.empty()) {
             auto it = *exp.begin();
             exp.pop_front();
@@ -301,5 +330,6 @@ private:
     list_storage _list_storage;
     dict_storage _dict_storage;
     set_storage  _set_storage;
+    sorted_set_storage  _zset_storage;
 };
 }

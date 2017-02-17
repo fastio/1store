@@ -385,6 +385,33 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                         this_type::append_item(msg, std::move(count));
                         return out.write(std::move(msg));
                     });
+                    /*
+                case redis_protocol_parser::command::zadd:
+                    return _redis.zadd(_command_args).then([&out] (int count) {
+                        scattered_message<char> msg;
+                        this_type::append_item(msg, std::move(count));
+                        return out.write(std::move(msg));
+                    });
+                case redis_protocol_parser::command::zrange:
+                    return _redis.zrange(_command_args).then([&out] (std::pair<std::vector<item_ptr>, bool>&& result) {
+                        auto& items = result.first;
+                        bool with_score = result.second;
+                        scattered_message<char> msg;
+                        if (with_score) {
+                            this_type::append_multi_items<true, true>(msg, std::move(items));
+                        }
+                        else {
+                            this_type::append_multi_items<true, false>(msg, std::move(items));
+                        }
+                        return out.write(std::move(msg));
+                    });
+                case redis_protocol_parser::command::zcard:
+                    return _redis.zcard(_command_args).then([&out] (int count) {
+                        scattered_message<char> msg;
+                        this_type::append_item(msg, std::move(count));
+                        return out.write(std::move(msg));
+                    });
+*/
                 default:
                     return out.write("+Not Implemented\r\n");
                 };

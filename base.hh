@@ -148,6 +148,7 @@ struct redis_key {
 // The defination of `item was copied from apps/memcached
 class list;
 class dict;
+class sorted_set;
 class item {
 public:
     using time_point = expiration::time_point;
@@ -283,6 +284,7 @@ public:
 
     item(const redis_key& key, list* ptr, uint8_t type) : item(key, reinterpret_cast<uintptr_t>(ptr), type) {}
     item(const redis_key& key, dict* ptr, uint8_t type) : item(key, reinterpret_cast<uintptr_t>(ptr), type) {}
+    item(const redis_key& key, sorted_set* ptr, uint8_t type) : item(key, reinterpret_cast<uintptr_t>(ptr), type) {}
 
     item(const redis_key& key, uintptr_t ptr, uint8_t type)
         : _value_size(0)
@@ -333,6 +335,7 @@ public:
 
     inline list* list_ptr() { return reinterpret_cast<list*>(_u._ptr); }
     inline dict* dict_ptr() { return reinterpret_cast<dict*>(_u._ptr); }
+    inline sorted_set* zset_ptr() { return reinterpret_cast<sorted_set*>(_u._ptr); }
 
     inline uint64_t uint64() { return _u._uint64; }
     inline int64_t int64() { return _u._int64; }
