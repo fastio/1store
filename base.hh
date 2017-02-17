@@ -339,7 +339,7 @@ public:
 
     inline uint64_t uint64() { return _u._uint64; }
     inline int64_t int64() { return _u._int64; }
-    inline int64_t Double() { return _u._double; }
+    inline double Double() { return _u._double; }
 
     inline uint64_t incr(uint64_t step) {
         _u._uint64 += step;
@@ -374,7 +374,6 @@ static const sstring msg_nokey_err = {"-ERR no such key\r\n"};
 static const sstring msg_syntax_err = {"-ERR syntax error\r\n"};
 static const sstring msg_same_object_err = {"-ERR source and destination objects are the same\r\n"};
 static const sstring msg_out_of_range_err = {"-ERR index out of range\r\n"};
-
 static const sstring msg_str_tag = {"+"};
 static const sstring msg_num_tag = {":"};
 static const sstring msg_sigle_tag = {"*"};

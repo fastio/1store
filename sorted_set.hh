@@ -19,6 +19,9 @@ public:
     bool exists(const redis_key& key) { return false; }
     int insert(const redis_key& key, lw_shared_ptr<item> item);
     size_t size();
-    std::vector<item_ptr> range(size_t begin, size_t end);
+    size_t count(double min, double max);
+    double incrby(const redis_key& key, double delta);
+    std::vector<item_ptr> range_by_rank(size_t begin, size_t end, bool reverse);
+    std::vector<item_ptr> range_by_score(double min, double max, bool reverse);
 };
 }

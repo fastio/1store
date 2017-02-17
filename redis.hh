@@ -137,16 +137,15 @@ public:
     // [ZSET]
     future<int> zadd(args_collection& args);
     future<size_t> zcard(args_collection& args);
-    future<std::pair<std::vector<item_ptr>, bool>> zrange(args_collection&);
-    future<int> zcount(args_collection& args);
-    future<int> zincrby(args_collection& args);
-    future<std::vector<item_ptr>> zrangebyscore(args_collection&);
+    future<std::pair<std::vector<item_ptr>, bool>> zrange(args_collection&, bool);
+    future<std::pair<std::vector<item_ptr>, bool>> zrangebyscore(args_collection&, bool);
+    future<size_t> zcount(args_collection& args);
+    future<std::pair<double, bool>> zincrby(args_collection& args);
     future<long> zrank(args_collection&);
     future<int> zrem(args_collection&);
     future<int> zremrangebyrank(args_collection&);
     future<int> zremrangebyscore(args_collection&);
     future<std::vector<item_ptr>> zrevrange(args_collection&);
-    future<std::vector<item_ptr>> zrevrangebyscore(args_collection&);
     future<int> zrevrank(args_collection&);
     future<double> zscore(args_collection&);
     future<int> zunionstore(args_collection&);

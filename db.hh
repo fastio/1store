@@ -297,14 +297,25 @@ public:
     {
         return _zset_storage.zadd<origin>(key, member, score);
     }
-   
     size_t zcard(sstring& key) 
     {
         return _zset_storage.zcard(key);
     }
-    std::vector<item_ptr> zrange(sstring& key, size_t begin, size_t end)
+    size_t zcount(sstring& key, double min, double max)
     {
-        return _zset_storage.zrange(key, begin, end);
+        return _zset_storage.zcount(key, min, max);
+    }
+    std::pair<double, bool> zincrby(sstring& key, sstring& member, double delta)
+    {
+        return _zset_storage.zincrby(key, member, delta);
+    }
+    std::vector<item_ptr> zrange(sstring& key, size_t begin, size_t end, bool reverse)
+    {
+        return _zset_storage.zrange(key, begin, end, reverse);
+    }
+    std::vector<item_ptr> zrangebyscore(sstring& key, double min, double max, bool reverse)
+    {
+        return _zset_storage.zrangebyscore(key, min, max, reverse);
     }
     future<> stop() { return make_ready_future<>(); }
 private:

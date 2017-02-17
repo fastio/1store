@@ -26,6 +26,8 @@ struct skiplist_node
 
 struct range
 {
+    range(double min, bool minx, double max, bool maxe) : _min(min), _max(max), _min_exclusive(minx), _max_exclusive(maxe) {}
+    range(double min, double max) : range(min, true, max, true) {}
     double _min;
     double _max;
     bool   _min_exclusive;
@@ -42,20 +44,23 @@ class skiplist
 private:
     skiplist_node* _head;
     skiplist_node* _tail;
-    size_t _size;
     unsigned int _level;
+    size_t _size;
     static const unsigned int MAX_LEVEL = 32;
 public:
+    skiplist();
+    ~skiplist();
     unsigned int random_level();
     skiplist_node* create_skiplist_node(unsigned int level, double score, lw_shared_ptr<item> value);
     skiplist_node* insert(double score, lw_shared_ptr<item> value);
     void remove_node(skiplist_node* x, skiplist_node** update);
-    int remove(lw_shared_ptr<item> value, double score, skiplist_node** node);
-    bool is_in_range(const range& r);
+    int remove_item(lw_shared_ptr<item> value, skiplist_node** node);
+    bool include_range(const range& r);
     skiplist_node* find_first_of_range(const range& r);
     skiplist_node* find_last_of_range(const range& r);
     skiplist_node* find_by_rank(size_t r);
-    size_t get_rank(double score, lw_shared_ptr<item> value);
+    size_t get_rank_of_item(lw_shared_ptr<item> value);
+    size_t get_rank_of_node(skiplist_node* n);
     int item_compare(lw_shared_ptr<item> l, lw_shared_ptr<item> r);
     size_t size() { return _size; }
 };
@@ -98,6 +103,9 @@ public:
     }
     void seek(const sstring& key) {
     }
+    void seek(size_t rank) {
+        _next = _rep->find_by_rank(rank);
+    }
     void next() {
         if (_next != nullptr)
             _next = _direction == FROM_HEAD_TO_TAIL ? _next->_next[0]._next : _next->_prev;
@@ -116,6 +124,24 @@ public:
         return _next != nullptr ? REDIS_OK : REDIS_ERR;
     }
 };
+
+skiplist::skiplist()
+    : _head(create_skiplist_node(MAX_LEVEL, 0, nullptr))
+    , _tail(nullptr)
+    , _level(1)
+    , _size(0)
+{
+}
+
+skiplist::~skiplist()
+{
+    auto x = _head;
+    while (x != nullptr) {
+        auto next = x->_next[0]._next;
+        delete x;
+        x = next;
+    }
+}
 
 int skiplist::item_compare(lw_shared_ptr<item> l, lw_shared_ptr<item> r)
 {
@@ -201,9 +227,10 @@ void skiplist::remove_node(skiplist_node* x, skiplist_node** update)
     _size--;
 }
 
-int skiplist::remove(lw_shared_ptr<item> value, double score, skiplist_node** node)
+int skiplist::remove_item(lw_shared_ptr<item> value, skiplist_node** node)
 {
     skiplist_node* update[MAX_LEVEL];
+    auto score = value->Double();
     auto x = _head;
     for (unsigned int level = _level - 1; level >= 0; level--) {
         while (x->_next[level]._next && (x->_next[level]._next->_score < score || (x->_next[level]._next->_score == score && item_compare(x->_next[level]._next->_value, value) < 0))) {
@@ -223,7 +250,7 @@ int skiplist::remove(lw_shared_ptr<item> value, double score, skiplist_node** no
     return 0;
 }
 
-bool skiplist::is_in_range(const range& r)
+bool skiplist::include_range(const range& r)
 {
     if (r.empty()) {
         return false;
@@ -241,7 +268,7 @@ bool skiplist::is_in_range(const range& r)
 
 skiplist_node* skiplist::find_first_of_range(const range& r)
 {
-    if (is_in_range(r) == false) {
+    if (include_range(r) == false) {
         return nullptr;
     }
     auto x = _head;
@@ -260,7 +287,7 @@ skiplist_node* skiplist::find_first_of_range(const range& r)
 
 skiplist_node* skiplist::find_last_of_range(const range& r)
 {
-    if (is_in_range(r) == false) {
+    if (include_range(r) == false) {
         return nullptr;
     }
     auto x = _head;
@@ -294,10 +321,11 @@ skiplist_node* skiplist::find_by_rank(size_t rank)
     return nullptr;
 }
 
-size_t skiplist::get_rank(double score, lw_shared_ptr<item> value) 
+size_t skiplist::get_rank_of_item(lw_shared_ptr<item> value) 
 {
     size_t rank = 0;
     auto x = _head;
+    auto score = value->Double();
     for (auto i = _level-1; i >= 0; i--) {
         while (x->_next[i]._next &&
               (x->_next[i]._next->_score < score ||
@@ -311,16 +339,97 @@ size_t skiplist::get_rank(double score, lw_shared_ptr<item> value)
             return rank;
         }
     }
+    return -1;
+}
+
+size_t skiplist::get_rank_of_node(skiplist_node* n) 
+{
+    size_t rank = 0;
+    auto x = _head;
+    auto score = n->_value->Double();
+    for (auto i = _level-1; i >= 0; i--) {
+        while (x->_next[i]._next &&
+                (x->_next[i]._next->_score < score ||
+                 (x->_next[i]._next->_score == score &&
+                  item_compare(x->_next[i]._next->_value, n->_value) <= 0))) {
+            rank += x->_next[i]._span;
+            x = x->_next[i]._next;
+        }
+
+        if (x->_value && item_compare(x->_value, n->_value) == 0) {
+            return rank;
+        }
+    }
     return 0;
 }
 
 struct sorted_set::rep {
+    rep();
+    ~rep();
     dict* _dict;
     skiplist* _list;
     int insert(const redis_key& key, lw_shared_ptr<item> m);
     inline size_t size() { return _dict->size(); } 
-    std::vector<item_ptr> range(size_t begin, size_t end);
+    size_t count_in_range(double min, double max);
+    size_t rank(const redis_key& key, bool reverse);
+    int remove(const redis_key& key);
+    double score(const redis_key& key);
+    double incr(const redis_key& key, double delta);
+    std::vector<item_ptr> range_by_score(double min, double max, bool reverse);
+    std::vector<item_ptr> range_by_rank(size_t begin, size_t end, bool reverse);
 };
+
+sorted_set::rep::rep()
+    : _dict(new dict())
+    , _list(new skiplist())
+{
+}
+
+sorted_set::rep::~rep()
+{
+    delete _list;
+    delete _dict;
+}
+
+double sorted_set::rep::incr(const redis_key& key, double delta)
+{
+    auto n = _dict->fetch_raw(key);
+    if (n) {
+        return n->incr(delta);
+    }
+    return 0;
+}
+
+double sorted_set::rep::score(const redis_key& key)
+{
+    auto n = _dict->fetch_raw(key);
+    if (n) {
+        return n->Double();
+    }
+    return 0;
+}
+
+int sorted_set::rep::remove(const redis_key& key)
+{
+    auto n = _dict->fetch_raw(key);
+    if (n) {
+        return _list->remove_item(n, nullptr);
+    }
+    return 0;
+}
+
+size_t sorted_set::rep::rank(const redis_key& key, bool reverse)
+{
+    auto n = _dict->fetch_raw(key);
+    if (n) {
+        auto rank = _list->get_rank_of_item(n);
+        if (!reverse) {
+            return _list->size() - rank; 
+        }
+        return rank;
+    }
+    return -1;
+}
 
 int sorted_set::rep::insert(const redis_key& key, lw_shared_ptr<item> m)
 {
@@ -331,7 +440,54 @@ int sorted_set::rep::insert(const redis_key& key, lw_shared_ptr<item> m)
     return 0;
 }
 
-std::vector<item_ptr> sorted_set::rep::range(size_t begin, size_t end)
+size_t sorted_set::rep::count_in_range(double min, double max)
+{
+    struct range r(min, max);
+    if (r.empty()) return 0;
+    if (_list->include_range(r) == false) {
+        return 0;
+    }
+    size_t count = 0;
+    auto n = _list->find_first_of_range(r);
+    if (n != nullptr) {
+        auto rank = _list->get_rank_of_node(n);
+        count = (_list->size() - (rank - 1));
+        n = _list->find_last_of_range(r);
+        if (n != nullptr) {
+            rank = _list->get_rank_of_node(n);
+            count -= (_list->size() - rank);
+        }
+    }
+    return count;
+}
+
+std::vector<item_ptr> sorted_set::rep::range_by_score(double min, double max, bool reverse)
+{
+    using return_type = std::vector<item_ptr>;
+    struct range r(min, max);
+    if (r.empty()) return return_type {};
+    if (_list->include_range(r) == false) {
+        return return_type {};
+    }
+    return_type result;
+    auto n = !reverse ? _list->find_first_of_range(r) : _list->find_last_of_range(r);
+    if (n) {
+        while (n) {
+            if (!r.hit_min(n->_score)) break;
+            if (!r.hit_max(n->_score)) break;
+            result.push_back(n->_value);
+            if (!reverse) {
+                n = n->_next[0]._next;
+            }
+            else {
+                n = n->_prev;
+            }
+        }
+    }
+    return std::move(result);
+}
+
+std::vector<item_ptr> sorted_set::rep::range_by_rank(size_t begin, size_t end, bool reverse)
 {
     if (_list->size() == 0) {
         return std::vector<item_ptr>();
@@ -342,9 +498,8 @@ std::vector<item_ptr> sorted_set::rep::range(size_t begin, size_t end)
     if (begin > end) {
         return std::vector<item_ptr>();
     }
-    skiplist_iterator iter(_list, FROM_HEAD_TO_TAIL);
-    iter.seek_to_first();
-    while (begin-- > 0) iter.next();
+    skiplist_iterator iter(_list, !reverse ? FROM_HEAD_TO_TAIL : FROM_TAIL_TO_HEAD);
+    iter.seek(begin);
     std::vector<item_ptr> result;
     size_t count = end - begin + 1;
     while (iter.status() == REDIS_OK && count-- > 0) {
@@ -352,6 +507,7 @@ std::vector<item_ptr> sorted_set::rep::range(size_t begin, size_t end)
         if (n && n->_value) {
             result.emplace_back(item_ptr(n->_value));
         }
+        iter.next();
     }
     return std::move(result);
 }
@@ -374,9 +530,24 @@ size_t sorted_set::size()
     return _rep->size();
 }
 
-std::vector<item_ptr> sorted_set::range(size_t begin, size_t end)
+std::vector<item_ptr> sorted_set::range_by_score(double min, double max, bool reverse)
 {
-    return _rep->range(begin, end);
+    return _rep->range_by_score(min, max, reverse);
+}
+
+std::vector<item_ptr> sorted_set::range_by_rank(size_t begin, size_t end, bool reverse)
+{
+    return _rep->range_by_rank(begin, end, reverse);
+}
+
+double sorted_set::incrby(const redis_key& key, double delta)
+{
+    return _rep->incr(key, delta);
+}
+
+size_t sorted_set::count(double min, double max)
+{
+    return _rep->count_in_range(min, max);
 }
 }
 

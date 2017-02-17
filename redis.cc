@@ -1115,12 +1115,12 @@ future<size_t> redis_service::zcard(args_collection& args)
     sstring& key = args._command_args[0];
     auto cpu = get_cpu(key);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<size_t>(_db_peers.local().scard(key));
+        return make_ready_future<size_t>(_db_peers.local().zcard(key));
     }
     return _db_peers.invoke_on(cpu, &db::zcard, std::ref(key));
 }
 
-future<std::pair<std::vector<item_ptr>, bool>> redis_service::zrange(args_collection& args)
+future<std::pair<std::vector<item_ptr>, bool>> redis_service::zrange(args_collection& args, bool reverse)
 {
     using return_type = std::pair<std::vector<item_ptr>, bool>;
     if (args._command_args_count < 3 || args._command_args.empty()) {
@@ -1135,27 +1135,66 @@ future<std::pair<std::vector<item_ptr>, bool>> redis_service::zrange(args_collec
         with_score = true;
     }
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<return_type>(return_type(std::move(_db_peers.local().zrange(key, begin, end)), with_score));
+        return make_ready_future<return_type>(return_type(std::move(_db_peers.local().zrange(key, begin, end, reverse)), with_score));
     }
-    return _db_peers.invoke_on(cpu, &db::zrange, std::ref(key), begin, end).then([with_score] (auto&& items) {
+    return _db_peers.invoke_on(cpu, &db::zrange, std::ref(key), begin, end, reverse).then([with_score] (auto&& items) {
         return make_ready_future<return_type>(return_type(std::move(items), with_score));
     });
 }
 
-future<int> redis_service::zcount(args_collection& args)
+future<std::pair<std::vector<item_ptr>, bool>> redis_service::zrangebyscore(args_collection& args, bool reverse)
 {
-    return make_ready_future<int>(0);
+    using return_type = std::pair<std::vector<item_ptr>, bool>;
+    if (args._command_args_count < 3 || args._command_args.empty()) {
+        return make_ready_future<return_type>(return_type(std::vector<item_ptr>{}, false));
+    }
+    sstring& key = args._command_args[0];
+    auto cpu = get_cpu(key);
+    double min = std::stol(args._command_args[1].c_str());
+    double max = std::stol(args._command_args[2].c_str());
+    bool with_score = false;
+    if (args._command_args_count == 4 && args._command_args[3] == "WITHSCORES") {
+        with_score = true;
+    }
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<return_type>(return_type(std::move(_db_peers.local().zrangebyscore(key, min, max, reverse)), with_score));
+    }
+    return _db_peers.invoke_on(cpu, &db::zrangebyscore, std::ref(key), min, max, reverse).then([with_score] (auto&& items) {
+        return make_ready_future<return_type>(return_type(std::move(items), with_score));
+    });
 }
 
-future<int> redis_service::zincrby(args_collection& args)
+future<size_t> redis_service::zcount(args_collection& args)
 {
-    return make_ready_future<int>(0);
+    if (args._command_args_count < 1 || args._command_args.empty()) {
+        return make_ready_future<size_t>(-1);
+    }
+    sstring& key = args._command_args[0];
+    double min = std::stod(args._command_args[1].c_str());
+    double max = std::stod(args._command_args[2].c_str());
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<size_t>(_db_peers.local().zcount(key, min, max));
+    }
+    return _db_peers.invoke_on(cpu, &db::zcount, std::ref(key), min, max);
 }
 
-future<std::vector<item_ptr>> redis_service::zrangebyscore(args_collection&)
+future<std::pair<double, bool>> redis_service::zincrby(args_collection& args)
 {
-    return make_ready_future<std::vector<item_ptr>>(std::vector<item_ptr>());
+    using result_type = std::pair<double, bool>;
+    if (args._command_args_count < 3 || args._command_args.empty()) {
+        return make_ready_future<result_type>(result_type{0, false});
+    }
+    sstring& key = args._command_args[0];
+    sstring& member = args._command_args[1];
+    double delta = std::stod(args._command_args[2].c_str());
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<result_type>(_db_peers.local().zincrby(key, member, delta));
+    }
+    return _db_peers.invoke_on(cpu, &db::zincrby, std::ref(key), std::ref(member), delta);
 }
+
 
 future<long> redis_service::zrank(args_collection&)
 {
@@ -1178,11 +1217,6 @@ future<int> redis_service::zremrangebyscore(args_collection&)
 }
 
 future<std::vector<item_ptr>> redis_service::zrevrange(args_collection&)
-{
-    return make_ready_future<std::vector<item_ptr>>(std::vector<item_ptr>());
-}
-
-future<std::vector<item_ptr>> redis_service::zrevrangebyscore(args_collection&)
 {
     return make_ready_future<std::vector<item_ptr>>(std::vector<item_ptr>());
 }

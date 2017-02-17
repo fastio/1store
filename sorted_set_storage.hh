@@ -61,7 +61,7 @@ public:
         return -1;
     }
 
-    std::vector<item_ptr> zrange(sstring& key, size_t begin, size_t end)
+    std::vector<item_ptr> zrange(sstring& key, size_t begin, size_t end, bool reverse)
     {
         redis_key rk {key};
         auto zset = fetch_zset(rk);
@@ -72,7 +72,21 @@ public:
                 return std::vector<item_ptr>();
             }
         }
-        return zset->range(begin, end);
+        return zset->range_by_rank(begin, end, reverse);
+    }
+
+    std::vector<item_ptr> zrangebyscore(sstring& key, double min, double max, bool reverse)
+    {
+        redis_key rk {key};
+        auto zset = fetch_zset(rk);
+        if (zset == nullptr) {
+            zset = new sorted_set();
+            auto zset_item = item::create(key, zset, REDIS_ZSET);
+            if (_store->set(key, zset_item) != 0) {
+                return std::vector<item_ptr>();
+            }
+        }
+        return zset->range_by_score(min, max, reverse);
     }
 
     size_t zcard(sstring& key)
@@ -83,6 +97,46 @@ public:
             return -1;
         }
         return zset->size();
+    }
+
+    size_t zcount(sstring& key, double min, double max)
+    {
+        redis_key rk {key};
+        auto zset = fetch_zset(rk);
+        if (zset == nullptr) {
+            return -1;
+        }
+        return zset->count(min, max);
+    }
+
+    std::pair<double, bool> zincrby(sstring& key, sstring& member, double delta)
+    {
+        using result_type = std::pair<double, bool>;
+        redis_key rk {key};
+        auto it = _store->fetch_raw(key);
+        if (it && it->type() != REDIS_ZSET) {
+            return result_type{0, false};
+        }
+        sorted_set* zset = nullptr;
+        if (!it) {
+            zset = new sorted_set();
+            auto zset_item = item::create(rk, zset, REDIS_ZSET);
+            if (_store->set(rk, zset_item) != 0) {
+                return result_type{0, false};
+            }
+        }
+        else {
+            zset = it->zset_ptr();
+        }
+        redis_key mk {member};
+        if (zset->exists(mk) == false) {
+            auto zmember = item::create(mk, delta);
+            if (zset->insert(mk, zmember) != 0) {
+                return result_type{0, false};
+            }
+            return result_type{delta, true};
+        }
+        return result_type{zset->incrby(mk, delta), true};
     }
 protected:
     inline sorted_set* fetch_zset(const redis_key& key)
