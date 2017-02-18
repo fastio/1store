@@ -50,419 +50,260 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                 prepare_request();
                 switch (_parser._command) {
                 case redis_protocol_parser::command::set:
-                    return _redis.set(_command_args).then([&out] (int r) {
-                        return out.write(r == 0 ? msg_ok : msg_err);
+                    return _redis.set(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::mset:
-                    return _redis.mset(_command_args).then([&out] (int r) {
-                        return out.write(r == 0 ? msg_ok : msg_err);
+                    return _redis.mset(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::get:
-                    return _redis.get(_command_args).then([&out] (auto it) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(it));
-                        return out.write(std::move(msg));
+                    return _redis.get(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::del:
-                    return _redis.del(_command_args).then([&out] (int count) {
-                         scattered_message<char> msg;
-                         this_type::append_item(msg, std::move(count));
-                         return out.write(std::move(msg));
-                    });
-                case redis_protocol_parser::command::echo:
-                    return _redis.echo(_command_args).then([&out] (sstring message) {
-                         scattered_message<char> msg;
-                         this_type::append_item(msg, std::move(message));
-                         return out.write(std::move(msg));
+                    return _redis.del(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::ping:
                     return out.write(msg_pong);
                 case redis_protocol_parser::command::incr:
-                    return _redis.incr(_command_args).then([&out] (uint64_t r) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, r);
-                        return out.write(std::move(msg));
+                    return _redis.incr(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::decr:
-                    return _redis.incr(_command_args).then([&out] (uint64_t r) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, r);
-                        return out.write(std::move(msg));
+                    return _redis.incr(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::incrby:
-                    return _redis.incrby(_command_args).then([&out] (uint64_t r) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, r);
-                        return out.write(std::move(msg));
+                    return _redis.incrby(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::decrby:
-                    return _redis.decrby(_command_args).then([&out] (uint64_t r) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, r);
-                        return out.write(std::move(msg));
+                    return _redis.decrby(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::mget:
-                    return _redis.mget(_command_args).then([&out] (std::vector<item_ptr> items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.mget(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::command:
                     return out.write(msg_ok);
                 case redis_protocol_parser::command::exists:
-                    return _redis.exists(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.exists(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::append:
-                    return _redis.append(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.append(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::strlen:
-                    return _redis.strlen(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.strlen(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::lpush:
-                    return _redis.lpush(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.lpush(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::lpushx:
-                    return _redis.lpushx(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.lpushx(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::lpop:
-                    return _redis.lpop(_command_args).then([&out] (item_ptr item) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(item));
-                        return out.write(std::move(msg));
+                    return _redis.lpop(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::llen:
-                    return _redis.llen(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.llen(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::lindex:
-                    return _redis.lindex(_command_args).then([&out] (item_ptr item) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(item));
-                        return out.write(std::move(msg));
+                    return _redis.lindex(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::linsert:
-                    return _redis.linsert(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.linsert(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::lrange:
-                    return _redis.lrange(_command_args).then([&out] (std::vector<item_ptr> items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.lrange(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::lset:
-                    return _redis.lset(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.lset(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::rpush:
-                    return _redis.rpush(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.rpush(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::rpushx:
-                    return _redis.rpushx(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.rpushx(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::rpop:
-                    return _redis.rpop(_command_args).then([&out] (item_ptr item) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(item));
-                        return out.write(std::move(msg));
+                    return _redis.rpop(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::lrem:
-                    return _redis.lrem(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.lrem(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::ltrim:
-                    return _redis.ltrim(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.ltrim(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::hset:
-                    return _redis.hset(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.hset(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::hdel:
-                    return _redis.hdel(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.hdel(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::hget:
-                    return _redis.hget(_command_args).then([ &out] (item_ptr item) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(item));
-                        return out.write(std::move(msg));
+                    return _redis.hget(_command_args).then([ &out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::hlen:
-                    return _redis.hlen(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.hlen(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::hexists:
-                    return _redis.hexists(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.hexists(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::hstrlen:
-                    return _redis.hstrlen(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.hstrlen(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::hincrby:
-                    return _redis.hincrby(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.hincrby(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::hincrbyfloat:
-                    return _redis.hincrbyfloat(_command_args).then([&out] (double count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.hincrbyfloat(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::hkeys:
-                    return _redis.hgetall(_command_args).then([&out] (std::vector<item_ptr>&& items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items<true, false>(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.hgetall(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::hvals:
-                    return _redis.hgetall(_command_args).then([&out] (std::vector<item_ptr>&& items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items<false, true>(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.hgetall(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::hmget:
-                    return _redis.hmget(_command_args).then([&out] (std::vector<item_ptr>&& items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.hmget(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::hgetall:
-                    return _redis.hgetall(_command_args).then([&out] (std::vector<item_ptr>&& items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items<true, true>(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.hgetall(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::sadd:
-                    return _redis.sadd(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.sadd(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::scard:
-                    return _redis.scard(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.scard(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::sismember:
-                    return _redis.sismember(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.sismember(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::smembers:
-                    return _redis.smembers(_command_args).then([&out] (std::vector<item_ptr>&& items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items<true, false>(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.smembers(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::srem:
-                    return _redis.srem(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.srem(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::sdiff:
-                    return _redis.sdiff(_command_args).then([&out] (std::vector<item_ptr>&& items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items<true, false>(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.sdiff(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::sdiffstore:
-                    return _redis.sdiff_store(_command_args).then([&out] (std::vector<item_ptr>&& items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items<true, false>(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.sdiff_store(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::sinter:
-                    return _redis.sinter(_command_args).then([&out] (std::vector<item_ptr>&& items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items<true, false>(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.sinter(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::sinterstore:
-                    return _redis.sinter_store(_command_args).then([&out] (std::vector<item_ptr>&& items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items<true, false>(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.sinter_store(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::sunion:
-                    return _redis.sunion(_command_args).then([&out] (std::vector<item_ptr>&& items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items<true, false>(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.sunion(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::sunionstore:
-                    return _redis.sunion_store(_command_args).then([&out] (std::vector<item_ptr>&& items) {
-                        scattered_message<char> msg;
-                        this_type::append_multi_items<true, false>(msg, std::move(items));
-                        return out.write(std::move(msg));
+                    return _redis.sunion_store(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::smove:
-                    return _redis.smove(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.smove(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::type:
-                    return _redis.type(_command_args).then([&out] (int type) {
-                        scattered_message<char> msg;
-                        this_type::print_type(msg, type);
-                        return out.write(std::move(msg));
+                    return _redis.type(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::expire:
-                    return _redis.expire(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.expire(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::pexpire:
-                    return _redis.pexpire(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.pexpire(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::ttl:
-                    return _redis.ttl(_command_args).then([&out] (long count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.ttl(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::pttl:
-                    return _redis.pttl(_command_args).then([&out] (long count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.pttl(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::persist:
-                    return _redis.persist(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.persist(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::zadd:
-                    return _redis.zadd(_command_args).then([&out] (int count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.zadd(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::zrange:
-                    return _redis.zrange(_command_args, false).then([&out] (std::pair<std::vector<item_ptr>, bool>&& result) {
-                        auto& items = result.first;
-                        bool with_score = result.second;
-                        scattered_message<char> msg;
-                        if (with_score) {
-                            this_type::append_multi_items<true, true>(msg, std::move(items));
-                        }
-                        else {
-                            this_type::append_multi_items<true, false>(msg, std::move(items));
-                        }
-                        return out.write(std::move(msg));
+                    return _redis.zrange(_command_args, false).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::zrevrange:
-                    return _redis.zrange(_command_args, true).then([&out] (std::pair<std::vector<item_ptr>, bool>&& result) {
-                        auto& items = result.first;
-                        bool with_score = result.second;
-                        scattered_message<char> msg;
-                        if (with_score) {
-                            this_type::append_multi_items<true, true>(msg, std::move(items));
-                        }
-                        else {
-                            this_type::append_multi_items<true, false>(msg, std::move(items));
-                        }
-                        return out.write(std::move(msg));
+                    return _redis.zrange(_command_args, true).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::zrangebyscore:
-                    return _redis.zrangebyscore(_command_args, false).then([&out] (std::pair<std::vector<item_ptr>, bool>&& result) {
-                        auto& items = result.first;
-                        bool with_score = result.second;
-                        scattered_message<char> msg;
-                        if (with_score) {
-                            this_type::append_multi_items<true, true>(msg, std::move(items));
-                        }
-                        else {
-                            this_type::append_multi_items<true, false>(msg, std::move(items));
-                        }
-                        return out.write(std::move(msg));
+                    return _redis.zrangebyscore(_command_args, false).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::zrevrangebyscore:
-                    return _redis.zrangebyscore(_command_args, true).then([&out] (std::pair<std::vector<item_ptr>, bool>&& result) {
-                        auto& items = result.first;
-                        bool with_score = result.second;
-                        scattered_message<char> msg;
-                        if (with_score) {
-                            this_type::append_multi_items<true, true>(msg, std::move(items));
-                        }
-                        else {
-                            this_type::append_multi_items<true, false>(msg, std::move(items));
-                        }
-                        return out.write(std::move(msg));
+                    return _redis.zrangebyscore(_command_args, true).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::zcard:
-                    return _redis.zcard(_command_args).then([&out] (size_t count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.zcard(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::zcount:
-                    return _redis.zcount(_command_args).then([&out] (size_t count) {
-                        scattered_message<char> msg;
-                        this_type::append_item(msg, std::move(count));
-                        return out.write(std::move(msg));
+                    return _redis.zcount(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::zincrby:
-                    return _redis.zincrby(_command_args).then([&out] (std::pair<double, bool> result) {
-                        if (result.second) {
-                            scattered_message<char> msg;
-                            this_type::append_item(msg, std::move(result.first));
-                            return out.write(std::move(msg));
-                        }
-                        return out.write(msg_type_err);
+                    return _redis.zincrby(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
                     });
                 default:
                     return out.write("+Not Implemented\r\n");

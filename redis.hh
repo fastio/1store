@@ -24,10 +24,6 @@
 #include "core/sharded.hh"
 #include "core/sstring.hh"
 #include <experimental/optional>
-#include <boost/intrusive/unordered_set.hpp>
-#include <boost/intrusive/list.hpp>
-#include <boost/intrusive_ptr.hpp>
-#include <boost/lexical_cast.hpp>
 #include <iomanip>
 #include <sstream>
 #include "core/app-template.hh"
@@ -55,7 +51,7 @@ struct args_collection;
 class db;
 class item;
 using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
-
+using message = scattered_message<char>;
 class redis_service {
 private:
     inline unsigned get_cpu(const sstring& key) {
@@ -70,94 +66,95 @@ public:
     // [TEST APIs]
     future<sstring> echo(args_collection& args);
     // [COUNTER APIs]
-    future<uint64_t> incr(args_collection& args);
-    future<uint64_t> decr(args_collection& args);
-    future<uint64_t> incrby(args_collection& args);
-    future<uint64_t> decrby(args_collection& args);
+    future<message> incr(args_collection& args);
+    future<message> decr(args_collection& args);
+    future<message> incrby(args_collection& args);
+    future<message> decrby(args_collection& args);
 
     // [STRING APIs]
-    future<int> mset(args_collection& args);
-    future<int> set(args_collection& args);
-    future<int> del(args_collection& args);
-    future<int> exists(args_collection& args);
-    future<int> append(args_collection& args);
-    future<int> strlen(args_collection& args);
-    future<item_ptr> get(args_collection& args);
-    future<std::vector<item_ptr>> mget(args_collection& args);
+    future<message> mset(args_collection& args);
+    future<message> set(args_collection& args);
+    future<message> del(args_collection& args);
+    future<message> exists(args_collection& args);
+    future<message> append(args_collection& args);
+    future<message> strlen(args_collection& args);
+    future<message> get(args_collection& args);
+    future<message> mget(args_collection& args);
 
     // [LIST APIs]
-    future<int> lpush(args_collection& arg);
-    future<int> lpushx(args_collection& args);
-    future<int> rpush(args_collection& arg);
-    future<int> rpushx(args_collection& args);
-    future<item_ptr> lpop(args_collection& args);
-    future<item_ptr> rpop(args_collection& args);
-    future<int> llen(args_collection& args);
-    future<item_ptr> lindex(args_collection& args);
-    future<int> linsert(args_collection& args);
-    future<int> lset(args_collection& args);
-    future<std::vector<item_ptr>> lrange(args_collection& args);
-    future<int> ltrim(args_collection& args);
-    future<int> lrem(args_collection& args);
+    future<message> lpush(args_collection& arg);
+    future<message> lpushx(args_collection& args);
+    future<message> rpush(args_collection& arg);
+    future<message> rpushx(args_collection& args);
+    future<message> lpop(args_collection& args);
+    future<message> rpop(args_collection& args);
+    future<message> llen(args_collection& args);
+    future<message> lindex(args_collection& args);
+    future<message> linsert(args_collection& args);
+    future<message> lset(args_collection& args);
+    future<message> lrange(args_collection& args);
+    future<message> ltrim(args_collection& args);
+    future<message> lrem(args_collection& args);
 
     // [HASH APIs]
-    future<int> hdel(args_collection& args);
-    future<int> hexists(args_collection& args);
-    future<int> hset(args_collection& args);
-    future<int> hmset(args_collection& args);
-    future<int> hincrby(args_collection& args);
-    future<double> hincrbyfloat(args_collection& args);
-    future<int> hlen(args_collection& args);
-    future<int> hstrlen(args_collection& args);
-    future<item_ptr> hget(args_collection& args);
-    future<std::vector<item_ptr>> hgetall(args_collection& args);
-    future<std::vector<item_ptr>> hmget(args_collection& args);
+    future<message> hdel(args_collection& args);
+    future<message> hexists(args_collection& args);
+    future<message> hset(args_collection& args);
+    future<message> hmset(args_collection& args);
+    future<message> hincrby(args_collection& args);
+    future<message> hincrbyfloat(args_collection& args);
+    future<message> hlen(args_collection& args);
+    future<message> hstrlen(args_collection& args);
+    future<message> hget(args_collection& args);
+    future<message> hgetall(args_collection& args);
+    future<message> hmget(args_collection& args);
 
     // [SET]
-    future<int> sadd(args_collection& args);
-    future<int> scard(args_collection& args);
-    future<int> srem(args_collection& args);
-    future<int> sismember(args_collection& args);
-    future<std::vector<item_ptr>> smembers(args_collection& args);
-    future<std::vector<item_ptr>> sdiff(args_collection& args);
-    future<std::vector<item_ptr>> sdiff_store(args_collection& args);
-    future<std::vector<item_ptr>> sinter(args_collection& args);
-    future<std::vector<item_ptr>> sinter_store(args_collection& args);
-    future<std::vector<item_ptr>> sunion(args_collection& args);
-    future<std::vector<item_ptr>> sunion_store(args_collection& args);
-    future<int> smove(args_collection& args);
+    future<message> sadd(args_collection& args);
+    future<message> scard(args_collection& args);
+    future<message> srem(args_collection& args);
+    future<message> sismember(args_collection& args);
+    future<message> smembers(args_collection& args);
+    future<message> sdiff(args_collection& args);
+    future<message> sdiff_store(args_collection& args);
+    future<message> sinter(args_collection& args);
+    future<message> sinter_store(args_collection& args);
+    future<message> sunion(args_collection& args);
+    future<message> sunion_store(args_collection& args);
+    future<message> smove(args_collection& args);
 
-    future<int> type(args_collection& args);
-    future<int> expire(args_collection& args);
-    future<int> persist(args_collection& args);
-    future<int> pexpire(args_collection& args);
-    future<long> ttl(args_collection& args);
-    future<long> pttl(args_collection& args);
+    future<message> type(args_collection& args);
+    future<message> expire(args_collection& args);
+    future<message> persist(args_collection& args);
+    future<message> pexpire(args_collection& args);
+    future<message> ttl(args_collection& args);
+    future<message> pttl(args_collection& args);
 
     // [ZSET]
-    future<int> zadd(args_collection& args);
-    future<size_t> zcard(args_collection& args);
-    future<std::pair<std::vector<item_ptr>, bool>> zrange(args_collection&, bool);
-    future<std::pair<std::vector<item_ptr>, bool>> zrangebyscore(args_collection&, bool);
-    future<size_t> zcount(args_collection& args);
-    future<std::pair<double, bool>> zincrby(args_collection& args);
-    future<long> zrank(args_collection&);
-    future<int> zrem(args_collection&);
-    future<int> zremrangebyrank(args_collection&);
-    future<int> zremrangebyscore(args_collection&);
-    future<std::vector<item_ptr>> zrevrange(args_collection&);
-    future<int> zrevrank(args_collection&);
-    future<double> zscore(args_collection&);
-    future<int> zunionstore(args_collection&);
-    future<int> zinterstore(args_collection&);
-    future<int> zdiffstore(args_collection&);
-    future<std::vector<item_ptr>> zunion(args_collection&);
-    future<std::vector<item_ptr>> zinter(args_collection&);
-    future<std::vector<item_ptr>> zdiff(args_collection&);
-    future<std::vector<item_ptr>> zrangebylex(args_collection&);
-    future<int> zlexcount(args_collection&);
-    future<std::vector<item_ptr>> zrevrangebylex(args_collection&);
+    future<message> zadd(args_collection& args);
+    future<message> zcard(args_collection& args);
+    future<message> zrange(args_collection&, bool);
+    future<message> zrangebyscore(args_collection&, bool);
+    future<message> zcount(args_collection& args);
+    future<message> zincrby(args_collection& args);
+    future<message> zrank(args_collection&);
+    future<message> zrem(args_collection&);
+    future<message> zremrangebyrank(args_collection&);
+    future<message> zremrangebyscore(args_collection&);
+    future<message> zrevrange(args_collection&);
+    future<message> zrevrank(args_collection&);
+    future<message> zscore(args_collection&);
+    future<message> zunionstore(args_collection&);
+    future<message> zinterstore(args_collection&);
+    future<message> zdiffstore(args_collection&);
+    future<message> zunion(args_collection&);
+    future<message> zinter(args_collection&);
+    future<message> zdiff(args_collection&);
+    future<message> zrangebylex(args_collection&);
+    future<message> zlexcount(args_collection&);
+    future<message> zrevrangebylex(args_collection&);
 private:
+    future<int> exists_impl(sstring& key);
     future<int> srem_impl(sstring& key, sstring& member);
     future<int> sadd_impl(sstring& key, sstring& member);
     future<int> sadds_impl(sstring& key, std::vector<sstring>&& members);
@@ -165,13 +162,217 @@ private:
     future<std::vector<item_ptr>> sinter_impl(std::vector<sstring>&& keys);
     future<std::vector<item_ptr>> sunion_impl(std::vector<sstring>&& keys);
     future<std::vector<item_ptr>> smembers_impl(sstring& key);
-    future<item_ptr> pop_impl(args_collection& args, bool left);
-    future<int> push_impl(args_collection& arg, bool force, bool left);
+    future<message> pop_impl(args_collection& args, bool left);
+    future<message> push_impl(args_collection& arg, bool force, bool left);
     future<int> push_impl(sstring& key, sstring& value, bool force, bool left);
     future<int> set_impl(sstring& key, sstring& value, long expir, uint8_t flag);
     future<item_ptr> get_impl(sstring& key);
     future<int> remove_impl(sstring& key);
-    future<uint64_t> counter_by(args_collection& args, bool incr, bool with_step);
+    future<int> hdel_impl(sstring& key, sstring& field);
+    future<message> counter_by(args_collection& args, bool incr, bool with_step);
+
+    using this_type = redis_service;
+    static future<message> syntax_err_message() {
+        message msg;
+        msg.append_static(msg_syntax_err);
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> wrong_type_err_message() {
+        message msg;
+        msg.append_static(msg_type_err);
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> ok_message() {
+        message msg;
+        msg.append_static(msg_ok);
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> err_message() {
+        message msg;
+        msg.append_static(msg_err);
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> one_message() {
+        message msg;
+        msg.append_static(msg_one);
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> zero_message() {
+        message msg;
+        msg.append_static(msg_zero);
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> size_message(long u)
+    {
+        scattered_message<char> msg;
+        msg.append(to_sstring(u));
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> size_message(size_t u)
+    {
+        scattered_message<char> msg;
+        msg.append(to_sstring(u));
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> size_message(int u)
+    {
+        scattered_message<char> msg;
+        msg.append(to_sstring(u));
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> uint64_message(uint64_t u)
+    {
+        scattered_message<char> msg;
+        msg.append(to_sstring(u));
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> int64_message(int64_t u)
+    {
+        scattered_message<char> msg;
+        msg.append(to_sstring(u));
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> double_message(double u)
+    {
+        scattered_message<char> msg;
+        msg.append(to_sstring(u));
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> item_message(sstring&& u) 
+    {
+        scattered_message<char> msg;
+        msg.append_static(msg_batch_tag);
+        msg.append(to_sstring(u.size()));
+        msg.append_static(msg_crlf);
+        msg.append_static(std::move(u));
+        msg.append_static(msg_crlf);
+        return make_ready_future<message>(std::move(msg));
+    }
+
+    template<bool Key, bool Value>
+    static future<message>  item_message(item_ptr&& u) 
+    {
+        scattered_message<char> msg;
+        this_type::append_item<Key, Value>(msg, std::move(u));
+        return make_ready_future<message>(std::move(msg));
+    }
+
+    template<bool Key, bool Value>
+    static void  append_item(message& msg, item_ptr&& u) 
+    {
+        if (!u) {
+            msg.append_static(msg_not_found);
+        }
+        else {
+            if (Key) {
+                msg.append(msg_batch_tag);
+                msg.append(std::move(to_sstring(u->key_size())));
+                msg.append_static(msg_crlf);
+                sstring v{u->key().data(), u->key().size()};
+                msg.append(std::move(v));
+                msg.append_static(msg_crlf);
+            }
+            if (Value) {
+                msg.append_static(msg_batch_tag);
+                if (u->type() == REDIS_RAW_UINT64 || u->type() == REDIS_RAW_INT64) {
+                    std::string s = std::to_string(u->int64());
+                    msg.append(to_sstring(s.size()));
+                    msg.append_static(msg_crlf);
+                    msg.append_static(s.c_str());
+                    msg.append_static(msg_crlf);
+                } else if (u->type() == REDIS_RAW_ITEM || u->type() == REDIS_RAW_STRING) {
+                    msg.append(to_sstring(u->value_size()));
+                    msg.append_static(msg_crlf);
+                    msg.append_static(u->value());
+                    msg.append_static(msg_crlf);
+                } else if (u->type() == REDIS_RAW_DOUBLE) {
+                    std::string s = std::to_string(u->Double());
+                    msg.append(to_sstring(s.size()));
+                    msg.append_static(msg_crlf);
+                    msg.append_static(s.c_str());
+                    msg.append_static(msg_crlf);
+                } else {
+                    msg.append_static(msg_type_err);
+                }
+            }
+            msg.on_delete([u = std::move(u)] {});
+        }
+    }
+
+    template<bool Key, bool Value>
+    static future<message> items_message(std::vector<item_ptr>&& items) 
+    {
+        message msg;
+        msg.append(msg_sigle_tag);
+        if (Key && Value)
+            msg.append(std::move(to_sstring(items.size() * 2)));
+        else
+            msg.append(std::move(to_sstring(items.size())));
+        msg.append_static(msg_crlf);
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (Key) {
+                msg.append(msg_batch_tag);
+                msg.append(std::move(to_sstring(items[i]->key_size())));
+                msg.append_static(msg_crlf);
+                sstring v{items[i]->key().data(), items[i]->key().size()};
+                msg.append(std::move(v));
+                msg.append_static(msg_crlf);
+            }
+            if (Value) {
+                if (!items[i]) {
+                    msg.append_static(msg_not_found);
+                }
+                else {
+                    msg.append(msg_batch_tag);
+                    if (items[i]->type() == REDIS_RAW_UINT64 || items[i]->type() == REDIS_RAW_INT64) {
+                        std::string s = std::to_string(items[i]->int64());
+                        msg.append(to_sstring(s.size()));
+                        msg.append_static(msg_crlf);
+                        msg.append_static(s.c_str());
+                        msg.append_static(msg_crlf);
+                    } else if (items[i]->type() == REDIS_RAW_ITEM || items[i]->type() == REDIS_RAW_STRING) {
+                        msg.append(std::move(to_sstring(items[i]->value_size())));
+                        msg.append_static(msg_crlf);
+                        sstring v{items[i]->value().data(), items[i]->value().size()};
+                        msg.append(std::move(v));
+                        msg.append_static(msg_crlf);
+                    } else if (items[i]->type() == REDIS_RAW_DOUBLE) {
+                        std::string s = std::to_string(items[i]->Double());
+                        msg.append(to_sstring(s.size()));
+                        msg.append_static(msg_crlf);
+                        msg.append_static(s.c_str());
+                        msg.append_static(msg_crlf);
+                    } else {
+                        msg.append_static(msg_type_err);
+                    }
+                }
+            }
+        }
+        msg.on_delete([item = std::move(items)] {});
+        return make_ready_future<message>(std::move(msg));
+    }
+
+    static future<message> type_message(int u) 
+    {
+        message msg;
+        if (u == static_cast<int>(REDIS_RAW_STRING)) {
+            msg.append_static(msg_type_string);
+        }
+        else if (u == static_cast<int>(REDIS_LIST)) {
+            msg.append_static(msg_type_list);
+        }
+        else if (u == static_cast<int>(REDIS_DICT)) {
+            msg.append_static(msg_type_hash);
+        }
+        else if (u == static_cast<int>(REDIS_SET)) {
+            msg.append_static(msg_type_set);
+        }
+        else if (u == static_cast<int>(REDIS_ZSET)) {
+            msg.append_static(msg_type_zset);
+        }
+        msg.append_static(msg_type_none);
+        return make_ready_future<message>(std::move(msg));
+    }
 };
 
 } /* namespace redis */

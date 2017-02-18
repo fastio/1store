@@ -36,13 +36,20 @@ public:
     int zadds(sstring& key, std::unordered_map<sstring, double>& members)
     {
         redis_key rk {key};
-        auto zset = fetch_zset(rk);
-        if (zset == nullptr) {
+        auto it = _store->fetch_raw(key);
+        sorted_set* zset = nullptr; 
+        if (!it) {
             zset = new sorted_set();
             auto zset_item = item::create(key, zset, REDIS_ZSET);
             if (_store->set(key, zset_item) != 0) {
                 return -1;
             }
+        }
+        else {
+            if (it->type() == REDIS_ZSET) {
+                zset = it->zset_ptr();
+            }
+            return REDIS_WRONG_TYPE;
         }
         int count = 0;
         for (auto& entry : members) {
@@ -63,22 +70,29 @@ public:
     int zadd(sstring& key, sstring& member, double score)
     {
         redis_key rk {key};
-        auto zset = fetch_zset(rk);
-        if (zset == nullptr) {
+        auto it = _store->fetch_raw(key);
+        sorted_set* zset = nullptr; 
+        if (!it) {
             zset = new sorted_set();
             auto zset_item = item::create(key, zset, REDIS_ZSET);
             if (_store->set(key, zset_item) != 0) {
                 return -1;
             }
         }
+        else {
+            if (it->type() == REDIS_ZSET) {
+                zset = it->zset_ptr();
+            }
+            return REDIS_WRONG_TYPE;
+        }
         redis_key member_data {std::ref(member), std::hash<sstring>()(member)};
         if (zset->exists(member_data) == false) {
             auto new_item = item::create(member_data, score);
-            if (zset->insert(member_data, new_item)) {
-                return 0;
+            if (zset->insert(member_data, new_item) == 1) {
+                return 1;
             }
         }
-        return -1;
+        return 0;
     }
 
     std::vector<item_ptr> zrange(sstring& key, size_t begin, size_t end, bool reverse)
