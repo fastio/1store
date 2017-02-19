@@ -112,16 +112,13 @@ int main(int ac, char** av) {
             auto&& config = app.configuration();
             uint16_t port = config["port"].as<uint16_t>();
             return db_peers.start().then([&system_stats] {
-                return system_stats.start(redis::clock_type::now());
-                }).then([&] {
-                    std::cout << PLATFORM << " Parallel Redis " << VERSION << "\n";
-                    return make_ready_future<>();
+                    return system_stats.start(redis::clock_type::now());
                 }).then([&, port] {
                     return server.start(std::ref(redis), std::ref(system_stats), port);
                 }).then([&server] {
                     return server.invoke_on_all(&redis::server::start);
-                }).then([&, port] {
-                    std::cout << " == server start success == \n";
+                }).then([&] {
+                    std::cout << "Parallel Redis ... \n";
                     return make_ready_future<>();
                 });
             });

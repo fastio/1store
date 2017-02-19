@@ -35,6 +35,14 @@ private:
 public:
     redis_protocol(redis_service& redis);
     void prepare_request();
+    void print_input()
+    {
+        std::cout << "{ \n" << _command_args._command_args_count << "\n";
+        for (size_t i = 0; i < _command_args._command_args.size(); i++) {
+            std::cout << i << "=> " << _command_args._command_args[i] << "\n";
+        };
+        std::cout << "}\n";
+    }
     future<> handle(input_stream<char>& in, output_stream<char>& out);
 };
 }

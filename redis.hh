@@ -205,37 +205,49 @@ private:
     static future<message> size_message(long u)
     {
         scattered_message<char> msg;
+        msg.append_static(msg_num_tag);
         msg.append(to_sstring(u));
+        msg.append_static(msg_crlf);
         return make_ready_future<message>(std::move(msg));
     }
     static future<message> size_message(size_t u)
     {
         scattered_message<char> msg;
+        msg.append_static(msg_num_tag);
         msg.append(to_sstring(u));
+        msg.append_static(msg_crlf);
         return make_ready_future<message>(std::move(msg));
     }
     static future<message> size_message(int u)
     {
         scattered_message<char> msg;
+        msg.append_static(msg_num_tag);
         msg.append(to_sstring(u));
+        msg.append_static(msg_crlf);
         return make_ready_future<message>(std::move(msg));
     }
     static future<message> uint64_message(uint64_t u)
     {
         scattered_message<char> msg;
+        msg.append_static(msg_num_tag);
         msg.append(to_sstring(u));
+        msg.append_static(msg_crlf);
         return make_ready_future<message>(std::move(msg));
     }
     static future<message> int64_message(int64_t u)
     {
         scattered_message<char> msg;
+        msg.append_static(msg_num_tag);
         msg.append(to_sstring(u));
+        msg.append_static(msg_crlf);
         return make_ready_future<message>(std::move(msg));
     }
     static future<message> double_message(double u)
     {
         scattered_message<char> msg;
+        msg.append_static(msg_num_tag);
         msg.append(to_sstring(u));
+        msg.append_static(msg_crlf);
         return make_ready_future<message>(std::move(msg));
     }
     static future<message> item_message(sstring&& u) 
