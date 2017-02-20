@@ -278,7 +278,7 @@ private:
         else {
             if (Key) {
                 msg.append(msg_batch_tag);
-                msg.append(std::move(to_sstring(u->key_size())));
+                msg.append(to_sstring(u->key_size()));
                 msg.append_static(msg_crlf);
                 sstring v{u->key().data(), u->key().size()};
                 msg.append(std::move(v));
@@ -287,10 +287,10 @@ private:
             if (Value) {
                 msg.append_static(msg_batch_tag);
                 if (u->type() == REDIS_RAW_UINT64 || u->type() == REDIS_RAW_INT64) {
-                    std::string s = std::to_string(u->int64());
-                    msg.append(to_sstring(s.size()));
+                    auto&& n = to_sstring(u->int64());
+                    msg.append(to_sstring(n.size()));
                     msg.append_static(msg_crlf);
-                    msg.append_static(s.c_str());
+                    msg.append(std::move(n));
                     msg.append_static(msg_crlf);
                 } else if (u->type() == REDIS_RAW_ITEM || u->type() == REDIS_RAW_STRING) {
                     msg.append(to_sstring(u->value_size()));
@@ -298,10 +298,10 @@ private:
                     msg.append_static(u->value());
                     msg.append_static(msg_crlf);
                 } else if (u->type() == REDIS_RAW_DOUBLE) {
-                    std::string s = std::to_string(u->Double());
-                    msg.append(to_sstring(s.size()));
+                    auto&& n = to_sstring(u->Double());
+                    msg.append(to_sstring(n.size()));
                     msg.append_static(msg_crlf);
-                    msg.append_static(s.c_str());
+                    msg.append(std::move(n));
                     msg.append_static(msg_crlf);
                 } else {
                     msg.append_static(msg_type_err);
@@ -337,10 +337,10 @@ private:
                 else {
                     msg.append(msg_batch_tag);
                     if (items[i]->type() == REDIS_RAW_UINT64 || items[i]->type() == REDIS_RAW_INT64) {
-                        std::string s = std::to_string(items[i]->int64());
-                        msg.append(to_sstring(s.size()));
+                        auto&& n = to_sstring(items[i]->int64());
+                        msg.append(to_sstring(n.size()));
                         msg.append_static(msg_crlf);
-                        msg.append_static(s.c_str());
+                        msg.append(std::move(n));
                         msg.append_static(msg_crlf);
                     } else if (items[i]->type() == REDIS_RAW_ITEM || items[i]->type() == REDIS_RAW_STRING) {
                         msg.append(std::move(to_sstring(items[i]->value_size())));
@@ -349,10 +349,10 @@ private:
                         msg.append(std::move(v));
                         msg.append_static(msg_crlf);
                     } else if (items[i]->type() == REDIS_RAW_DOUBLE) {
-                        std::string s = std::to_string(items[i]->Double());
-                        msg.append(to_sstring(s.size()));
+                        auto&& n = to_sstring(items[i]->Double());
+                        msg.append(to_sstring(n.size()));
                         msg.append_static(msg_crlf);
-                        msg.append_static(s.c_str());
+                        msg.append(std::move(n));
                         msg.append_static(msg_crlf);
                     } else {
                         msg.append_static(msg_type_err);
@@ -382,7 +382,9 @@ private:
         else if (u == static_cast<int>(REDIS_ZSET)) {
             msg.append_static(msg_type_zset);
         }
-        msg.append_static(msg_type_none);
+        else {
+            msg.append_static(msg_type_none);
+        }
         return make_ready_future<message>(std::move(msg));
     }
 };

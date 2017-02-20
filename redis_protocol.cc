@@ -37,13 +37,11 @@ void redis_protocol::prepare_request()
 future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out)
 {
     _parser.init();
-    return in.consume(_parser).then([this, &out] () -> future<> {
+    return in.consume(_parser).then([this, &in, &out] () -> future<> {
         switch (_parser._state) {
             case redis_protocol_parser::state::eof:
-                return make_ready_future<>();
-
             case redis_protocol_parser::state::error:
-                return out.write(msg_err);
+                return make_ready_future<>();
 
             case redis_protocol_parser::state::ok:
             {
@@ -313,10 +311,11 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                 return out.write("+Not Implemented\r\n");
         };
         std::abort();
-    }).then_wrapped([this, &out] (auto&& f) -> future<> {
+    }).then_wrapped([this, &in, &out] (auto&& f) -> future<> {
         try {
             f.get();
         } catch (std::bad_alloc& e) {
+            in.close();
             return out.write(msg_err);
         }
         return make_ready_future<>();

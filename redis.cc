@@ -1238,8 +1238,8 @@ future<message> redis_service::zadd(args_collection& args)
     sstring& key = args._command_args[0];
     auto cpu = get_cpu(key);
     if (args._command_args_count == 3) {
-        sstring& member = args._command_args[1];
-        sstring& score_ = args._command_args[2];
+        sstring& score_ = args._command_args[1];
+        sstring& member = args._command_args[2];
         double score = std::stod(score_.c_str());
         if (engine().cpu_id() == cpu) {
             return size_message(_db_peers.local().zadd(key, member, score));
