@@ -318,6 +318,14 @@ public:
     {
         return _zset_storage.zrangebyscore(key, min, max, reverse);
     }
+    size_t zrank(sstring& key, sstring& member, bool reverse)
+    {
+        return _zset_storage.zrank(key, member, reverse);
+    }
+    size_t zrem(sstring& key, std::vector<sstring>& members)
+    {
+        return _zset_storage.zrem(key, members);
+    }
     future<> stop() { return make_ready_future<>(); }
 private:
     void expired_items()

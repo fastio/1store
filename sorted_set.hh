@@ -41,6 +41,8 @@ public:
     lw_shared_ptr<item> fetch(const redis_key& key);
     bool update(lw_shared_ptr<item> item, double score);
     size_t size();
+    size_t rank(const redis_key& key, bool reverse);
+    int remove(const redis_key& key);
     size_t count(double min, double max);
     double incrby(const redis_key& key, double delta);
     std::vector<item_ptr> range_by_rank(size_t begin, size_t end, bool reverse);

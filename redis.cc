@@ -1415,34 +1415,43 @@ future<message> redis_service::zincrby(args_collection& args)
     });
 }
 
-future<message> redis_service::zrank(args_collection&)
+future<message> redis_service::zrank(args_collection& args, bool reverse)
 {
-    return syntax_err_message();
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    sstring& member = args._command_args[1];
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        auto u = _db_peers.local().zrank(key, member, reverse);
+        return u >= 0 ? size_message(u) : nil_message();
+    }
+    return _db_peers.invoke_on(cpu, &db::zrank, std::ref(key), std::ref(member), reverse).then([] (auto u) {
+        return u >= 0 ? size_message(u) : nil_message();
+    });
 }
 
-future<message> redis_service::zrem(args_collection&)
+future<message> redis_service::zrem(args_collection& args)
 {
-    return syntax_err_message();
-}
-
-future<message> redis_service::zremrangebyrank(args_collection&)
-{
-    return syntax_err_message();
-}
-
-future<message> redis_service::zremrangebyscore(args_collection&)
-{
-    return syntax_err_message();
-}
-
-future<message> redis_service::zrevrange(args_collection&)
-{
-    return syntax_err_message();
-}
-
-future<message> redis_service::zrevrank(args_collection&)
-{
-    return syntax_err_message();
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    std::vector<sstring> members;
+    for (size_t i = 1; i < args._command_args_count; ++i) {
+        sstring& member = args._command_args[i];
+        members.emplace_back(std::move(member));
+    }
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return size_message(_db_peers.local().zrem(key, members));
+    }
+    else {
+        return _db_peers.invoke_on(cpu, &db::zrem, std::ref(key), std::ref(members)).then([] (auto u) {
+            return size_message(u);
+        });
+    }
 }
 
 future<message> redis_service::zscore(args_collection&)

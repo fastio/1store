@@ -303,6 +303,14 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.zincrby(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
+                case redis_protocol_parser::command::zrank:
+                    return _redis.zrank(_command_args, false).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
+                case redis_protocol_parser::command::zrevrank:
+                    return _redis.zrank(_command_args, true).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
                 default:
                     return out.write("+Not Implemented\r\n");
                 };

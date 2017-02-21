@@ -137,7 +137,7 @@ public:
     future<message> zrangebyscore(args_collection&, bool);
     future<message> zcount(args_collection& args);
     future<message> zincrby(args_collection& args);
-    future<message> zrank(args_collection&);
+    future<message> zrank(args_collection&, bool);
     future<message> zrem(args_collection&);
     future<message> zremrangebyrank(args_collection&);
     future<message> zremrangebyscore(args_collection&);
@@ -175,6 +175,11 @@ private:
     static future<message> syntax_err_message() {
         message msg;
         msg.append_static(msg_syntax_err);
+        return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> nil_message() {
+        message msg;
+        msg.append_static(msg_nil);
         return make_ready_future<message>(std::move(msg));
     }
     static future<message> wrong_type_err_message() {

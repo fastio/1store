@@ -597,5 +597,15 @@ lw_shared_ptr<item> sorted_set::fetch(const redis_key& key)
 {
     return _rep->fetch(key);
 }
+
+int sorted_set::remove(const redis_key& key)
+{
+    return _rep->remove(key);
+}
+
+size_t sorted_set::rank(const redis_key& key, bool reverse)
+{
+    return _rep->rank(key, reverse);
+}
 }
 

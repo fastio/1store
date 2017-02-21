@@ -78,16 +78,40 @@ public:
         return result_type {count, REDIS_OK};
     }
 
+    size_t zrem(sstring& key, std::vector<sstring>& members)
+    {
+        redis_key rk {key};
+        auto zset = fetch_zset(rk);
+        if (zset != nullptr) {
+            size_t count = 0;
+            for (size_t i = 0; i < members.size(); ++i) {
+                redis_key m{members[i]};
+                if (zset->remove(m) == REDIS_OK) {
+                    count++;
+                }
+            }
+            return count;
+        }
+        return 0;
+    }
+
+    size_t zrank(sstring& key, sstring& member, bool reverse)
+    {
+        redis_key rk {key};
+        auto zset = fetch_zset(rk);
+        if (zset == nullptr) {
+            return -1;
+        }
+        redis_key m{member};
+        return zset->rank(m, reverse);
+    }
+
     std::vector<item_ptr> zrange(sstring& key, size_t begin, size_t end, bool reverse)
     {
         redis_key rk {key};
         auto zset = fetch_zset(rk);
         if (zset == nullptr) {
-            zset = new sorted_set();
-            auto zset_item = item::create(key, zset, REDIS_ZSET);
-            if (_store->set(key, zset_item) != 0) {
-                return std::vector<item_ptr>();
-            }
+            return std::vector<item_ptr>();
         }
         return zset->range_by_rank(begin, end, reverse);
     }
