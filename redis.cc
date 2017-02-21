@@ -1236,37 +1236,80 @@ future<message> redis_service::zadd(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
+    std::string un = args._command_args[1];
+    std::transform(un.begin(), un.end(), un.begin(), ::tolower);
+    auto zadd_flags = ZADD_NONE;
+    size_t first_score_index = 2;
+    if (un == "nx") {
+        zadd_flags |= ZADD_NX;
+    }
+    else if (un == "xx") {
+        zadd_flags |= ZADD_XX;
+    }
+    else if (un == "ch") {
+        zadd_flags |= ZADD_CH;
+    }
+    else if (un == "incr") {
+        zadd_flags |= ZADD_INCR;
+    }
+    else {
+        first_score_index = 1;
+    }
     auto cpu = get_cpu(key);
-    if (args._command_args_count == 3) {
-        sstring& score_ = args._command_args[1];
-        sstring& member = args._command_args[2];
-        double score = std::stod(score_.c_str());
+    size_t c = (args._command_args_count - first_score_index) / 2;
+    if (zadd_flags & ZADD_INCR) {
+        if (args._command_args_count - first_score_index > 2) {
+            return syntax_err_message();
+        }
+        sstring& member = args._command_args[first_score_index];
+        sstring& delta = args._command_args[first_score_index + 1];
+        double score = std::stod(delta.c_str());
         if (engine().cpu_id() == cpu) {
-            return size_message(_db_peers.local().zadd(key, member, score));
+            auto&& u = _db_peers.local().zincrby(key, member, score);
+            return u.second ? double_message(u.first) : err_message();
         }
         else {
-            return _db_peers.invoke_on(cpu, &db::zadd<remote_origin_tag>, std::ref(key), std::ref(member), score).then([] (auto u) {
-                return size_message(u);
+            return _db_peers.invoke_on(cpu, &db::zincrby<remote_origin_tag>, std::ref(key), std::ref(member), score).then([] (auto&& u) {
+                return u.second ? double_message(u.first) : err_message();
             });
         }
     }
     else {
-        std::unordered_map<sstring, double> members;
-        size_t c = (args._command_args_count - 1) / 2;
-        for (size_t i = 1; i < c; ++i) {
-            sstring& member = args._command_args[i];
-            sstring& score_ = args._command_args[i + 1];
-            double score = std::stod(score_.c_str());
-            members.emplace(std::pair<sstring, double>(member, score));
+        if (c % 2 != 0 || ((zadd_flags & ZADD_NX) && (zadd_flags & ZADD_XX))) {
+            return syntax_err_message();
         }
-        if (engine().cpu_id() == cpu) {
-            return size_message(_db_peers.local().zadds(key, members));
+    }
+    std::unordered_map<sstring, double> members;
+    for (size_t i = first_score_index; i < c; ++i) {
+        sstring& member = args._command_args[i];
+        sstring& score_ = args._command_args[i + 1];
+        double score = std::stod(score_.c_str());
+        members.emplace(std::pair<sstring, double>(member, score));
+    }
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db_peers.local().zadds(key, members, zadd_flags);
+        if (u.second == REDIS_OK) {
+            return size_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
         }
         else {
-            return _db_peers.invoke_on(cpu, &db::zadds<remote_origin_tag>, std::ref(key), std::ref(members)).then([] (auto u) {
-                return size_message(u);
-            });
+            return err_message();
         }
+    }
+    else {
+        return _db_peers.invoke_on(cpu, &db::zadds<remote_origin_tag>, std::ref(key), std::ref(members), zadd_flags).then([] (auto&& u) {
+            if (u.second == REDIS_OK) {
+                return size_message(u.first);
+            }
+            else if (u.second == REDIS_WRONG_TYPE) {
+                return wrong_type_err_message();
+            }
+            else {
+                return err_message();
+            }
+        });
     }
 }
 

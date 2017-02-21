@@ -340,6 +340,7 @@ public:
     inline uint64_t uint64() { return _u._uint64; }
     inline int64_t int64() { return _u._int64; }
     inline double Double() { return _u._double; }
+    inline void set_double(double d) { _u._double = d; }
 
     inline uint64_t incr(uint64_t step) {
         _u._uint64 += step;
@@ -390,4 +391,11 @@ static const sstring msg_type_list {"+list\r\n"};
 static const sstring msg_type_set {"+set\r\n"};
 static const sstring msg_type_zset {"+zset\r\n"};
 static const sstring msg_type_hash {"+hash\r\n"};
+
+// some flags
+static const int ZADD_NONE = 0;
+static constexpr const int ZADD_INCR = (1 << 0); // increment the score instead of setting it.
+static constexpr const int ZADD_NX   = (1 << 1); // don't touch elements not already existing.
+static constexpr const int ZADD_XX   = (1 << 2); // only touch elements already exisitng.
+static constexpr const int ZADD_CH   = (1 << 3); // number elementes were changed.
 } /* namespace redis */

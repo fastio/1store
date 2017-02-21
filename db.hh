@@ -287,9 +287,9 @@ public:
     }
 
     template <typename origin = local_origin_tag> inline
-    int zadds(sstring& key, std::unordered_map<sstring, double>& members)
+    std::pair<size_t, int> zadds(sstring& key, std::unordered_map<sstring, double>& members, int flags)
     {
-        return _zset_storage.zadds<origin>(key, members);
+        return _zset_storage.zadds<origin>(key, members, flags);
     }
 
     template <typename origin = local_origin_tag> inline
@@ -305,9 +305,10 @@ public:
     {
         return _zset_storage.zcount(key, min, max);
     }
+    template <typename origin = local_origin_tag> inline
     std::pair<double, bool> zincrby(sstring& key, sstring& member, double delta)
     {
-        return _zset_storage.zincrby(key, member, delta);
+        return _zset_storage.zincrby<origin>(key, member, delta);
     }
     std::vector<item_ptr> zrange(sstring& key, size_t begin, size_t end, bool reverse)
     {

@@ -29,12 +29,12 @@ struct skiplist_node
     double _score;
     struct next_levels {
         skiplist_node* _next;
-        unsigned int _span;
+        int _span;
     };
     skiplist_node* _prev;
     next_levels _next[];
-    skiplist_node(unsigned int level, double score, lw_shared_ptr<item> value) : _value(value), _score(score), _prev(nullptr) {
-        for (unsigned int i = 0; i < level; ++i) {
+    skiplist_node(int level, double score, lw_shared_ptr<item> value) : _value(value), _score(score), _prev(nullptr) {
+        for (int i = 0; i < level; ++i) {
            _next[i]._next = nullptr;
            _next[i]._span = 0;
         }
@@ -64,14 +64,14 @@ class skiplist
 private:
     skiplist_node* _head;
     skiplist_node* _tail;
-    unsigned int _level;
+    int _level;
     size_t _size;
-    static const unsigned int MAX_LEVEL = 32;
+    static const int MAX_LEVEL = 32;
 public:
     skiplist();
     ~skiplist();
-    unsigned int random_level();
-    skiplist_node* create_skiplist_node(unsigned int level, double score, lw_shared_ptr<item> value);
+    int random_level();
+    skiplist_node* create_skiplist_node(int level, double score, lw_shared_ptr<item> value);
     skiplist_node* insert(double score, lw_shared_ptr<item> value);
     void remove_node(skiplist_node* x, skiplist_node** update);
     int remove_item(lw_shared_ptr<item> value, skiplist_node** node);
@@ -168,17 +168,17 @@ int skiplist::item_compare(lw_shared_ptr<item> l, lw_shared_ptr<item> r)
     return 0;
 }
 
-unsigned int skiplist::random_level()
+int skiplist::random_level()
 {
-    static const unsigned int kBranching = 4;
-    unsigned int level = 1;
+    static const int kBranching = 4;
+    int level = 1;
     while (level < MAX_LEVEL && (random() % kBranching == 0)) {
         level++;
     }
     return level;
 }
 
-skiplist_node* skiplist::create_skiplist_node(unsigned int level, double score, lw_shared_ptr<item> value)
+skiplist_node* skiplist::create_skiplist_node(int level, double score, lw_shared_ptr<item> value)
 {
    using next_levels = skiplist_node::next_levels;
    char* m = static_cast<char*>(malloc(sizeof(skiplist_node) + level * sizeof(next_levels)));
@@ -189,9 +189,9 @@ skiplist_node* skiplist::create_skiplist_node(unsigned int level, double score, 
 skiplist_node* skiplist::insert(double score, lw_shared_ptr<item> value)
 {
     skiplist_node* update[MAX_LEVEL];
-    unsigned int rank[MAX_LEVEL];
+    int rank[MAX_LEVEL];
     auto x = _head;
-    for (unsigned int level = _level - 1; level >= 0; level--) {
+    for (int level = _level - 1; level >= 0; level--) {
         rank[level] = level == (_level-1) ? 0 : rank[level + 1];
         while (x->_next[level]._next && (x->_next[level]._next->_score < score || (x->_next[level]._next->_score == score && item_compare(x->_next[level]._next->_value, value) < 0))) {
             rank[level] += x->_next[level]._span;
@@ -209,13 +209,13 @@ skiplist_node* skiplist::insert(double score, lw_shared_ptr<item> value)
         _level = level;
     }
     x = create_skiplist_node(level, score, value);
-    for (unsigned int level = 0; level < _level; ++level) {
+    for (int level = 0; level < _level; ++level) {
         x->_next[level]._next = update[level]->_next[level]._next;
         update[level]->_next[level]._next = x;
         x->_next[level]._span = update[level]->_next[level]._span - (rank[0] - rank[level]);
         update[level]->_next[level]._span = (rank[0] - rank[level]) + 1;
     }
-    for (unsigned l  = level; l < _level; l++) {
+    for (int l  = level; l < _level; l++) {
         update[l]->_next[l]._span++;
     }
     x->_prev = (update[0] == _head) ? nullptr : update[0];
@@ -229,7 +229,7 @@ skiplist_node* skiplist::insert(double score, lw_shared_ptr<item> value)
 
 void skiplist::remove_node(skiplist_node* x, skiplist_node** update)
 {
-    for (unsigned l = 0; l < _level; l++) {
+    for (int l = 0; l < _level; l++) {
         if (update[l]->_next[l]._next == x) {
             update[l]->_next[l]._span += x->_next[l]._span - 1;
             update[l]->_next[l]._next = x->_next[l]._next;
@@ -252,7 +252,7 @@ int skiplist::remove_item(lw_shared_ptr<item> value, skiplist_node** node)
     skiplist_node* update[MAX_LEVEL];
     auto score = value->Double();
     auto x = _head;
-    for (unsigned int level = _level - 1; level >= 0; level--) {
+    for (int level = _level - 1; level >= 0; level--) {
         while (x->_next[level]._next && (x->_next[level]._next->_score < score || (x->_next[level]._next->_score == score && item_compare(x->_next[level]._next->_value, value) < 0))) {
             x = x->_next[level]._next;
         }
@@ -397,6 +397,8 @@ struct sorted_set::rep {
     double incr(const redis_key& key, double delta);
     std::vector<item_ptr> range_by_score(double min, double max, bool reverse);
     std::vector<item_ptr> range_by_rank(size_t begin, size_t end, bool reverse);
+    lw_shared_ptr<item> fetch(const redis_key& key);
+    bool update(lw_shared_ptr<item> value, double score);
 };
 
 sorted_set::rep::rep()
@@ -409,6 +411,22 @@ sorted_set::rep::~rep()
 {
     delete _list;
     delete _dict;
+}
+
+lw_shared_ptr<item> sorted_set::rep::fetch(const redis_key& key)
+{
+    return _dict->fetch_raw(key);
+}
+
+bool sorted_set::rep::update(lw_shared_ptr<item> value, double score)
+{
+    if (value) {
+       _list->remove_item(value, nullptr);
+       value->set_double(score);
+       _list->insert(score, value);
+       return true;
+    }
+    return false;
 }
 
 double sorted_set::rep::incr(const redis_key& key, double delta)
@@ -457,7 +475,7 @@ int sorted_set::rep::insert(const redis_key& key, lw_shared_ptr<item> m)
     if (node != nullptr) {
         return _dict->set(key, m);
     }
-    return 0;
+    return REDIS_ERR;
 }
 
 size_t sorted_set::rep::count_in_range(double min, double max)
@@ -568,6 +586,16 @@ double sorted_set::incrby(const redis_key& key, double delta)
 size_t sorted_set::count(double min, double max)
 {
     return _rep->count_in_range(min, max);
+}
+
+bool sorted_set::update(lw_shared_ptr<item> value, double score)
+{
+    return _rep->update(value, score);
+}
+
+lw_shared_ptr<item> sorted_set::fetch(const redis_key& key)
+{
+    return _rep->fetch(key);
 }
 }
 
