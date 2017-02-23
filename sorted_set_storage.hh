@@ -50,7 +50,9 @@ public:
             if (it->type() == REDIS_ZSET) {
                 zset = it->zset_ptr();
             }
-            return result_type {0, REDIS_WRONG_TYPE};
+            else {
+                return result_type {0, REDIS_WRONG_TYPE};
+            }
         }
         size_t count = 0;
         for (auto& entry : members) {
@@ -70,7 +72,7 @@ public:
             }
             else if (!(flags & ZADD_XX)) {
                 auto new_item = item::create(member_data, score);
-                if (zset->insert(member_data, new_item)) {
+                if (zset->insert(member_data, new_item) == REDIS_OK) {
                     count++;
                 }
             }
@@ -163,7 +165,7 @@ public:
         if (!it) {
             zset = new sorted_set();
             auto zset_item = item::create(rk, zset, REDIS_ZSET);
-            if (_store->set(rk, zset_item) != 0) {
+            if (_store->set(rk, zset_item) != REDIS_OK) {
                 return result_type{0, false};
             }
         }
@@ -173,12 +175,29 @@ public:
         redis_key mk {member};
         if (zset->exists(mk) == false) {
             auto zmember = item::create(mk, delta);
-            if (zset->insert(mk, zmember) != 0) {
+            if (zset->insert(mk, zmember) != REDIS_OK) {
                 return result_type{0, false};
             }
             return result_type{delta, true};
         }
         return result_type{zset->incrby(mk, delta), true};
+    }
+
+    std::pair<double, bool> zscore(sstring& key, sstring& member)
+    {
+        using result_type = std::pair<double, bool>;
+        redis_key rk {key};
+        auto it = _store->fetch_raw(key);
+        if (!it || (it && it->type() != REDIS_ZSET)) {
+            return result_type{0, false};
+        }
+        auto zset = it->zset_ptr();
+        redis_key mk {member};
+        auto value = zset->fetch(mk);
+        if (!value) {
+            return result_type{0, false};
+        }
+        return result_type{value->Double(), true};
     }
 protected:
     inline sorted_set* fetch_zset(const redis_key& key)

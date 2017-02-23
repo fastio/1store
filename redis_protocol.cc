@@ -291,12 +291,20 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.zrangebyscore(_command_args, true).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
+                case redis_protocol_parser::command::zrem:
+                    return _redis.zrem(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
                 case redis_protocol_parser::command::zcard:
                     return _redis.zcard(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::zcount:
                     return _redis.zcount(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
+                case redis_protocol_parser::command::zscore:
+                    return _redis.zscore(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::zincrby:
@@ -312,11 +320,11 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                         return out.write(std::move(m));
                     });
                 default:
-                    return out.write("+Not Implemented\r\n");
+                    return out.write("+Not Implemented");
                 };
             }
             default:
-                return out.write("+Not Implemented\r\n");
+                return out.write("+Error\r\n");
         };
         std::abort();
     }).then_wrapped([this, &in, &out] (auto&& f) -> future<> {

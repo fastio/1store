@@ -326,6 +326,10 @@ public:
     {
         return _zset_storage.zrem(key, members);
     }
+    std::pair<double, bool> zscore(sstring& key, sstring& member)
+    {
+        return _zset_storage.zscore(key, member);
+    }
     future<> stop() { return make_ready_future<>(); }
 private:
     void expired_items()

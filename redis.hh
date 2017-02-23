@@ -139,10 +139,6 @@ public:
     future<message> zincrby(args_collection& args);
     future<message> zrank(args_collection&, bool);
     future<message> zrem(args_collection&);
-    future<message> zremrangebyrank(args_collection&);
-    future<message> zremrangebyscore(args_collection&);
-    future<message> zrevrange(args_collection&);
-    future<message> zrevrank(args_collection&);
     future<message> zscore(args_collection&);
     future<message> zunionstore(args_collection&);
     future<message> zinterstore(args_collection&);

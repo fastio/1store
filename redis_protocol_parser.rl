@@ -139,8 +139,7 @@ zadd = "zadd"i ${_command = command::zadd; };
 zcard  = "zcard"i ${_command = command::zcard; };
 zcount = "zcount"i ${_command = command::zcount; };
 zincrby = "zincrby"i ${_command = command::zincrby; };
-zrange = "zrange"i ${_command = command::zrange; };
-zrangebyscore = "zrangebyscore"i ${_command = command::zrangebyscore; };
+zrange = "zrange"i ${_command = command::zrange;};
 zrank = "zrank"i ${_command = command::zrank; };
 zrem = "zrem"i ${_command = command::zrem; };
 zremrangebyrank = "zremrangebyrank"i ${_command = command::zremrangebyrank; };
@@ -157,13 +156,21 @@ zinter = "zinter"i ${_command = command::zinter; };
 zdiff = "zunion"i ${_command = command::zdiff; };
 zscan = "zscan"i ${_command = command::zscan; };
 zrangebylex = "zrangebylex"i ${_command = command::zrangebylex; };
-zlexcount = "zlexcount"i ${_command = command::zlexcount; };
-zremrangebylex = "zremrangebylex" ${_command = command::zremrangebylex; };
+zrangebyscore = "zrangebyscore"i ${_command = command::zrangebyscore; };
+zlexcount = "zlexcount"i ${_command = command::zlexcount;};
+zremrangebylex = "zremrangebylex"i ${_command = command::zremrangebylex; };
 
-command = (set | get | del | mget | mset | echo | ping | incr | decr | incrby | decrby | command_ | exists | append | strlen | lpush | lpushx | lpop | llen | lindex | linsert | lrange | lset | rpush | rpushx | rpop | lrem | ltrim | hset | hget | hdel | hlen | hexists | hstrlen | hincrby | hincrbyfloat | hkeys | hvals | hmget | hgetall   | sadd | scard | sismember | smembers | srem | sdiff | sdiffstore | sinter | sinterstore | sunion | sunionstore | smove | type | expire | pexpire | persist | ttl | pttl | zadd | zcard | zcount | zincrby | zrange | zrangebyscore | zrank | zrem | zremrangebyrank | zremrangebyscore | zrevrange | zrevrangebyscore | zrevrank | zscore | zunionstore  | zinterstore | zdiffstore | zunion | zinter | zdiff | zscan | zrangebylex | zlexcount | zremrangebylex );
+command = (set | get | del | mget | mset | echo | ping | incr | decr | incrby | decrby | command_ | exists | append |
+           strlen | lpush | lpushx | lpop | llen | lindex | linsert | lrange | lset | rpush | rpushx | rpop | lrem |
+           ltrim | hset | hget | hdel | hlen | hexists | hstrlen | hincrby | hincrbyfloat | hkeys | hvals | hmget |
+           hgetall   | sadd | scard | sismember | smembers | srem | sdiff | sdiffstore | sinter | sinterstore | sunion |
+           sunionstore | smove | type | expire | pexpire | persist | ttl | pttl | zadd | zcard | zcount | zincrby |
+           zrangebyscore | zrank | zremrangebyrank | zremrangebyscore | zremrangebylex | zrem | zrevrangebyscore | zrevrange| zrevrank |
+           zscore | zunionstore  | zinterstore | zdiffstore | zunion | zinter | zdiff | zscan | zrangebylex | zlexcount |
+           zrange);
 arg = '$' u32 crlf ${ _arg_size = _u32;};
 
-main := (args_count (arg (command) crlf) (arg @{fcall blob; } crlf)+) ${_state = state::ok;};
+main := (args_count (arg command crlf) (arg @{fcall blob; } crlf)+) ${_state = state::ok;};
 
 prepush {
     prepush();

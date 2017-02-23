@@ -1256,7 +1256,6 @@ future<message> redis_service::zadd(args_collection& args)
         first_score_index = 1;
     }
     auto cpu = get_cpu(key);
-    size_t c = (args._command_args_count - first_score_index) / 2;
     if (zadd_flags & ZADD_INCR) {
         if (args._command_args_count - first_score_index > 2) {
             return syntax_err_message();
@@ -1275,14 +1274,14 @@ future<message> redis_service::zadd(args_collection& args)
         }
     }
     else {
-        if (c % 2 != 0 || ((zadd_flags & ZADD_NX) && (zadd_flags & ZADD_XX))) {
+        if ((args._command_args_count - first_score_index) % 2 != 0 || ((zadd_flags & ZADD_NX) && (zadd_flags & ZADD_XX))) {
             return syntax_err_message();
         }
     }
     std::unordered_map<sstring, double> members;
-    for (size_t i = first_score_index; i < c; ++i) {
-        sstring& member = args._command_args[i];
-        sstring& score_ = args._command_args[i + 1];
+    for (size_t i = first_score_index; i < args._command_args_count; i += 2) {
+        sstring& score_ = args._command_args[i];
+        sstring& member = args._command_args[i + 1];
         double score = std::stod(score_.c_str());
         members.emplace(std::pair<sstring, double>(member, score));
     }
@@ -1454,9 +1453,23 @@ future<message> redis_service::zrem(args_collection& args)
     }
 }
 
-future<message> redis_service::zscore(args_collection&)
+future<message> redis_service::zscore(args_collection& args)
 {
-    return syntax_err_message();
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    sstring& member = args._command_args[1];
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db_peers.local().zscore(key, member);
+        return u.second ? double_message(u.first) : nil_message();
+    }
+    else {
+        return _db_peers.invoke_on(cpu, &db::zscore, std::ref(key), std::ref(member)).then([] (auto&& u) {
+            return u.second ? double_message(u.first) : nil_message();
+        });
+    }
 }
 
 future<message> redis_service::zunionstore(args_collection&)
@@ -1499,8 +1512,4 @@ future<message> redis_service::zlexcount(args_collection&)
     return syntax_err_message();
 }
 
-future<message> redis_service::zrevrangebylex(args_collection&)
-{
-    return syntax_err_message();
-}
 } /* namespace redis */
