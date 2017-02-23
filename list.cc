@@ -80,7 +80,7 @@ list::~list()
     }
 }
 
-long list::length()
+long list::size()
 {
     return _rep->length();
 }

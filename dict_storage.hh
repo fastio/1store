@@ -102,7 +102,11 @@ public:
         if (d != nullptr) {
             auto hash = std::hash<sstring>()(field);
             redis_key field_key{std::ref(field), hash};
-            return d->remove(field_key);
+            auto result = d->remove(field_key);
+            if (d->size() == 0) {
+                _store->remove(rk);
+            }
+            return result;
         }
         return 0;
     }

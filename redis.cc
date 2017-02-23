@@ -1264,11 +1264,11 @@ future<message> redis_service::zadd(args_collection& args)
         sstring& delta = args._command_args[first_score_index + 1];
         double score = std::stod(delta.c_str());
         if (engine().cpu_id() == cpu) {
-            auto&& u = _db_peers.local().zincrby(key, member, score);
+            auto&& u = _db_peers.local().zincrby(key, std::move(member), score);
             return u.second ? double_message(u.first) : err_message();
         }
         else {
-            return _db_peers.invoke_on(cpu, &db::zincrby<remote_origin_tag>, std::ref(key), std::ref(member), score).then([] (auto&& u) {
+            return _db_peers.invoke_on(cpu, &db::zincrby<remote_origin_tag>, std::ref(key), std::move(member), score).then([] (auto&& u) {
                 return u.second ? double_message(u.first) : err_message();
             });
         }
@@ -1286,7 +1286,7 @@ future<message> redis_service::zadd(args_collection& args)
         members.emplace(std::pair<sstring, double>(member, score));
     }
     if (engine().cpu_id() == cpu) {
-        auto&& u = _db_peers.local().zadds(key, members, zadd_flags);
+        auto&& u = _db_peers.local().zadds(key, std::move(members), zadd_flags);
         if (u.second == REDIS_OK) {
             return size_message(u.first);
         }
@@ -1298,7 +1298,7 @@ future<message> redis_service::zadd(args_collection& args)
         }
     }
     else {
-        return _db_peers.invoke_on(cpu, &db::zadds<remote_origin_tag>, std::ref(key), std::ref(members), zadd_flags).then([] (auto&& u) {
+        return _db_peers.invoke_on(cpu, &db::zadds<remote_origin_tag>, std::ref(key), std::move(members), zadd_flags).then([] (auto&& u) {
             if (u.second == REDIS_OK) {
                 return size_message(u.first);
             }
@@ -1400,13 +1400,13 @@ future<message> redis_service::zincrby(args_collection& args)
     double delta = std::stod(args._command_args[2].c_str());
     auto cpu = get_cpu(key);
     if (engine().cpu_id() == cpu) {
-        auto&& result = _db_peers.local().zincrby(key, member, delta);
+        auto&& result = _db_peers.local().zincrby(key, std::move(member), delta);
         if (result.second) {
             return double_message(result.first);
         }
         return wrong_type_err_message();
     }
-    return _db_peers.invoke_on(cpu, &db::zincrby, std::ref(key), std::ref(member), delta).then([] (auto u) {
+    return _db_peers.invoke_on(cpu, &db::zincrby, std::ref(key), std::move(member), delta).then([] (auto u) {
         if (u.second) {
             return double_message(u.first);
         }
@@ -1423,10 +1423,10 @@ future<message> redis_service::zrank(args_collection& args, bool reverse)
     sstring& member = args._command_args[1];
     auto cpu = get_cpu(key);
     if (engine().cpu_id() == cpu) {
-        auto u = _db_peers.local().zrank(key, member, reverse);
+        auto u = _db_peers.local().zrank(key, std::move(member), reverse);
         return u >= 0 ? size_message(u) : nil_message();
     }
-    return _db_peers.invoke_on(cpu, &db::zrank, std::ref(key), std::ref(member), reverse).then([] (auto u) {
+    return _db_peers.invoke_on(cpu, &db::zrank, std::ref(key), std::move(member), reverse).then([] (auto u) {
         return u >= 0 ? size_message(u) : nil_message();
     });
 }
@@ -1444,10 +1444,10 @@ future<message> redis_service::zrem(args_collection& args)
     }
     auto cpu = get_cpu(key);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().zrem(key, members));
+        return size_message(_db_peers.local().zrem(key, std::move(members)));
     }
     else {
-        return _db_peers.invoke_on(cpu, &db::zrem, std::ref(key), std::ref(members)).then([] (auto u) {
+        return _db_peers.invoke_on(cpu, &db::zrem, std::ref(key), std::move(members)).then([] (auto u) {
             return size_message(u);
         });
     }
@@ -1462,11 +1462,11 @@ future<message> redis_service::zscore(args_collection& args)
     sstring& member = args._command_args[1];
     auto cpu = get_cpu(key);
     if (engine().cpu_id() == cpu) {
-        auto&& u = _db_peers.local().zscore(key, member);
+        auto&& u = _db_peers.local().zscore(key, std::move(member));
         return u.second ? double_message(u.first) : nil_message();
     }
     else {
-        return _db_peers.invoke_on(cpu, &db::zscore, std::ref(key), std::ref(member)).then([] (auto&& u) {
+        return _db_peers.invoke_on(cpu, &db::zscore, std::ref(key), std::move(member)).then([] (auto&& u) {
             return u.second ? double_message(u.first) : nil_message();
         });
     }

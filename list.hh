@@ -49,6 +49,6 @@ public:
     std::vector<foreign_ptr<lw_shared_ptr<item>>> range(int start, int end);
     int trim(int start, int end);
     int trem(int count, sstring& value);
-    long length();
+    long size();
 };
 }

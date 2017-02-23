@@ -265,9 +265,9 @@ int skiplist::remove_item(lw_shared_ptr<item> value, skiplist_node** node)
            delete node;
         else
             *node = x;
-        return 1;
+        return REDIS_OK;
     }
-    return 0;
+    return REDIS_ERR;
 }
 
 bool skiplist::include_range(const range& r)
@@ -453,7 +453,7 @@ int sorted_set::rep::remove(const redis_key& key)
     if (n) {
         return _list->remove_item(n, nullptr);
     }
-    return 0;
+    return REDIS_ERR;
 }
 
 size_t sorted_set::rep::rank(const redis_key& key, bool reverse)

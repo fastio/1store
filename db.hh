@@ -287,16 +287,11 @@ public:
     }
 
     template <typename origin = local_origin_tag> inline
-    std::pair<size_t, int> zadds(sstring& key, std::unordered_map<sstring, double>& members, int flags)
+    std::pair<size_t, int> zadds(sstring& key, std::unordered_map<sstring, double>&& members, int flags)
     {
-        return _zset_storage.zadds<origin>(key, members, flags);
+        return _zset_storage.zadds<origin>(key, std::move(members), flags);
     }
 
-    template <typename origin = local_origin_tag> inline
-    int zadd(sstring& key, sstring& member, double score)
-    {
-        return _zset_storage.zadd<origin>(key, member, score);
-    }
     size_t zcard(sstring& key) 
     {
         return _zset_storage.zcard(key);
@@ -306,9 +301,9 @@ public:
         return _zset_storage.zcount(key, min, max);
     }
     template <typename origin = local_origin_tag> inline
-    std::pair<double, bool> zincrby(sstring& key, sstring& member, double delta)
+    std::pair<double, bool> zincrby(sstring& key, sstring&& member, double delta)
     {
-        return _zset_storage.zincrby<origin>(key, member, delta);
+        return _zset_storage.zincrby<origin>(key, std::move(member), delta);
     }
     std::vector<item_ptr> zrange(sstring& key, size_t begin, size_t end, bool reverse)
     {
@@ -318,17 +313,17 @@ public:
     {
         return _zset_storage.zrangebyscore(key, min, max, reverse);
     }
-    size_t zrank(sstring& key, sstring& member, bool reverse)
+    size_t zrank(sstring& key, sstring&& member, bool reverse)
     {
-        return _zset_storage.zrank(key, member, reverse);
+        return _zset_storage.zrank(key, std::move(member), reverse);
     }
-    size_t zrem(sstring& key, std::vector<sstring>& members)
+    size_t zrem(sstring& key, std::vector<sstring>&& members)
     {
-        return _zset_storage.zrem(key, members);
+        return _zset_storage.zrem(key, std::move(members));
     }
-    std::pair<double, bool> zscore(sstring& key, sstring& member)
+    std::pair<double, bool> zscore(sstring& key, sstring&& member)
     {
-        return _zset_storage.zscore(key, member);
+        return _zset_storage.zscore(key, std::move(member));
     }
     future<> stop() { return make_ready_future<>(); }
 private:

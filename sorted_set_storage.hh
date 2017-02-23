@@ -33,7 +33,7 @@ public:
     {
     }
     template<typename origin = local_origin_tag>
-    std::pair<size_t, int> zadds(sstring& key, std::unordered_map<sstring, double>& members, int flags)
+    std::pair<size_t, int> zadds(sstring& key, std::unordered_map<sstring, double>&& members, int flags)
     {
         using result_type = std::pair<size_t, int>;
         redis_key rk {key};
@@ -80,7 +80,7 @@ public:
         return result_type {count, REDIS_OK};
     }
 
-    size_t zrem(sstring& key, std::vector<sstring>& members)
+    size_t zrem(sstring& key, std::vector<sstring>&& members)
     {
         redis_key rk {key};
         auto zset = fetch_zset(rk);
@@ -92,12 +92,15 @@ public:
                     count++;
                 }
             }
+            if (zset->size() == 0) {
+                _store->remove(rk);
+            }
             return count;
         }
         return 0;
     }
 
-    size_t zrank(sstring& key, sstring& member, bool reverse)
+    size_t zrank(sstring& key, sstring&& member, bool reverse)
     {
         redis_key rk {key};
         auto zset = fetch_zset(rk);
@@ -153,7 +156,7 @@ public:
     }
 
     template<typename origin = local_origin_tag>
-    std::pair<double, bool> zincrby(sstring& key, sstring& member, double delta)
+    std::pair<double, bool> zincrby(sstring& key, sstring&& member, double delta)
     {
         using result_type = std::pair<double, bool>;
         redis_key rk {key};
@@ -183,7 +186,7 @@ public:
         return result_type{zset->incrby(mk, delta), true};
     }
 
-    std::pair<double, bool> zscore(sstring& key, sstring& member)
+    std::pair<double, bool> zscore(sstring& key, sstring&& member)
     {
         using result_type = std::pair<double, bool>;
         redis_key rk {key};

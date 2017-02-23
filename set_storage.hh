@@ -162,6 +162,9 @@ public:
                     count++;
                 }
             }
+            if (d->size() == 0) {
+                _store->remove(rk);
+            }
         }
         return count;
     }
@@ -174,6 +177,9 @@ public:
             auto member_hash = std::hash<sstring>()(member);
             redis_key member_data {std::ref(member), std::ref(member_hash)};
             if (d->remove(member_data) == REDIS_OK) {
+                if (d->size() == 0) {
+                    _store->remove(rk);
+                }
                 return 1;
             }
         }

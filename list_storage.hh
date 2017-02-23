@@ -53,7 +53,7 @@ public:
             }
         }
         auto new_item = item::create(origin::move_if_local(value));
-        return (left ? l->add_head(new_item) : l->add_tail(new_item)) == 0 ? static_cast<int>(l->length()) : 0;
+        return (left ? l->add_head(new_item) : l->add_tail(new_item)) == 0 ? static_cast<int>(l->size()) : 0;
     }
 
     item_ptr pop(sstring& key, bool left)
@@ -62,7 +62,7 @@ public:
         list* l = fetch_list(rk);
         if (l != nullptr) {
             auto it = left ? l->pop_head() : l->pop_tail();
-            if (l->length() == 0) {
+            if (l->size() == 0) {
                 _store->remove(rk);
             }
             return it;
@@ -75,7 +75,7 @@ public:
         redis_key rk{key};
         list* l = fetch_list(rk);
         if (l != nullptr) {
-            return l->length();
+            return l->size();
         } 
         return 0;
     }
@@ -132,7 +132,11 @@ public:
         redis_key rk{key};
         list* l = fetch_list(rk);
         if (l != nullptr) {
-            return l->trem(count, value);
+            auto result = l->trem(count, value);
+            if (l->size() == 0) {
+                _store->remove(rk);
+            }
+            return result;
         }
         return 0;
     }
