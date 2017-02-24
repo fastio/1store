@@ -21,6 +21,7 @@
 #include "sorted_set.hh"
 #include "iterator.hh"
 #include "dict.hh"
+#include <cstring>
 namespace redis 
 {
 struct skiplist_node
@@ -261,8 +262,9 @@ int skiplist::remove_item(lw_shared_ptr<item> value, skiplist_node** node)
     x = x->_next[0]._next;
     if (x && score == x->_score && item_compare(x->_value, value) == 0) {
         remove_node(x, update);
-        if (!node)
+        if (!node) {
            delete node;
+        }
         else
             *node = x;
         return REDIS_OK;
@@ -388,6 +390,7 @@ struct sorted_set::rep {
     ~rep();
     dict* _dict;
     skiplist* _list;
+    int exists(const redis_key& key);
     int insert(const redis_key& key, lw_shared_ptr<item> m);
     inline size_t size() { return _dict->size(); } 
     size_t count_in_range(double min, double max);
@@ -398,7 +401,7 @@ struct sorted_set::rep {
     std::vector<item_ptr> range_by_score(double min, double max, bool reverse);
     std::vector<item_ptr> range_by_rank(size_t begin, size_t end, bool reverse);
     lw_shared_ptr<item> fetch(const redis_key& key);
-    bool update(lw_shared_ptr<item> value, double score);
+    int update(lw_shared_ptr<item> value, double score);
 };
 
 sorted_set::rep::rep()
@@ -413,27 +416,34 @@ sorted_set::rep::~rep()
     delete _dict;
 }
 
+int sorted_set::rep::exists(const redis_key& key)
+{
+    return _dict->exists(key) ? REDIS_OK : REDIS_ERR;
+}
+
 lw_shared_ptr<item> sorted_set::rep::fetch(const redis_key& key)
 {
     return _dict->fetch_raw(key);
 }
 
-bool sorted_set::rep::update(lw_shared_ptr<item> value, double score)
+int sorted_set::rep::update(lw_shared_ptr<item> value, double score)
 {
     if (value) {
        _list->remove_item(value, nullptr);
        value->set_double(score);
        _list->insert(score, value);
-       return true;
+       return REDIS_OK; 
     }
-    return false;
+    return REDIS_ERR;
 }
 
 double sorted_set::rep::incr(const redis_key& key, double delta)
 {
     auto n = _dict->fetch_raw(key);
     if (n) {
-        return n->incr(delta);
+        auto score = n->Double() + delta;
+        update(n, score);
+        return n->Double();
     }
     return 0;
 }
@@ -461,10 +471,10 @@ size_t sorted_set::rep::rank(const redis_key& key, bool reverse)
     auto n = _dict->fetch_raw(key);
     if (n) {
         auto rank = _list->get_rank_of_item(n);
-        if (!reverse) {
+        if (reverse) {
             return _list->size() - rank; 
         }
-        return rank;
+        return rank - 1;
     }
     return -1;
 }
@@ -588,7 +598,7 @@ size_t sorted_set::count(double min, double max)
     return _rep->count_in_range(min, max);
 }
 
-bool sorted_set::update(lw_shared_ptr<item> value, double score)
+int sorted_set::update(lw_shared_ptr<item> value, double score)
 {
     return _rep->update(value, score);
 }
@@ -607,5 +617,9 @@ size_t sorted_set::rank(const redis_key& key, bool reverse)
 {
     return _rep->rank(key, reverse);
 }
-}
 
+int sorted_set::exists(const redis_key& key)
+{
+    return _rep->exists(key);
+}
+}

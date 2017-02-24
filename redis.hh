@@ -243,12 +243,23 @@ private:
         msg.append_static(msg_crlf);
         return make_ready_future<message>(std::move(msg));
     }
+    template<bool string = false>
     static future<message> double_message(double u)
     {
         scattered_message<char> msg;
-        msg.append_static(msg_num_tag);
-        msg.append(to_sstring(u));
-        msg.append_static(msg_crlf);
+        if (!string) {
+            msg.append_static(msg_num_tag);
+            msg.append(to_sstring(u));
+            msg.append_static(msg_crlf);
+        }
+        else {
+            auto&& n = to_sstring(u);
+            msg.append_static(msg_batch_tag);
+            msg.append(to_sstring(n.size()));
+            msg.append_static(msg_crlf);
+            msg.append(std::move(n));
+            msg.append_static(msg_crlf);
+        }
         return make_ready_future<message>(std::move(msg));
     }
     static future<message> item_message(sstring&& u) 

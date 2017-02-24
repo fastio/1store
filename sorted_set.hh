@@ -36,10 +36,10 @@ private:
 public:
     sorted_set();
     ~sorted_set();
-    bool exists(const redis_key& key) { return false; }
+    int exists(const redis_key& key);
     int insert(const redis_key& key, lw_shared_ptr<item> item);
     lw_shared_ptr<item> fetch(const redis_key& key);
-    bool update(lw_shared_ptr<item> item, double score);
+    int update(lw_shared_ptr<item> item, double score);
     size_t size();
     size_t rank(const redis_key& key, bool reverse);
     int remove(const redis_key& key);

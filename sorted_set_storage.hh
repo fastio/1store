@@ -176,7 +176,7 @@ public:
             zset = it->zset_ptr();
         }
         redis_key mk {member};
-        if (zset->exists(mk) == false) {
+        if (zset->exists(mk) != REDIS_OK) {
             auto zmember = item::create(mk, delta);
             if (zset->insert(mk, zmember) != REDIS_OK) {
                 return result_type{0, false};
