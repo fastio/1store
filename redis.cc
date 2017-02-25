@@ -539,10 +539,27 @@ future<message> redis_service::counter_by(args_collection& args, bool incr, bool
     }
     auto cpu = get_cpu(key);
     if (engine().cpu_id() == cpu) {
-        return uint64_message(_db_peers.local().counter_by(key, step, incr));
+        auto&& u = _db_peers.local().counter_by(key, step, incr);
+        if (u.second == REDIS_OK) {
+            return uint64_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
     }
-    return _db_peers.invoke_on(cpu, &db::counter_by<remote_origin_tag>, std::ref(key), step, incr).then([] (uint64_t u) {
-        return uint64_message(u);
+    return _db_peers.invoke_on(cpu, &db::counter_by<remote_origin_tag>, std::ref(key), step, incr).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return uint64_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
     });
 }
 
@@ -655,10 +672,27 @@ future<message> redis_service::hincrby(args_collection& args)
     int delta = std::atoi(val.c_str());
     auto cpu = get_cpu(key);
     if (engine().cpu_id() == cpu) {
-        return int64_message(_db_peers.local().hincrby(key, field, delta));
+        auto&& u = _db_peers.local().hincrby(key, field, delta);
+        if (u.second == REDIS_OK) {
+            return int64_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
     }
-    return _db_peers.invoke_on(cpu, &db::hincrby<remote_origin_tag>, std::ref(key), std::ref(field), delta).then([] (int64_t u) {
-        return int64_message(u);
+    return _db_peers.invoke_on(cpu, &db::hincrby<remote_origin_tag>, std::ref(key), std::ref(field), delta).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return int64_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
     });
 }
 
@@ -673,10 +707,27 @@ future<message> redis_service::hincrbyfloat(args_collection& args)
     double delta = std::atof(val.c_str());
     auto cpu = get_cpu(key);
     if (engine().cpu_id() == cpu) {
-        return double_message(_db_peers.local().hincrbyfloat(key, field, delta));
+        auto&& u = _db_peers.local().hincrbyfloat(key, field, delta);
+        if (u.second == REDIS_OK) {
+            return double_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
     }
-    return _db_peers.invoke_on(cpu, &db::hincrbyfloat<remote_origin_tag>, std::ref(key), std::ref(field), delta).then([] (double u) {
-        return double_message(u);
+    return _db_peers.invoke_on(cpu, &db::hincrbyfloat<remote_origin_tag>, std::ref(key), std::ref(field), delta).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return double_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
     });
 }
 
@@ -1474,6 +1525,96 @@ future<message> redis_service::zscore(args_collection& args)
 
 future<message> redis_service::zunionstore(args_collection&)
 {
+    /*
+    if (args._command_args_count < 3 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& dest = args._command_args[0];
+    int numkeys = std::stoi(args._command_args[1].c_str());
+    size_t index = static_cast<size_t>(numkeys) + 2;
+    for (args._command_args_count < index) {
+        return syntax_err_message();
+    }
+    std::vector<sstring> keys;
+    for (size_t i = 2; i < index; ++i) {
+        keys.emplace_back(std::move(args._command_args[i]));
+    }
+    std::vector<double> weights;
+    bool has_weights = false, has_aggregate = false;
+    int aggregate_flags = 0;
+    if (index < args._command_args_count) {
+       sstring& weight_syntax = args._command_args[index];
+       if (weight_syntax == "WEIGHTS") {
+           index ++;
+           if (index + numkeys < args._command_args_count) {
+               return syntax_err_message();
+           }
+           has_weights = true;
+           size_t i = index;
+           index += numkeys;
+           for (; i < index; ++i) {
+               weights.push_back(std::stod(args._command_args[i].c_str()));
+           }
+       }
+       if (index < args._command_args_count) {
+           if (index + 2 < args._command_args_count) {
+               sstring& aggregate = ars._command_args[index];
+               if (arggregate == "ARGGREGATE") {
+                   has_aggregate = true;
+               }
+               index++;
+               sstring& aggre = ars._command_args[index];
+               if (aggre == "SUM") {
+                   aggregate_flags |= ZAGGREGATE_SUM;
+               }
+               else if (aggre == "MIN") {
+                   aggregate_flags |= ZAGGREGATE_MIN;
+               }
+               else if (aggre == "MAX") {
+                   aggregate_flags |= ZAGGREGATE_MAX;
+               }
+               else {
+                   return syntax_err_message();
+               }
+               has_aggregate = true;
+           }
+           else {
+               return syntax_err_message();
+           }
+       }
+    }
+    if (has_weights == false) {
+        for (size_t i = 0; i < numkeys; ++i) {
+            weights.push_back(1);
+        }
+    }
+    if (has_aggregate == false) {
+        aggregate_flags = ZAGGREGATE_SUM;
+    }
+    struct zunion_store_state {
+        std::unordered_map<sstring, double> wkeys;
+        sstring dest;
+    };
+    std::unordered_map<sstring, double> wkeys;
+    for (size_t i = 0; i < numkeys; ++i) {
+        wkeys.emplace({std::move(keys[i]), weights[i]});
+    }
+    return do_with(zunion_store_state{std::move(wkeys), std::move(dest)}, [this] (auto& state) {
+        return parallel_for_each(std::begin(state.wkeys), std::end(state.wkeys), [this, &state] (auto& entry) {
+            return this->range_impl(std::move(state.wkeys)).then([this, &state] (auto&& items) {
+            std::vector<sstring> members;
+            for (item_ptr& item : items) {
+               sstring member(item->key().data(), item->key().size());
+               members.emplace_back(std::move(member));
+            }
+            state.result = std::move(items);
+            return this->sadds_impl(state.dest, std::move(members)).then([&state] (auto u) {
+                (void) u;
+                return items_message<true, false>(std::move(state.result));
+            });
+        });
+    });
+*/
     return syntax_err_message();
 }
 

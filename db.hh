@@ -55,7 +55,7 @@ public:
     }
 
     template  <typename origin = local_origin_tag> inline
-    uint64_t counter_by(sstring& key, uint64_t step, bool incr)
+    std::pair<int64_t, int> counter_by(sstring& key, int64_t step, bool incr)
     {
         return _misc_storage.counter_by<origin>(key, step, incr);
     }
@@ -199,13 +199,13 @@ public:
     }
 
     template <typename origin = local_origin_tag> inline
-    int hincrby(sstring& key, sstring& field, int delta)
+    std::pair<size_t, int> hincrby(sstring& key, sstring& field, size_t delta)
     {
         return _dict_storage.hincrby<origin>(key, field, delta);
     }
 
     template <typename origin = local_origin_tag> inline
-    double hincrbyfloat(sstring& key, sstring& field, double delta)
+    std::pair<double, int> hincrbyfloat(sstring& key, sstring& field, double delta)
     {
         return _dict_storage.hincrbyfloat<origin>(key, field, delta);
     }

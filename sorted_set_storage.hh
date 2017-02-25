@@ -61,18 +61,18 @@ public:
             redis_key member_data {std::ref(key), std::hash<sstring>()(key)};
             auto de = zset->fetch(member_data);
             if (de) {
-                if (flags & ZADD_NX) {
+                if (flags & ZADD_NX || score == 0) {
                     continue;
                 }
-                auto current_score = de->Double() + score;
-                if (current_score != score) {
-                   zset->update(de, current_score);
-                   count++;
+                score += de->Double();
+                auto new_item = item::create(member_data, score);
+                if (zset->replace(member_data, new_item) == REDIS_OK) {
+                    count++;
                 }
             }
             else if (!(flags & ZADD_XX)) {
                 auto new_item = item::create(member_data, score);
-                if (zset->insert(member_data, new_item) == REDIS_OK) {
+                if (zset->replace(member_data, new_item) == REDIS_OK) {
                     count++;
                 }
             }
@@ -176,14 +176,18 @@ public:
             zset = it->zset_ptr();
         }
         redis_key mk {member};
-        if (zset->exists(mk) != REDIS_OK) {
-            auto zmember = item::create(mk, delta);
-            if (zset->insert(mk, zmember) != REDIS_OK) {
-                return result_type{0, false};
-            }
-            return result_type{delta, true};
+        double new_value = delta;
+        auto exists_member = zset->fetch(mk);
+        if (exists_member) {
+            new_value += exists_member->Double();
         }
-        return result_type{zset->incrby(mk, delta), true};
+        auto new_member = item::create(mk, new_value);
+        if (zset->replace(mk, new_member) == REDIS_OK) {
+            return result_type {new_value, true};
+        }
+        else {
+            return result_type {0, false}; 
+        }
     }
 
     std::pair<double, bool> zscore(sstring& key, sstring&& member)

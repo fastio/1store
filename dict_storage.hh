@@ -153,60 +153,64 @@ public:
 
     // HINCRBY
     template<typename origin = local_origin_tag>
-    int hincrby(const sstring& key, sstring& field, int delta)
+    std::pair<int64_t, int> hincrby(const sstring& key, sstring& field, int64_t delta)
     {
+        using result_type = std::pair<int64_t, int>;
         redis_key rk{key};
         dict* d = fetch_dict(rk);
         if (d == nullptr) {
             d = new dict();
             auto dict_item = item::create(key, d, REDIS_DICT);
-            if (_store->set(rk, dict_item) != 0) {
-                return -1;
+            if (_store->set(rk, dict_item) != REDIS_OK) {
+                return result_type {0, REDIS_ERR};
             }
         }
         auto hash = std::hash<sstring>()(field);
         redis_key field_key{std::ref(field), hash};
         auto it = d->fetch(field_key);
+        auto new_value = delta;
         if (!it) {
-            auto new_item = item::create(origin::move_if_local(field_key), static_cast<int64_t>(delta));
-            if (d->set(field_key, new_item) == -1) {
-                return -1;
+            if (it->type() == REDIS_RAW_INT64) {
+                return result_type {0, REDIS_WRONG_TYPE};
             }
-            return delta;
+            new_value += it->int64(); 
         }
-        if (it->type() == REDIS_RAW_INT64) {
-            return it->incr(static_cast<int64_t>(delta));
+        auto new_item = item::create(origin::move_if_local(field_key), static_cast<int64_t>(new_value));
+        if (d->replace(field_key, new_item) == REDIS_OK) {
+            return result_type {new_value, REDIS_OK};
         }
-        return -1;
+        return result_type {0, REDIS_ERR}; 
     }
 
     // HINCRBYFLOAT
     template<typename origin = local_origin_tag>
-    double hincrbyfloat(const sstring& key, sstring& field, double delta)
+    std::pair<double, int> hincrbyfloat(const sstring& key, sstring& field, double delta)
     {
+        using result_type = std::pair<double, int>;
         redis_key rk{key};
         dict* d = fetch_dict(rk);
         if (d == nullptr) {
             d = new dict();
             auto dict_item = item::create(key, d, REDIS_DICT);
-            if (_store->set(rk, dict_item) != 0) {
-                return -1;
+            if (_store->set(rk, dict_item) != REDIS_OK) {
+                return result_type {0, REDIS_ERR};
             }
         }
         auto hash = std::hash<sstring>()(field);
         redis_key field_key{std::ref(field), hash};
         auto it = d->fetch(field_key);
+        auto new_value = delta;
         if (!it) {
-            auto new_item = item::create(origin::move_if_local(field_key), delta);
-            if (d->set(field_key, new_item) == -1) {
-                return -1;
+            if (it->type() != REDIS_RAW_DOUBLE) {
+                return result_type {0, REDIS_WRONG_TYPE};
             }
-            return delta;
+            new_value += it->Double();
         }
-        if (it->type() == REDIS_RAW_DOUBLE) {
-            return it->incr(delta);
+        auto new_item = item::create(origin::move_if_local(field_key), new_value);
+        if (d->replace(field_key, new_item) == REDIS_OK) {
+            return result_type {new_value, REDIS_OK};
         }
-        return -1;
+        return result_type {0, REDIS_ERR}; 
     }
 
     // HGETALL

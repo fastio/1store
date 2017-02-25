@@ -18,20 +18,24 @@ public:
 
     /** COUNTER API **/
     template <typename origin = local_origin_tag>
-    uint64_t counter_by(sstring& key, uint64_t step, bool incr)
+    std::pair<int64_t, int> counter_by(sstring& key, int64_t step, bool incr)
     {
+        using result_type = std::pair<int64_t, int>;
         redis_key rk{key};
         auto it = _store->fetch_raw(rk);
+        int64_t new_value = incr ? step : -step;
         if (it) {
             if (it->type() != REDIS_RAW_UINT64) {
-                return REDIS_ERR;
+                return result_type {0, REDIS_WRONG_TYPE};
             }
-            return it->incr(incr ? step : -step);
-        } else {
-            auto new_item = item::create(key, step);
-            if (_store->set(rk, new_item) != REDIS_OK)
-                return REDIS_ERR;
-            return step;
+            new_value += it->int64();
+        }
+        auto new_item = item::create(key, new_value);
+        if (_store->replace(rk, new_item) == REDIS_OK) {
+            return result_type {new_value, REDIS_OK};
+        }
+        else {
+            return result_type {0, REDIS_ERR};
         }
     }
 

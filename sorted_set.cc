@@ -401,7 +401,7 @@ struct sorted_set::rep {
     std::vector<item_ptr> range_by_score(double min, double max, bool reverse);
     std::vector<item_ptr> range_by_rank(size_t begin, size_t end, bool reverse);
     lw_shared_ptr<item> fetch(const redis_key& key);
-    int update(lw_shared_ptr<item> value, double score);
+    int replace(const redis_key& key, lw_shared_ptr<item> value);
 };
 
 sorted_set::rep::rep()
@@ -426,26 +426,10 @@ lw_shared_ptr<item> sorted_set::rep::fetch(const redis_key& key)
     return _dict->fetch_raw(key);
 }
 
-int sorted_set::rep::update(lw_shared_ptr<item> value, double score)
+int sorted_set::rep::replace(const redis_key& key, lw_shared_ptr<item> value)
 {
-    if (value) {
-       _list->remove_item(value, nullptr);
-       value->set_double(score);
-       _list->insert(score, value);
-       return REDIS_OK; 
-    }
-    return REDIS_ERR;
-}
-
-double sorted_set::rep::incr(const redis_key& key, double delta)
-{
-    auto n = _dict->fetch_raw(key);
-    if (n) {
-        auto score = n->Double() + delta;
-        update(n, score);
-        return n->Double();
-    }
-    return 0;
+    remove(key);
+    return insert(key, value);
 }
 
 double sorted_set::rep::score(const redis_key& key)
@@ -588,19 +572,14 @@ std::vector<item_ptr> sorted_set::range_by_rank(size_t begin, size_t end, bool r
     return _rep->range_by_rank(begin, end, reverse);
 }
 
-double sorted_set::incrby(const redis_key& key, double delta)
-{
-    return _rep->incr(key, delta);
-}
-
 size_t sorted_set::count(double min, double max)
 {
     return _rep->count_in_range(min, max);
 }
 
-int sorted_set::update(lw_shared_ptr<item> value, double score)
+int sorted_set::replace(const redis_key& key, lw_shared_ptr<item> value)
 {
-    return _rep->update(value, score);
+    return _rep->replace(key, value);
 }
 
 lw_shared_ptr<item> sorted_set::fetch(const redis_key& key)

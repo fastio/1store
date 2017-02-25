@@ -96,7 +96,6 @@ struct expiration {
 
     expiration(long s) {
         using namespace std::chrono;
-
         static_assert(sizeof(clock_type::duration::rep) >= 8, "clock_type::duration::rep must be at least 8 bytes wide");
 
         if (s == 0U) {
@@ -106,11 +105,11 @@ struct expiration {
         }
     }
 
-    inline bool ever_expires() {
+    inline const bool ever_expires() const {
         return _time != never_expire_timepoint;
     }
 
-    inline time_point to_time_point() {
+    inline const time_point to_time_point() const {
         return _time;
     }
 
@@ -301,7 +300,7 @@ public:
     }
 
 public:
-    inline bool ever_expires() {
+    inline const bool ever_expires() const {
         return _expired.ever_expires();
     }
 
@@ -313,7 +312,7 @@ public:
         _expired = expiry;
     }
 
-    clock_type::time_point get_timeout() {
+    inline const clock_type::time_point get_timeout() const {
         return _expired.to_time_point();
     }
 
@@ -323,7 +322,7 @@ public:
         return std::experimental::string_view(_appends + align_up(_value_size, field_alignment), _key_size);
     }
 
-    const size_t key_hash() { return _key_hash; }
+    const size_t key_hash() const { return _key_hash; }
 
     const std::experimental::string_view value() const {
         return std::experimental::string_view(_appends, _value_size);
@@ -333,32 +332,18 @@ public:
     item(item&&) = delete;
 
 
-    inline list* list_ptr() { return reinterpret_cast<list*>(_u._ptr); }
-    inline dict* dict_ptr() { return reinterpret_cast<dict*>(_u._ptr); }
-    inline sorted_set* zset_ptr() { return reinterpret_cast<sorted_set*>(_u._ptr); }
+    inline list* list_ptr() const { return reinterpret_cast<list*>(_u._ptr); }
+    inline dict* dict_ptr() const { return reinterpret_cast<dict*>(_u._ptr); }
+    inline sorted_set* zset_ptr() const { return reinterpret_cast<sorted_set*>(_u._ptr); }
 
-    inline uint64_t uint64() { return _u._uint64; }
-    inline int64_t int64() { return _u._int64; }
-    inline double Double() { return _u._double; }
-    inline void set_double(double d) { _u._double = d; }
-
-    inline uint64_t incr(uint64_t step) {
-        _u._uint64 += step;
-        return _u._uint64;
-    }
-    inline int64_t incr(int64_t step) {
-        _u._int64 += step;
-        return _u._int64;
-    }
-    inline double incr(double step) {
-        _u._double += step;
-        return _u._double;
-    }
+    inline const uint64_t uint64() const { return _u._uint64; }
+    inline const int64_t int64() const { return _u._int64; }
+    inline const double Double() const { return _u._double; }
 
     inline const uint32_t value_size() const { return _value_size; }
     inline const uint32_t key_size() const { return _key_size; }
 
-    inline uint8_t type() const { return _type; }
+    inline const uint8_t type() const { return _type; }
 };
 static const sstring msg_crlf {"\r\n"};
 static const sstring msg_ok {"+OK\r\n"};
@@ -398,4 +383,9 @@ static constexpr const int ZADD_INCR = (1 << 0); // increment the score instead 
 static constexpr const int ZADD_NX   = (1 << 1); // don't touch elements not already existing.
 static constexpr const int ZADD_XX   = (1 << 2); // only touch elements already exisitng.
 static constexpr const int ZADD_CH   = (1 << 3); // number elementes were changed.
+
+static constexpr const int ZAGGREGATE_MIN = (1 << 0);
+static constexpr const int ZAGGREGATE_MAX = (1 << 1);
+static constexpr const int ZAGGREGATE_SUM = (1 << 2);
+
 } /* namespace redis */
