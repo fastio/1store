@@ -111,7 +111,7 @@ public:
         return zset->rank(m, reverse);
     }
 
-    std::vector<item_ptr> zrange(sstring& key, size_t begin, size_t end, bool reverse)
+    std::vector<item_ptr> zrange(const sstring& key, long begin, long end, bool reverse)
     {
         redis_key rk {key};
         auto zset = fetch_zset(rk);

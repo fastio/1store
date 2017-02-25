@@ -305,7 +305,7 @@ public:
     {
         return _zset_storage.zincrby<origin>(key, std::move(member), delta);
     }
-    std::vector<item_ptr> zrange(sstring& key, size_t begin, size_t end, bool reverse)
+    std::vector<item_ptr> zrange(const sstring& key, long begin, long end, bool reverse)
     {
         return _zset_storage.zrange(key, begin, end, reverse);
     }

@@ -44,7 +44,7 @@ public:
     size_t rank(const redis_key& key, bool reverse);
     int remove(const redis_key& key);
     size_t count(double min, double max);
-    std::vector<item_ptr> range_by_rank(size_t begin, size_t end, bool reverse);
+    std::vector<item_ptr> range_by_rank(long begin, long end, bool reverse);
     std::vector<item_ptr> range_by_score(double min, double max, bool reverse);
 };
 }

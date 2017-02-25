@@ -397,9 +397,8 @@ struct sorted_set::rep {
     size_t rank(const redis_key& key, bool reverse);
     int remove(const redis_key& key);
     double score(const redis_key& key);
-    double incr(const redis_key& key, double delta);
     std::vector<item_ptr> range_by_score(double min, double max, bool reverse);
-    std::vector<item_ptr> range_by_rank(size_t begin, size_t end, bool reverse);
+    std::vector<item_ptr> range_by_rank(long begin, long end, bool reverse);
     lw_shared_ptr<item> fetch(const redis_key& key);
     int replace(const redis_key& key, lw_shared_ptr<item> value);
 };
@@ -445,6 +444,7 @@ int sorted_set::rep::remove(const redis_key& key)
 {
     auto n = _dict->fetch_raw(key);
     if (n) {
+        _dict->remove(key);
         return _list->remove_item(n, nullptr);
     }
     return REDIS_ERR;
@@ -519,7 +519,7 @@ std::vector<item_ptr> sorted_set::rep::range_by_score(double min, double max, bo
     return std::move(result);
 }
 
-std::vector<item_ptr> sorted_set::rep::range_by_rank(size_t begin, size_t end, bool reverse)
+std::vector<item_ptr> sorted_set::rep::range_by_rank(long begin, long end, bool reverse)
 {
     if (_list->size() == 0) {
         return std::vector<item_ptr>();
@@ -531,10 +531,10 @@ std::vector<item_ptr> sorted_set::rep::range_by_rank(size_t begin, size_t end, b
         return std::vector<item_ptr>();
     }
     skiplist_iterator iter(_list, !reverse ? FROM_HEAD_TO_TAIL : FROM_TAIL_TO_HEAD);
-    iter.seek(begin);
+    iter.seek(begin + 1);
     std::vector<item_ptr> result;
-    size_t count = end - begin + 1;
-    while (iter.status() == REDIS_OK && count-- > 0) {
+    long count = end - begin + 1;
+    while (iter.status() == REDIS_OK && --count >= 0) {
         auto n = iter.value();
         if (n && n->_value) {
             result.emplace_back(item_ptr(n->_value));
@@ -567,7 +567,7 @@ std::vector<item_ptr> sorted_set::range_by_score(double min, double max, bool re
     return _rep->range_by_score(min, max, reverse);
 }
 
-std::vector<item_ptr> sorted_set::range_by_rank(size_t begin, size_t end, bool reverse)
+std::vector<item_ptr> sorted_set::range_by_rank(long begin, long end, bool reverse)
 {
     return _rep->range_by_rank(begin, end, reverse);
 }

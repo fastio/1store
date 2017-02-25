@@ -1281,6 +1281,17 @@ future<message> redis_service::persist(args_collection& args)
     });
 }
 
+future<std::pair<size_t, int>> redis_service::zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags)
+{
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<std::pair<size_t, int>>(_db_peers.local().zadds(key, std::move(members), flags));
+    }
+    else {
+        return _db_peers.invoke_on(cpu, &db::zadds<remote_origin_tag>, std::ref(key), std::move(members), flags);
+    }
+}
+
 future<message> redis_service::zadd(args_collection& args)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
@@ -1306,11 +1317,11 @@ future<message> redis_service::zadd(args_collection& args)
     else {
         first_score_index = 1;
     }
-    auto cpu = get_cpu(key);
     if (zadd_flags & ZADD_INCR) {
         if (args._command_args_count - first_score_index > 2) {
             return syntax_err_message();
         }
+        auto cpu = get_cpu(key);
         sstring& member = args._command_args[first_score_index + 1];
         sstring& delta = args._command_args[first_score_index];
         double score = std::stod(delta.c_str());
@@ -1336,8 +1347,7 @@ future<message> redis_service::zadd(args_collection& args)
         double score = std::stod(score_.c_str());
         members.emplace(std::pair<sstring, double>(member, score));
     }
-    if (engine().cpu_id() == cpu) {
-        auto&& u = _db_peers.local().zadds(key, std::move(members), zadd_flags);
+    return zadds_impl(key, std::move(members), zadd_flags).then([] (auto&& u) {
         if (u.second == REDIS_OK) {
             return size_message(u.first);
         }
@@ -1347,20 +1357,7 @@ future<message> redis_service::zadd(args_collection& args)
         else {
             return err_message();
         }
-    }
-    else {
-        return _db_peers.invoke_on(cpu, &db::zadds<remote_origin_tag>, std::ref(key), std::move(members), zadd_flags).then([] (auto&& u) {
-            if (u.second == REDIS_OK) {
-                return size_message(u.first);
-            }
-            else if (u.second == REDIS_WRONG_TYPE) {
-                return wrong_type_err_message();
-            }
-            else {
-                return err_message();
-            }
-        });
-    }
+    });
 }
 
 future<message> redis_service::zcard(args_collection& args)
@@ -1378,26 +1375,30 @@ future<message> redis_service::zcard(args_collection& args)
     });
 }
 
+future<std::vector<item_ptr>> redis_service::range_impl(const sstring& key, long begin, long end, bool reverse)
+{
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        return make_ready_future<std::vector<item_ptr>>(_db_peers.local().zrange(key, begin, end, reverse));
+    }
+    return _db_peers.invoke_on(cpu, &db::zrange, std::ref(key), begin, end, reverse);
+}
+
 future<message> redis_service::zrange(args_collection& args, bool reverse)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return syntax_err_message();
     }
-    sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
-    size_t begin = std::stol(args._command_args[1].c_str());
-    size_t end = std::stol(args._command_args[2].c_str());
+    const sstring& key = args._command_args[0];
+    long begin = std::stoi(args._command_args[1].c_str());
+    long end = std::stoi(args._command_args[2].c_str());
     bool with_score = false;
     auto ws = args._command_args[3];
     std::transform(ws.begin(), ws.end(), ws.begin(), ::toupper);
     if (args._command_args_count == 4 && ws == "WITHSCORES") {
         with_score = true;
     }
-    if (engine().cpu_id() == cpu) {
-        auto&& items = _db_peers.local().zrange(key, begin, end, reverse);
-        return with_score ? items_message<true, true>(std::move(items)) : items_message<true, false>(std::move(items)); 
-    }
-    return _db_peers.invoke_on(cpu, &db::zrange, std::ref(key), begin, end, reverse).then([with_score] (auto&& items) {
+    return range_impl(key, begin, end, reverse).then([with_score] (auto&& items) {
         return with_score ? items_message<true, true>(std::move(items)) : items_message<true, false>(std::move(items)); 
     });
 }
@@ -1523,16 +1524,15 @@ future<message> redis_service::zscore(args_collection& args)
     }
 }
 
-future<message> redis_service::zunionstore(args_collection&)
+future<message> redis_service::zunionstore(args_collection& args)
 {
-    /*
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return syntax_err_message();
     }
     sstring& dest = args._command_args[0];
-    int numkeys = std::stoi(args._command_args[1].c_str());
+    size_t numkeys = std::stol(args._command_args[1].c_str());
     size_t index = static_cast<size_t>(numkeys) + 2;
-    for (args._command_args_count < index) {
+    if (args._command_args_count < index) {
         return syntax_err_message();
     }
     std::vector<sstring> keys;
@@ -1558,12 +1558,12 @@ future<message> redis_service::zunionstore(args_collection&)
        }
        if (index < args._command_args_count) {
            if (index + 2 < args._command_args_count) {
-               sstring& aggregate = ars._command_args[index];
-               if (arggregate == "ARGGREGATE") {
+               sstring& aggregate = args._command_args[index];
+               if (aggregate == "ARGGREGATE") {
                    has_aggregate = true;
                }
                index++;
-               sstring& aggre = ars._command_args[index];
+               sstring& aggre = args._command_args[index];
                if (aggre == "SUM") {
                    aggregate_flags |= ZAGGREGATE_SUM;
                }
@@ -1594,28 +1594,62 @@ future<message> redis_service::zunionstore(args_collection&)
     struct zunion_store_state {
         std::unordered_map<sstring, double> wkeys;
         sstring dest;
+        std::unordered_map<sstring, std::unordered_map<sstring, double>> result;
+        int aggregate_flag;
     };
     std::unordered_map<sstring, double> wkeys;
     for (size_t i = 0; i < numkeys; ++i) {
-        wkeys.emplace({std::move(keys[i]), weights[i]});
+        wkeys.emplace(std::move(keys[i]), weights[i]);
     }
-    return do_with(zunion_store_state{std::move(wkeys), std::move(dest)}, [this] (auto& state) {
+    return do_with(zunion_store_state{std::move(wkeys), std::move(dest), {}, aggregate_flags}, [this] (auto& state) {
         return parallel_for_each(std::begin(state.wkeys), std::end(state.wkeys), [this, &state] (auto& entry) {
-            return this->range_impl(std::move(state.wkeys)).then([this, &state] (auto&& items) {
-            std::vector<sstring> members;
-            for (item_ptr& item : items) {
-               sstring member(item->key().data(), item->key().size());
-               members.emplace_back(std::move(member));
-            }
-            state.result = std::move(items);
-            return this->sadds_impl(state.dest, std::move(members)).then([&state] (auto u) {
-                (void) u;
-                return items_message<true, false>(std::move(state.result));
+            const sstring& key = entry.first;
+            double weight = entry.second;
+            return this->range_impl(key, static_cast<size_t>(0), static_cast<size_t>(-1), false).then([this, &state, &key, weight] (auto&& items) {
+                std::unordered_map<sstring, double> result;
+                for (size_t i = 0; i < items.size(); ++i) {
+                    const auto& member = items[i]->key();
+                    result.emplace(sstring(member.data(), member.size()), items[i]->Double() * weight);
+                }
+                state.result[key] = std::move(result);
             });
+        }).then([this, &state] () {
+            std::unordered_map<sstring, double> result;
+            for (auto& u : state.result) {
+               auto& member_scores = u.second;
+               for (auto& e : member_scores) {
+                   auto& member = e.first;
+                   auto  score = e.second;
+                   auto exists = result.find(member);
+                   if (exists != result.end()) {
+                       result[member] = score;
+                   }
+                   else {
+                       if (state.aggregate_flag == ZAGGREGATE_MIN) {
+                           result[member] = std::min(result[member], score);
+                       }
+                       else if(state.aggregate_flag == ZAGGREGATE_SUM) {
+                           result[member] += score;
+                       }
+                       else {
+                           result[member] = std::max(result[member], score);
+                       }
+                   }
+               }
+            }
+            return this->zadds_impl(state.dest, std::move(result), 0).then([] (auto&& u) {
+                if (u.second == REDIS_OK) {
+                    return size_message(u.first);
+                }
+                else if (u.second == REDIS_WRONG_TYPE) {
+                    return wrong_type_err_message();
+                }
+                else {
+                    return err_message();
+                }
+           });
         });
     });
-*/
-    return syntax_err_message();
 }
 
 future<message> redis_service::zinterstore(args_collection&)

@@ -150,6 +150,8 @@ public:
     future<message> zlexcount(args_collection&);
     future<message> zrevrangebylex(args_collection&);
 private:
+    future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
+    future<std::vector<item_ptr>> range_impl(const sstring& key, long begin, long end, bool reverse);
     future<int> exists_impl(sstring& key);
     future<int> srem_impl(sstring& key, sstring& member);
     future<int> sadd_impl(sstring& key, sstring& member);
