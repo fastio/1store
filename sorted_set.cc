@@ -22,7 +22,7 @@
 #include "iterator.hh"
 #include "dict.hh"
 #include <cstring>
-namespace redis 
+namespace redis
 {
 struct skiplist_node
 {
@@ -54,7 +54,7 @@ struct range
     bool   _min_exclusive;
     bool   _max_exclusive;
     bool hit_min(double min) const { return _min_exclusive ? (min > _min) : (min >= _min); }
-    bool hit_max(double max) const { return _max_exclusive ? (max > _max) : (max >= _max); }
+    bool hit_max(double max) const { return _max_exclusive ? (max < _max) : (max <= _max); }
     bool empty() const { return _min > _max || (_min == _max && (_min_exclusive || _max_exclusive)); }
 };
 
@@ -279,13 +279,13 @@ bool skiplist::include_range(const range& r)
     }
     auto x = _tail;
     if (x == nullptr || r.hit_min(x->_score) == false) {
-        return 0;
+        return false;
     }
     x = _head->_next[0]._next;
     if (x == nullptr || r.hit_max(x->_score) == false) {
-        return 0;
+        return false;
     }
-    return 1;
+    return true;
 }
 
 skiplist_node* skiplist::find_first_of_range(const range& r)
@@ -343,7 +343,7 @@ skiplist_node* skiplist::find_by_rank(size_t rank)
     return nullptr;
 }
 
-size_t skiplist::get_rank_of_item(lw_shared_ptr<item> value) 
+size_t skiplist::get_rank_of_item(lw_shared_ptr<item> value)
 {
     size_t rank = 0;
     auto x = _head;
@@ -364,7 +364,7 @@ size_t skiplist::get_rank_of_item(lw_shared_ptr<item> value)
     return -1;
 }
 
-size_t skiplist::get_rank_of_node(skiplist_node* n) 
+size_t skiplist::get_rank_of_node(skiplist_node* n)
 {
     size_t rank = 0;
     auto x = _head;
@@ -392,7 +392,7 @@ struct sorted_set::rep {
     skiplist* _list;
     int exists(const redis_key& key);
     int insert(const redis_key& key, lw_shared_ptr<item> m);
-    inline size_t size() { return _dict->size(); } 
+    inline size_t size() { return _dict->size(); }
     size_t count_in_range(double min, double max);
     size_t rank(const redis_key& key, bool reverse);
     int remove(const redis_key& key);
@@ -456,7 +456,7 @@ size_t sorted_set::rep::rank(const redis_key& key, bool reverse)
     if (n) {
         auto rank = _list->get_rank_of_item(n);
         if (reverse) {
-            return _list->size() - rank; 
+            return _list->size() - rank;
         }
         return rank - 1;
     }

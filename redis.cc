@@ -1393,10 +1393,12 @@ future<message> redis_service::zrange(args_collection& args, bool reverse)
     long begin = std::stoi(args._command_args[1].c_str());
     long end = std::stoi(args._command_args[2].c_str());
     bool with_score = false;
-    auto ws = args._command_args[3];
-    std::transform(ws.begin(), ws.end(), ws.begin(), ::toupper);
-    if (args._command_args_count == 4 && ws == "WITHSCORES") {
-        with_score = true;
+    if (args._command_args_count == 4) {
+        auto ws = args._command_args[3];
+        std::transform(ws.begin(), ws.end(), ws.begin(), ::toupper);
+        if (ws == "WITHSCORES") {
+            with_score = true;
+        }
     }
     return range_impl(key, begin, end, reverse).then([with_score] (auto&& items) {
         return with_score ? items_message<true, true>(std::move(items)) : items_message<true, false>(std::move(items)); 
@@ -1413,8 +1415,12 @@ future<message> redis_service::zrangebyscore(args_collection& args, bool reverse
     double min = std::stol(args._command_args[1].c_str());
     double max = std::stol(args._command_args[2].c_str());
     bool with_score = false;
-    if (args._command_args_count == 4 && args._command_args[3] == "WITHSCORES") {
-        with_score = true;
+    if (args._command_args_count == 4) {
+        auto ws = args._command_args[3];
+        std::transform(ws.begin(), ws.end(), ws.begin(), ::toupper);
+        if (ws == "WITHSCORES") {
+            with_score = true;
+        }
     }
     if (engine().cpu_id() == cpu) {
         auto&& items = _db_peers.local().zrangebyscore(key, min, max, reverse);
