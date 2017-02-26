@@ -168,6 +168,15 @@ private:
     future<int> remove_impl(sstring& key);
     future<int> hdel_impl(sstring& key, sstring& field);
     future<message> counter_by(args_collection& args, bool incr, bool with_step);
+    struct zset_args
+    {
+        sstring dest;
+        size_t numkeys;
+        std::vector<sstring> keys;
+        std::vector<double> weights;
+        int aggregate_flag;
+    };
+    bool parse_zset_args(args_collection& args, zset_args& uargs);
 
     using this_type = redis_service;
     static future<message> syntax_err_message() {

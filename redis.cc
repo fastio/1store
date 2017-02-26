@@ -1524,72 +1524,78 @@ future<message> redis_service::zscore(args_collection& args)
     }
 }
 
-future<message> redis_service::zunionstore(args_collection& args)
+bool redis_service::parse_zset_args(args_collection& args, zset_args& uargs)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
-        return syntax_err_message();
+        return false;
     }
-    sstring& dest = args._command_args[0];
-    size_t numkeys = std::stol(args._command_args[1].c_str());
-    size_t index = static_cast<size_t>(numkeys) + 2;
+    uargs.dest = std::move(args._command_args[0]);
+    uargs.numkeys = std::stol(args._command_args[1].c_str());
+    size_t index = static_cast<size_t>(uargs.numkeys) + 2;
     if (args._command_args_count < index) {
-        return syntax_err_message();
+        return false;
     }
-    std::vector<sstring> keys;
     for (size_t i = 2; i < index; ++i) {
-        keys.emplace_back(std::move(args._command_args[i]));
+        uargs.keys.emplace_back(std::move(args._command_args[i]));
     }
-    std::vector<double> weights;
     bool has_weights = false, has_aggregate = false;
-    int aggregate_flags = 0;
     if (index < args._command_args_count) {
-       sstring& weight_syntax = args._command_args[index];
-       if (weight_syntax == "WEIGHTS") {
-           index ++;
-           if (index + numkeys < args._command_args_count) {
-               return syntax_err_message();
-           }
-           has_weights = true;
-           size_t i = index;
-           index += numkeys;
-           for (; i < index; ++i) {
-               weights.push_back(std::stod(args._command_args[i].c_str()));
-           }
-       }
-       if (index < args._command_args_count) {
-           if (index + 2 < args._command_args_count) {
-               sstring& aggregate = args._command_args[index];
-               if (aggregate == "ARGGREGATE") {
-                   has_aggregate = true;
-               }
-               index++;
-               sstring& aggre = args._command_args[index];
-               if (aggre == "SUM") {
-                   aggregate_flags |= ZAGGREGATE_SUM;
-               }
-               else if (aggre == "MIN") {
-                   aggregate_flags |= ZAGGREGATE_MIN;
-               }
-               else if (aggre == "MAX") {
-                   aggregate_flags |= ZAGGREGATE_MAX;
-               }
-               else {
-                   return syntax_err_message();
-               }
-               has_aggregate = true;
-           }
-           else {
-               return syntax_err_message();
-           }
-       }
+        sstring& weight_syntax = args._command_args[index];
+        if (weight_syntax == "WEIGHTS") {
+            index ++;
+            if (index + uargs.numkeys < args._command_args_count) {
+                return false;
+            }
+            has_weights = true;
+            size_t i = index;
+            index += uargs.numkeys;
+            for (; i < index; ++i) {
+                uargs.weights.push_back(std::stod(args._command_args[i].c_str()));
+            }
+        }
+        if (index < args._command_args_count) {
+            if (index + 2 < args._command_args_count) {
+                sstring& aggregate = args._command_args[index];
+                if (aggregate == "ARGGREGATE") {
+                    has_aggregate = true;
+                }
+                index++;
+                sstring& aggre = args._command_args[index];
+                if (aggre == "SUM") {
+                    uargs.aggregate_flag |= ZAGGREGATE_SUM;
+                }
+                else if (aggre == "MIN") {
+                    uargs.aggregate_flag |= ZAGGREGATE_MIN;
+                }
+                else if (aggre == "MAX") {
+                    uargs.aggregate_flag |= ZAGGREGATE_MAX;
+                }
+                else {
+                    return false;
+                }
+                has_aggregate = true;
+            }
+            else {
+                return false;
+            }
+        }
     }
     if (has_weights == false) {
-        for (size_t i = 0; i < numkeys; ++i) {
-            weights.push_back(1);
+        for (size_t i = 0; i < uargs.numkeys; ++i) {
+            uargs.weights.push_back(1);
         }
     }
     if (has_aggregate == false) {
-        aggregate_flags = ZAGGREGATE_SUM;
+        uargs.aggregate_flag = ZAGGREGATE_SUM;
+    }
+    return true;
+}
+
+future<message> redis_service::zunionstore(args_collection& args)
+{
+    zset_args uargs;
+    if (parse_zset_args(args, uargs) == false) {
+        return syntax_err_message();
     }
     struct zunion_store_state {
         std::unordered_map<sstring, double> wkeys;
@@ -1598,10 +1604,10 @@ future<message> redis_service::zunionstore(args_collection& args)
         int aggregate_flag;
     };
     std::unordered_map<sstring, double> wkeys;
-    for (size_t i = 0; i < numkeys; ++i) {
-        wkeys.emplace(std::move(keys[i]), weights[i]);
+    for (size_t i = 0; i < uargs.numkeys; ++i) {
+        wkeys.emplace(std::move(uargs.keys[i]), uargs.weights[i]);
     }
-    return do_with(zunion_store_state{std::move(wkeys), std::move(dest), {}, aggregate_flags}, [this] (auto& state) {
+    return do_with(zunion_store_state{std::move(wkeys), std::move(uargs.dest), {}, uargs.aggregate_flag}, [this] (auto& state) {
         return parallel_for_each(std::begin(state.wkeys), std::end(state.wkeys), [this, &state] (auto& entry) {
             const sstring& key = entry.first;
             double weight = entry.second;
@@ -1652,9 +1658,70 @@ future<message> redis_service::zunionstore(args_collection& args)
     });
 }
 
-future<message> redis_service::zinterstore(args_collection&)
+future<message> redis_service::zinterstore(args_collection& args)
 {
-    return syntax_err_message();
+    zset_args uargs;
+    if (parse_zset_args(args, uargs) == false) {
+        return syntax_err_message();
+    }
+    struct zinter_store_state {
+        std::vector<sstring> keys;
+        std::vector<double> weights;
+        sstring dest;
+        std::unordered_map<size_t, std::unordered_map<sstring, double>> result;
+        int aggregate_flag;
+    };
+    size_t count = uargs.keys.size();
+    return do_with(zinter_store_state{std::move(uargs.keys), std::move(uargs.weights), std::move(uargs.dest), {}, uargs.aggregate_flag}, [this, count] (auto& state) {
+        return parallel_for_each(boost::irange<size_t>(0, count), [this, &state] (size_t k) {
+            sstring& key = state.keys[k];
+            double weight = state.weights[k];
+            return this->range_impl(key, static_cast<size_t>(0), static_cast<size_t>(-1), false).then([this, &state, &key, weight, index = k] (auto&& items) {
+                std::unordered_map<sstring, double> result;
+                for (size_t i = 0; i < items.size(); ++i) {
+                    const auto& member = items[i]->key();
+                    result.emplace(sstring(member.data(), member.size()), items[i]->Double() * weight);
+                }
+                state.result[index] = std::move(result);
+            });
+        }).then([this, &state, count] {
+            auto&& result = std::move(state.result[0]);
+            for (uint32_t i = 1; i < count; ++i) {
+                std::unordered_map<sstring, double> temp;
+                auto&& next_items = std::move(state.result[i]);
+                if (result.empty() || next_items.empty()) {
+                    result.clear();
+                    break;
+                }
+                for (auto& e : next_items) {
+                    auto exists_member = std::find_if(result.begin(), result.end(), [&e] (auto& o) { return e.first == o.first; });
+                    if (exists_member != result.end()) {
+                       if (state.aggregate_flag == ZAGGREGATE_MIN) {
+                           temp[exists_member->first] = std::min(exists_member->second, e.second);
+                       }
+                       else if(state.aggregate_flag == ZAGGREGATE_SUM) {
+                           temp[exists_member->first] += e.second;
+                       }
+                       else {
+                           temp[exists_member->first] = std::max(exists_member->second, e.second);
+                       }
+                    }
+                }
+                result = std::move(temp);
+            }
+            return this->zadds_impl(state.dest, std::move(result), 0).then([] (auto&& u) {
+                if (u.second == REDIS_OK) {
+                    return size_message(u.first);
+                }
+                else if (u.second == REDIS_WRONG_TYPE) {
+                    return wrong_type_err_message();
+                }
+                else {
+                    return err_message();
+                }
+           });
+        });
+    });
 }
 
 future<message> redis_service::zdiffstore(args_collection&)
