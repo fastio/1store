@@ -1324,7 +1324,12 @@ future<message> redis_service::zadd(args_collection& args)
         auto cpu = get_cpu(key);
         sstring& member = args._command_args[first_score_index + 1];
         sstring& delta = args._command_args[first_score_index];
-        double score = std::stod(delta.c_str());
+        double score = 0;
+        try {
+            score = std::stod(delta.c_str());
+        } catch (const std::invalid_argument&) {
+            return syntax_err_message();
+        }
         if (engine().cpu_id() == cpu) {
             auto&& u = _db_peers.local().zincrby(key, std::move(member), score);
             return u.second ? double_message<true>(u.first) : err_message();
@@ -1344,7 +1349,12 @@ future<message> redis_service::zadd(args_collection& args)
     for (size_t i = first_score_index; i < args._command_args_count; i += 2) {
         sstring& score_ = args._command_args[i];
         sstring& member = args._command_args[i + 1];
-        double score = std::stod(score_.c_str());
+        double score = 0;
+        try {
+            score = std::stod(score_.c_str());
+        } catch (const std::invalid_argument&) {
+            return syntax_err_message();
+        }
         members.emplace(std::pair<sstring, double>(member, score));
     }
     return zadds_impl(key, std::move(members), zadd_flags).then([] (auto&& u) {
@@ -1390,8 +1400,13 @@ future<message> redis_service::zrange(args_collection& args, bool reverse)
         return syntax_err_message();
     }
     const sstring& key = args._command_args[0];
-    long begin = std::stoi(args._command_args[1].c_str());
-    long end = std::stoi(args._command_args[2].c_str());
+    long begin = 0, end = 0;
+    try {
+        begin = std::stoi(args._command_args[1].c_str());
+        end = std::stoi(args._command_args[2].c_str());
+    } catch (const std::invalid_argument&) {
+        return syntax_err_message();
+    }
     bool with_score = false;
     if (args._command_args_count == 4) {
         auto ws = args._command_args[3];
@@ -1412,8 +1427,13 @@ future<message> redis_service::zrangebyscore(args_collection& args, bool reverse
     }
     sstring& key = args._command_args[0];
     auto cpu = get_cpu(key);
-    double min = std::stol(args._command_args[1].c_str());
-    double max = std::stol(args._command_args[2].c_str());
+    double min = 0, max = 0;
+    try {
+        min = std::stod(args._command_args[1].c_str());
+        max = std::stod(args._command_args[2].c_str());
+    } catch (const std::invalid_argument&) {
+        return syntax_err_message();
+    }
     bool with_score = false;
     if (args._command_args_count == 4) {
         auto ws = args._command_args[3];
@@ -1437,8 +1457,13 @@ future<message> redis_service::zcount(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    double min = std::stod(args._command_args[1].c_str());
-    double max = std::stod(args._command_args[2].c_str());
+    double min = 0, max = 0;
+    try {
+        min = std::stod(args._command_args[1].c_str());
+        max = std::stod(args._command_args[2].c_str());
+    } catch (const std::invalid_argument&) {
+        return syntax_err_message();
+    }
     auto cpu = get_cpu(key);
     if (engine().cpu_id() == cpu) {
         return size_message(_db_peers.local().zcount(key, min, max));
@@ -1455,7 +1480,12 @@ future<message> redis_service::zincrby(args_collection& args)
     }
     sstring& key = args._command_args[0];
     sstring& member = args._command_args[2];
-    double delta = std::stod(args._command_args[1].c_str());
+    double delta = 0;
+    try {
+        delta = std::stod(args._command_args[1].c_str());
+    } catch (const std::invalid_argument&) {
+        return syntax_err_message();
+    }
     auto cpu = get_cpu(key);
     if (engine().cpu_id() == cpu) {
         auto&& result = _db_peers.local().zincrby(key, std::move(member), delta);
@@ -1536,7 +1566,11 @@ bool redis_service::parse_zset_args(args_collection& args, zset_args& uargs)
         return false;
     }
     uargs.dest = std::move(args._command_args[0]);
-    uargs.numkeys = std::stol(args._command_args[1].c_str());
+    try {
+        uargs.numkeys = std::stol(args._command_args[1].c_str());
+    } catch(const std::invalid_argument&) {
+        return false;
+    }
     size_t index = static_cast<size_t>(uargs.numkeys) + 2;
     if (args._command_args_count < index) {
         return false;
@@ -1556,7 +1590,11 @@ bool redis_service::parse_zset_args(args_collection& args, zset_args& uargs)
             size_t i = index;
             index += uargs.numkeys;
             for (; i < index; ++i) {
-                uargs.weights.push_back(std::stod(args._command_args[i].c_str()));
+                try {
+                    uargs.weights.push_back(std::stod(args._command_args[i].c_str()));
+                } catch (const std::invalid_argument&) {
+                    return false;
+                }
             }
         }
         if (index < args._command_args_count) {
@@ -1739,8 +1777,13 @@ future<message> redis_service::zremrangebyscore(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    double min = std::stod(args._command_args[1].c_str());
-    double max = std::stod(args._command_args[2].c_str());
+    double min = 0, max = 0;
+    try {
+        min = std::stod(args._command_args[1].c_str());
+        max = std::stod(args._command_args[2].c_str());
+    } catch (const std::invalid_argument&) {
+        return syntax_err_message();
+    }
     auto cpu = get_cpu(key);
     if (engine().cpu_id() == cpu) {
         auto&& u = _db_peers.local().zremrangebyscore(key, min, max);
@@ -1778,8 +1821,13 @@ future<message> redis_service::zremrangebyrank(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    long begin = std::stol(args._command_args[1].c_str());
-    long end = std::stol(args._command_args[2].c_str());
+    long begin = 0, end = 0;
+    try {
+        begin = std::stol(args._command_args[1].c_str());
+        end = std::stol(args._command_args[2].c_str());
+    } catch(const std::invalid_argument& e) {
+        return syntax_err_message();
+    }
     auto cpu = get_cpu(key);
     if (engine().cpu_id() == cpu) {
         auto&& u = _db_peers.local().zremrangebyrank(key, begin, end);
