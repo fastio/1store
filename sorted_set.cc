@@ -166,7 +166,14 @@ skiplist::~skiplist()
 
 int skiplist::item_compare(lw_shared_ptr<item> l, lw_shared_ptr<item> r)
 {
-    return 0;
+    auto llen = l->key_size();
+    auto rlen = r->key_size();
+    auto min = std::min<size_t>(llen, rlen);
+    auto res = std::memcmp(l->key().data(), r->key().data(), min);
+    if (res == 0) {
+        return llen - rlen;
+    }
+    return res;
 }
 
 int skiplist::random_level()
