@@ -206,6 +206,34 @@ public:
         }
         return result_type{value->Double(), true};
     }
+    std::pair<size_t, int> zremrangebyscore(sstring& key, double min, double max)
+    {
+        using result_type = std::pair<size_t, int>;
+        redis_key rk {key};
+        auto it = _store->fetch_raw(key);
+        if (!it) {
+            return result_type {0, REDIS_OK};
+        }
+        if (it && it->type() != REDIS_ZSET) {
+            return result_type {0, REDIS_WRONG_TYPE};
+        }
+        auto zset = it->zset_ptr();
+        return result_type {zset->remove_range_by_score(min, max), REDIS_OK};
+    }
+    std::pair<size_t, int> zremrangebyrank(sstring& key, long begin, long end)
+    {
+        using result_type = std::pair<size_t, int>;
+        redis_key rk {key};
+        auto it = _store->fetch_raw(key);
+        if (!it) {
+            return result_type {0, REDIS_OK};
+        }
+        if (it && it->type() != REDIS_ZSET) {
+            return result_type {0, REDIS_WRONG_TYPE};
+        }
+        auto zset = it->zset_ptr();
+        return result_type {zset->remove_range_by_rank(begin, end), REDIS_OK};
+    }
 protected:
     inline sorted_set* fetch_zset(const redis_key& key)
     {

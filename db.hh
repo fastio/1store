@@ -111,7 +111,7 @@ public:
         return 0;
     }
 
-    
+
     template <typename origin = local_origin_tag> inline
     int push(sstring& key, sstring& value, bool force, bool left)
     {
@@ -269,8 +269,8 @@ public:
             if (item->ever_expires() == false) {
                 return -1;
             }
-            auto duration = item->get_timeout() - clock_type::now(); 
-            return static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(duration).count()); 
+            auto duration = item->get_timeout() - clock_type::now();
+            return static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
         }
         else {
             return -2;
@@ -292,7 +292,7 @@ public:
         return _zset_storage.zadds<origin>(key, std::move(members), flags);
     }
 
-    size_t zcard(sstring& key) 
+    size_t zcard(sstring& key)
     {
         return _zset_storage.zcard(key);
     }
@@ -325,6 +325,14 @@ public:
     {
         return _zset_storage.zscore(key, std::move(member));
     }
+    std::pair<size_t, int> zremrangebyscore(sstring& key, double min, double max)
+    {
+        return _zset_storage.zremrangebyscore(key, min, max);
+    }
+    std::pair<size_t, int> zremrangebyrank(sstring& key, size_t begin, size_t end)
+    {
+        return _zset_storage.zremrangebyrank(key, begin, end);
+    }
     future<> stop() { return make_ready_future<>(); }
 private:
     void expired_items()
@@ -335,8 +343,8 @@ private:
             auto it = *exp.begin();
             exp.pop_front();
             // release expired item
-            if (it && it->ever_expires()) { 
-                _store->expired(it);
+            if (it && it->ever_expires()) {
+                _store->remove(it);
             }
         }
         _timer.arm(_alive.get_next_timeout());

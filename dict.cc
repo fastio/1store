@@ -70,7 +70,7 @@ struct dict::rep
     int add(const redis_key& key, lw_shared_ptr<item> val);
     int replace(const redis_key& key, lw_shared_ptr<item> val);
     int remove(const redis_key& key);
-    int expired(lw_shared_ptr<item> item);
+    int remove(lw_shared_ptr<item> item);
 
 
     dict_node *add_raw(const redis_key& key);
@@ -370,7 +370,7 @@ dict_node* dict::rep::replace_raw(const redis_key& key)
     return entry ? entry : add_raw(key);
 }
 
-int dict::rep::expired(lw_shared_ptr<item> key)
+int dict::rep::remove(lw_shared_ptr<item> key)
 {
     if (!key) return REDIS_ERR;
 
@@ -642,9 +642,9 @@ std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::fetch()
   return _rep->fetch();
 }
 
-int dict::expired(lw_shared_ptr<item> item)
+int dict::remove(lw_shared_ptr<item> item)
 {
-    return _rep->expired(item);
+    return _rep->remove(item);
 }
 
 } /* namespace redis*/

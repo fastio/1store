@@ -969,7 +969,7 @@ future<std::vector<item_ptr>> redis_service::sdiff_impl(std::vector<sstring>&& k
                 auto&& next_items = std::move(state.items_set[i]);
                 for (item_ptr& item : next_items) {
                      if (std::find_if(temp.begin(), temp.end(), [&item] (auto& o) { return item->key() == o->key(); }) != temp.end()) {
-                        tokens[item->key()]++; 
+                        tokens[item->key()]++;
                      }
                 }
             }
@@ -1015,7 +1015,7 @@ future<std::vector<item_ptr>> redis_service::sinter_impl(std::vector<sstring>&& 
         }).then([&state, count] {
             auto&& result = std::move(state.items_set[0]);
             for (uint32_t i = 1; i < count; ++i) {
-                std::vector<item_ptr> temp;    
+                std::vector<item_ptr> temp;
                 auto&& next_items = std::move(state.items_set[i]);
                 if (result.empty() || next_items.empty()) {
                     return make_ready_future<std::vector<item_ptr>>();
@@ -1401,7 +1401,7 @@ future<message> redis_service::zrange(args_collection& args, bool reverse)
         }
     }
     return range_impl(key, begin, end, reverse).then([with_score] (auto&& items) {
-        return with_score ? items_message<true, true>(std::move(items)) : items_message<true, false>(std::move(items)); 
+        return with_score ? items_message<true, true>(std::move(items)) : items_message<true, false>(std::move(items));
     });
 }
 
@@ -1424,10 +1424,10 @@ future<message> redis_service::zrangebyscore(args_collection& args, bool reverse
     }
     if (engine().cpu_id() == cpu) {
         auto&& items = _db_peers.local().zrangebyscore(key, min, max, reverse);
-        return with_score ? items_message<true, true>(std::move(items)) : items_message<true, false>(std::move(items)); 
+        return with_score ? items_message<true, true>(std::move(items)) : items_message<true, false>(std::move(items));
     }
     return _db_peers.invoke_on(cpu, &db::zrangebyscore, std::ref(key), min, max, reverse).then([with_score] (auto&& items) {
-        return with_score ? items_message<true, true>(std::move(items)) : items_message<true, false>(std::move(items)); 
+        return with_score ? items_message<true, true>(std::move(items)) : items_message<true, false>(std::move(items));
     });
 }
 
@@ -1728,6 +1728,84 @@ future<message> redis_service::zinterstore(args_collection& args)
            });
         });
     });
+}
+
+future<message> redis_service::zremrangebyscore(args_collection& args)
+{
+    // ZREMRANGEBYSCORE key min max
+    // Removes all elements in the sorted set stored at key with a score between min and max (inclusive).
+    // Integer reply: the number of elements removed.
+    if (args._command_args_count < 3 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    double min = std::stod(args._command_args[1].c_str());
+    double max = std::stod(args._command_args[2].c_str());
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db_peers.local().zremrangebyscore(key, min, max);
+        if (u.second == REDIS_OK) {
+            return size_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    }
+    else {
+        return _db_peers.invoke_on(cpu, &db::zremrangebyscore, std::ref(key), min, max).then([] (auto&& u) {
+            if (u.second == REDIS_OK) {
+                return size_message(u.first);
+            }
+            else if (u.second == REDIS_WRONG_TYPE) {
+                return wrong_type_err_message();
+            }
+            else {
+                return err_message();
+            }
+        });
+    }
+}
+
+future<message> redis_service::zremrangebyrank(args_collection& args)
+{
+    // ZREMRANGEBYRANK key begin end
+    // Removes all elements in the sorted set stored at key with a rank between start and end (inclusive).
+    // Integer reply: the number of elements removed.
+    if (args._command_args_count < 3 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    long begin = std::stol(args._command_args[1].c_str());
+    long end = std::stol(args._command_args[2].c_str());
+    auto cpu = get_cpu(key);
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db_peers.local().zremrangebyrank(key, begin, end);
+        if (u.second == REDIS_OK) {
+            return size_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    }
+    else {
+        return _db_peers.invoke_on(cpu, &db::zremrangebyrank, std::ref(key), begin, end).then([] (auto&& u) {
+            if (u.second == REDIS_OK) {
+                return size_message(u.first);
+            }
+            else if (u.second == REDIS_WRONG_TYPE) {
+                return wrong_type_err_message();
+            }
+            else {
+                return err_message();
+            }
+        });
+    }
 }
 
 future<message> redis_service::zdiffstore(args_collection&)

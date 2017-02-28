@@ -149,6 +149,8 @@ public:
     future<message> zrangebylex(args_collection&);
     future<message> zlexcount(args_collection&);
     future<message> zrevrangebylex(args_collection&);
+    future<message> zremrangebyscore(args_collection&);
+    future<message> zremrangebyrank(args_collection&);
 private:
     future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
     future<std::vector<item_ptr>> range_impl(const sstring& key, long begin, long end, bool reverse);

@@ -295,6 +295,14 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.zrem(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
+                case redis_protocol_parser::command::zremrangebyscore:
+                    return _redis.zremrangebyscore(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
+                case redis_protocol_parser::command::zremrangebyrank:
+                    return _redis.zremrangebyrank(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
                 case redis_protocol_parser::command::zcard:
                     return _redis.zcard(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
