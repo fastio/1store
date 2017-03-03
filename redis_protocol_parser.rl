@@ -106,6 +106,7 @@ rpop = "rpop"i ${_command = command::rpop;};
 lrem = "lrem"i ${_command = command::lrem;};
 ltrim = "ltrim"i ${_command = command::ltrim;};
 hset = "hset"i ${_command = command::hset;};
+hmset = "hmset"i ${_command = command::hmset;};
 hdel = "hdel"i ${_command = command::hdel;};
 hget = "hget"i ${_command = command::hget;};
 hlen = "hlen"i ${_command = command::hlen;};
@@ -159,15 +160,16 @@ zrangebylex = "zrangebylex"i ${_command = command::zrangebylex; };
 zrangebyscore = "zrangebyscore"i ${_command = command::zrangebyscore; };
 zlexcount = "zlexcount"i ${_command = command::zlexcount;};
 zremrangebylex = "zremrangebylex"i ${_command = command::zremrangebylex; };
+select = "select"i ${_command = command::select; };
 
 command = (set | get | del | mget | mset | echo | ping | incr | decr | incrby | decrby | command_ | exists | append |
            strlen | lpush | lpushx | lpop | llen | lindex | linsert | lrange | lset | rpush | rpushx | rpop | lrem |
-           ltrim | hset | hget | hdel | hlen | hexists | hstrlen | hincrby | hincrbyfloat | hkeys | hvals | hmget |
+           ltrim | hset | hget | hdel | hlen | hexists | hstrlen | hincrby | hincrbyfloat | hkeys | hvals | hmget | hmset |
            hgetall   | sadd | scard | sismember | smembers | srem | sdiff | sdiffstore | sinter | sinterstore | sunion |
            sunionstore | smove | type | expire | pexpire | persist | ttl | pttl | zadd | zcard | zcount | zincrby |
            zrangebyscore | zrank | zremrangebyrank | zremrangebyscore | zremrangebylex | zrem | zrevrangebyscore | zrevrange| zrevrank |
            zscore | zunionstore  | zinterstore | zdiffstore | zunion | zinter | zdiff | zscan | zrangebylex | zlexcount |
-           zrange);
+           zrange | select);
 arg = '$' u32 crlf ${ _arg_size = _u32;};
 
 main := (args_count (arg command crlf) (arg @{fcall blob; } crlf)+) ${_state = state::ok;};
@@ -230,6 +232,7 @@ public:
         hkeys,
         hvals,
         hmget,
+        hmset,
         hgetall,
         sadd,
         scard,
@@ -273,6 +276,7 @@ public:
         zrangebylex,
         zlexcount,
         zremrangebylex,
+        select,
     };
 
     state _state;

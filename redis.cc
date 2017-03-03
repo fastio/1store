@@ -61,11 +61,12 @@ future<sstring> redis_service::echo(args_collection& args)
 
 future<int> redis_service::set_impl(sstring& key, sstring& val, long expir, uint8_t flag)
 {
-    auto cpu = get_cpu(key);
+    redis_key rk { std::move(key) };
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db_peers.local().set(key, val, expir, flag));
+        return make_ready_future<int>(_db.local().set(std::move(rk), std::move(val), expir, flag));
     }
-    return _db_peers.invoke_on(cpu, &db::set<remote_origin_tag>, std::ref(key), std::ref(val), expir, flag);
+    return _db.invoke_on(cpu, &database::set<remote_origin_tag>, std::move(rk), std::move(val), expir, flag);
 }
 
 future<message> redis_service::set(args_collection& args)
@@ -109,16 +110,17 @@ future<message> redis_service::set(args_collection& args)
         }
     }
     return set_impl(key, val, expir, flag).then([] (auto r) {
-        return r == 0 ? ok_message() : err_message();
+        return r == REDIS_OK ? ok_message() : err_message();
     });
 }
 
 future<int> redis_service::remove_impl(sstring& key) {
-    auto cpu = get_cpu(key);
+    redis_key rk { std::move(key) };
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db_peers.local().del(key));
+        return make_ready_future<int>(_db.local().del(std::move(rk)));
     }
-    return _db_peers.invoke_on(cpu, &db::del, std::ref(key));
+    return _db.invoke_on(cpu, &database::del, std::move(rk));
 }
 
 future<message> redis_service::del(args_collection& args)
@@ -129,7 +131,7 @@ future<message> redis_service::del(args_collection& args)
     if (args._command_args.size() == 1) {
         sstring& key = args._command_args[0];
         return remove_impl(key).then([] (auto r) {
-            return r == 1 ? one_message() : zero_message();
+            return r == REDIS_OK ? one_message() : zero_message();
         });
     }
     else {
@@ -144,7 +146,7 @@ future<message> redis_service::del(args_collection& args)
         return do_with(mdel_state{std::move(keys), 0}, [this] (auto& state) {
             return parallel_for_each(std::begin(state.keys), std::end(state.keys), [this, &state] (auto& key) {
                 return this->remove_impl(key).then([&state] (auto r) {
-                    if (r == 1) state.success_count++;
+                    if (r == REDIS_OK) state.success_count++;
                 });
             }).then([&state] {
                 return size_message(state.success_count);
@@ -185,11 +187,12 @@ future<message> redis_service::mset(args_collection& args)
 
 future<item_ptr> redis_service::get_impl(sstring& key)
 {
-    auto cpu = get_cpu(key);
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<item_ptr>(_db_peers.local().get(key));
+        return make_ready_future<item_ptr>(_db.local().get(std::move(rk)));
     }
-    return _db_peers.invoke_on(cpu, &db::get, std::ref(key));
+    return _db.invoke_on(cpu, &database::get, std::move(rk));
 }
 
 future<message> redis_service::get(args_collection& args)
@@ -199,7 +202,7 @@ future<message> redis_service::get(args_collection& args)
     }
     sstring& key = args._command_args[0];
     return get_impl(key).then([] (auto&& u) {
-        return item_message<false, true>(std::move(u));
+        return item_message<false, true>(u);
     });
 }
 
@@ -233,22 +236,24 @@ future<message> redis_service::strlen(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
+    redis_key rk { std::move(key) };
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().strlen(key));
+        return size_message(_db.local().strlen(std::move(rk)));
     }
-    return _db_peers.invoke_on(cpu, &db::strlen, std::ref(key)).then([] (size_t u) {
+    return _db.invoke_on(cpu, &database::strlen, std::move(rk)).then([] (size_t u) {
         return size_message(u);
     });
 }
 
 future<int> redis_service::exists_impl(sstring& key)
 {
-    auto cpu = get_cpu(key);
+    redis_key rk { std::move(key) };
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db_peers.local().exists(key));
+        return make_ready_future<int>(_db.local().exists(std::move(rk)));
     }
-    return _db_peers.invoke_on(cpu, &db::exists, std::ref(key));
+    return _db.invoke_on(cpu, &database::exists, std::move(rk));
 }
 
 future<message> redis_service::exists(args_collection& args)
@@ -290,22 +295,25 @@ future<message> redis_service::append(args_collection& args)
     }
     sstring& key = args._command_args[0];
     sstring& val = args._command_args[1];
-    auto cpu = get_cpu(key);
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().append(key, val));
+        auto&& u = _db.local().append(std::move(rk), std::move(val));
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::append<remote_origin_tag>, std::ref(key), std::ref(val)).then([] (size_t u) {
+    return _db.invoke_on(cpu, &database::append<remote_origin_tag>, std::move(rk), std::move(val)).then([] (auto&& u) {
         return size_message(u);
     });
 }
 
-future<int> redis_service::push_impl(sstring& key, sstring& val, bool force, bool left)
+future<std::pair<size_t, int>> redis_service::push_impl(sstring& key, sstring& val, bool force, bool left)
 {
-    auto cpu = get_cpu(key);
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db_peers.local().push(key, val, force, left));
+        return make_ready_future<std::pair<size_t, int>>(_db.local().push(std::move(rk), std::move(val), force, left));
     }
-    return _db_peers.invoke_on(cpu, &db::push<remote_origin_tag>, std::ref(key), std::ref(val), force, left);
+    return _db.invoke_on(cpu, &database::push<remote_origin_tag>, std::move(rk), std::move(val), force, left);
 }
 
 future<message> redis_service::push_impl(args_collection& args, bool force, bool left)
@@ -330,8 +338,8 @@ future<message> redis_service::push_impl(args_collection& args, bool force, bool
         for (size_t i = 1; i < args._command_args.size(); ++i) values.emplace_back(args._command_args[i]);
         return do_with(push_state{std::move(key), std::move(values), 0}, [this, force, left] (auto& state) {
             return parallel_for_each(std::begin(state.values), std::end(state.values), [this, &state, force, left] (auto& value) {
-                return this->push_impl(state.key, value, force, left).then([&state] (auto r) {
-                    if (r) state.success_count++;
+                return this->push_impl(state.key, value, force, left).then([&state] (auto&& u) {
+                    if (u.second == REDIS_OK) state.success_count++;
                 });
             }).then([&state] () {
                 return size_message(state.success_count);
@@ -376,12 +384,14 @@ future<message> redis_service::pop_impl(args_collection& args, bool left)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return item_message<false, true>(std::move(_db_peers.local().pop(key, left)));
+        auto&& u = _db.local().pop(std::move(rk), left);
+        return item_message<false, true>(u);
     }
-    return _db_peers.invoke_on(cpu, &db::pop, std::ref(key), left).then([] (auto&& item) {
-        return item_message<false, true>(std::move(item));
+    return _db.invoke_on(cpu, &database::pop, std::move(rk), left).then([] (auto&& u) {
+        return item_message<false, true>(u);
     });
 }
 
@@ -392,12 +402,14 @@ future<message> redis_service::lindex(args_collection& args)
     }
     sstring& key = args._command_args[0];
     int idx = std::atoi(args._command_args[1].c_str());
-    auto cpu = get_cpu(key);
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return item_message<false, true>(std::move(_db_peers.local().lindex(key, idx)));
+        auto&& u = _db.local().lindex(std::move(rk), idx);
+        return item_message<false, true>(u);
     }
-    return _db_peers.invoke_on(cpu, &db::lindex, std::ref(key), idx).then([] (auto&& item) {
-        return item_message<false, true>(std::move(item));
+    return _db.invoke_on(cpu, &database::lindex, std::move(rk), idx).then([] (auto&& u) {
+        return item_message<false, true>(u);
     });
 }
 
@@ -408,10 +420,12 @@ future<message> redis_service::llen(args_collection& args)
     }
     sstring& key = args._command_args[0];
     auto cpu = get_cpu(key);
+    redis_key rk {std::move(key)};
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().llen(key));
+        auto&& u = _db.local().llen(std::move(rk));
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::llen, std::ref(key)).then([] (size_t u) {
+    return _db.invoke_on(cpu, &database::llen, std::move(rk)).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -428,11 +442,13 @@ future<message> redis_service::linsert(args_collection& args)
     std::transform(dir.begin(), dir.end(), dir.begin(), ::toupper);
     bool after = true;
     if (dir == "BEFORE") after = false;
-    auto cpu = get_cpu(key);
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().linsert(key, pivot, value, after));
+        auto&& u = _db.local().linsert(std::move(rk), std::move(pivot), std::move(value), after);
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::linsert<remote_origin_tag>, std::ref(key), std::ref(pivot), std::ref(value), after).then([] (auto u) {
+    return _db.invoke_on(cpu, &database::linsert<remote_origin_tag>, std::move(rk), std::move(pivot), std::move(value), after).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -447,12 +463,14 @@ future<message> redis_service::lrange(args_collection& args)
     sstring& e = args._command_args[2];
     int start = std::atoi(s.c_str());
     int end = std::atoi(e.c_str());
-    auto cpu = get_cpu(key);
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return items_message<false, true>(std::move(_db_peers.local().lrange(key, start, end)));
+        auto&& u = _db.local().lrange(std::move(rk), start, end);
+        return items_message<false, true>(u);
     }
-    return _db_peers.invoke_on(cpu, &db::lrange, std::ref(key), start, end).then([] (auto&& items) {
-        return items_message<false, true>(std::move(items));
+    return _db.invoke_on(cpu, &database::lrange, std::move(rk), start, end).then([] (auto&& u) {
+        return items_message<false, true>(u);
     });
 }
 
@@ -465,11 +483,13 @@ future<message> redis_service::lset(args_collection& args)
     sstring& index = args._command_args[1];
     sstring& value = args._command_args[2];
     int idx = std::atoi(index.c_str());
-    auto cpu = get_cpu(key);
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().lset(key, idx, value));
+        auto&& u = _db.local().lset(std::move(rk), idx, std::move(value));
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::lset<remote_origin_tag>, std::ref(key), idx, std::ref(value)).then([] (size_t u) {
+    return _db.invoke_on(cpu, &database::lset<remote_origin_tag>, std::move(rk), idx, std::move(value)).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -482,11 +502,13 @@ future<message> redis_service::ltrim(args_collection& args)
     sstring& key = args._command_args[0];
     int start =  std::atoi(args._command_args[1].c_str());
     int stop = std::atoi(args._command_args[2].c_str());
-    auto cpu = get_cpu(key);
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().ltrim(key, start, stop));
+        auto&& u = _db.local().ltrim(std::move(rk), start, stop);
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::ltrim, std::ref(key), start, stop).then([] (size_t u) {
+    return _db.invoke_on(cpu, &database::ltrim, std::move(rk), start, stop).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -499,11 +521,13 @@ future<message> redis_service::lrem(args_collection& args)
     sstring& key = args._command_args[0];
     int count = std::atoi(args._command_args[1].c_str());
     sstring& value = args._command_args[2];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().lrem(key, count, value));
+        auto&& u = _db.local().lrem(std::move(rk), count, std::move(value));
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::lrem, std::ref(key), count, std::ref(value)).then([] (size_t u) {
+    return _db.invoke_on(cpu, &database::lrem, std::move(rk), count, std::move(value)).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -535,11 +559,16 @@ future<message> redis_service::counter_by(args_collection& args, bool incr, bool
     uint64_t step = 1;
     if (with_step) {
         sstring& s = args._command_args[1];
-        step = std::atol(s.c_str());
+        try {
+            step = std::atol(s.c_str());
+        } catch (const std::invalid_argument&) {
+            return syntax_err_message();
+        }
     }
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        auto&& u = _db_peers.local().counter_by(key, step, incr);
+        auto&& u = _db.local().counter_by(std::move(rk), step, incr);
         if (u.second == REDIS_OK) {
             return uint64_message(u.first);
         }
@@ -550,7 +579,7 @@ future<message> redis_service::counter_by(args_collection& args, bool incr, bool
             return err_message();
         }
     }
-    return _db_peers.invoke_on(cpu, &db::counter_by<remote_origin_tag>, std::ref(key), step, incr).then([] (auto&& u) {
+    return _db.invoke_on(cpu, &database::counter_by<remote_origin_tag>, std::move(rk), step, incr).then([] (auto&& u) {
         if (u.second == REDIS_OK) {
             return uint64_message(u.first);
         }
@@ -565,11 +594,12 @@ future<message> redis_service::counter_by(args_collection& args, bool incr, bool
 
 future<int> redis_service::hdel_impl(sstring& key, sstring& field)
 {
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db_peers.local().hdel(key, field));
+        return make_ready_future<int>(_db.local().hdel(std::move(rk), std::move(field)));
     }
-    return _db_peers.invoke_on(cpu, &db::hdel, std::ref(key), std::ref(field));
+    return _db.invoke_on(cpu, &database::hdel, std::move(rk), std::move(field));
 }
 
 future<message> redis_service::hdel(args_collection& args)
@@ -595,7 +625,7 @@ future<message> redis_service::hdel(args_collection& args)
         for (size_t i = 1; i < args._command_args.size(); ++i) fields.emplace_back(args._command_args[i]);
         return do_with(hdel_state{std::move(key), std::move(fields), 0}, [this] (auto& state) {
             return parallel_for_each(std::begin(state.fields), std::end(state.fields), [this, &state] (auto& field) {
-                return this->hdel_impl(state.key, field).then([&state] (auto r) {
+                return this->hdel_impl(state.key, field).then([&state] (auto&& r) {
                     if (r) state.success_count++;
                 });
             }).then([&state] () {
@@ -612,11 +642,13 @@ future<message> redis_service::hexists(args_collection& args)
     }
     sstring& key = args._command_args[0];
     sstring& field = args._command_args[1];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().hexists(key, field));
+        auto&& u = _db.local().hexists(std::move(rk), std::move(field));
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::hexists, std::ref(key), std::ref(field)).then([] (size_t u) {
+    return _db.invoke_on(cpu, &database::hexists, std::move(rk), std::move(field)).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -629,11 +661,12 @@ future<message> redis_service::hset(args_collection& args)
     sstring& key = args._command_args[0];
     sstring& field = args._command_args[1];
     sstring& val = args._command_args[2];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().hset(key, field, val));
+        return size_message(_db.local().hset(std::move(rk), std::move(field), std::move(val)));
     }
-    return _db_peers.invoke_on(cpu, &db::hset<remote_origin_tag>, std::ref(key), std::ref(field), std::ref(val)).then([] (size_t u) {
+    return _db.invoke_on(cpu, &database::hset<remote_origin_tag>, std::move(rk), std::move(field), std::move(val)).then([] (size_t u) {
         return size_message(u);
     });
 }
@@ -644,20 +677,19 @@ future<message> redis_service::hmset(args_collection& args)
         return syntax_err_message();
     }
     unsigned int field_count = (args._command_args_count - 1) / 2;
-    if (field_count == 1) {
-        return hset(args);
-    }
     sstring& key = args._command_args[0];
     std::unordered_map<sstring, sstring> key_values_collection;
     for (unsigned int i = 0; i < field_count; ++i) {
         key_values_collection.emplace(std::make_pair(args._command_args[i], args._command_args[i + 1]));
     }
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().hmset(key, key_values_collection));
+        auto u = _db.local().hmset(std::move(rk), std::move(key_values_collection));
+        return u == 0 ? ok_message() : err_message();
     }
-    return _db_peers.invoke_on(cpu, &db::hmset<remote_origin_tag>, std::ref(key), std::ref(key_values_collection)).then([] (size_t u) {
-        return size_message(u);
+    return _db.invoke_on(cpu, &database::hmset<remote_origin_tag>, std::move(rk), std::move(key_values_collection)).then([] (size_t u) {
+        return u == 0 ? ok_message() : err_message();
     });
 }
 
@@ -670,9 +702,10 @@ future<message> redis_service::hincrby(args_collection& args)
     sstring& field = args._command_args[1];
     sstring& val = args._command_args[2];
     int delta = std::atoi(val.c_str());
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        auto&& u = _db_peers.local().hincrby(key, field, delta);
+        auto&& u = _db.local().hincrby(std::move(rk), std::move(field), delta);
         if (u.second == REDIS_OK) {
             return int64_message(u.first);
         }
@@ -683,7 +716,7 @@ future<message> redis_service::hincrby(args_collection& args)
             return err_message();
         }
     }
-    return _db_peers.invoke_on(cpu, &db::hincrby<remote_origin_tag>, std::ref(key), std::ref(field), delta).then([] (auto&& u) {
+    return _db.invoke_on(cpu, &database::hincrby<remote_origin_tag>, std::move(rk), std::move(field), delta).then([] (auto&& u) {
         if (u.second == REDIS_OK) {
             return int64_message(u.first);
         }
@@ -705,9 +738,10 @@ future<message> redis_service::hincrbyfloat(args_collection& args)
     sstring& field = args._command_args[1];
     sstring& val = args._command_args[2];
     double delta = std::atof(val.c_str());
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        auto&& u = _db_peers.local().hincrbyfloat(key, field, delta);
+        auto&& u = _db.local().hincrbyfloat(std::move(rk), std::move(field), delta);
         if (u.second == REDIS_OK) {
             return double_message(u.first);
         }
@@ -718,7 +752,7 @@ future<message> redis_service::hincrbyfloat(args_collection& args)
             return err_message();
         }
     }
-    return _db_peers.invoke_on(cpu, &db::hincrbyfloat<remote_origin_tag>, std::ref(key), std::ref(field), delta).then([] (auto&& u) {
+    return _db.invoke_on(cpu, &database::hincrbyfloat<remote_origin_tag>, std::move(rk), std::move(field), delta).then([] (auto&& u) {
         if (u.second == REDIS_OK) {
             return double_message(u.first);
         }
@@ -737,11 +771,13 @@ future<message> redis_service::hlen(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().hlen(key));
+        auto&& u = _db.local().hlen(std::move(rk));
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::hlen, std::ref(key)).then([] (size_t u) {
+    return _db.invoke_on(cpu, &database::hlen, std::move(rk)).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -753,11 +789,14 @@ future<message> redis_service::hstrlen(args_collection& args)
     }
     sstring& key = args._command_args[0];
     sstring& field = args._command_args[1];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().hstrlen(key, field));
+        auto&& u = _db.local().hstrlen(std::move(rk), std::move(field));
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::hstrlen, std::ref(key), std::ref(field)).then([] (size_t u) {
+
+    return _db.invoke_on(cpu, &database::hstrlen, std::move(key), std::move(field)).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -769,12 +808,14 @@ future<message> redis_service::hget(args_collection& args)
     }
     sstring& key = args._command_args[0];
     sstring& field = args._command_args[1];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return item_message<false, true>(std::move(_db_peers.local().hget(key, field)));
+        auto&& u = _db.local().hget(std::move(rk), std::move(field));
+        return item_message<false, true>(u);
     }
-    return _db_peers.invoke_on(cpu, &db::hget, std::ref(key), std::ref(field)).then([] (auto&& u) {
-        return item_message<false, true>(std::move(u));
+    return _db.invoke_on(cpu, &database::hget, std::move(rk), std::move(field)).then([] (auto&& u) {
+        return item_message<false, true>(u);
     });
 }
 
@@ -784,12 +825,14 @@ future<message> redis_service::hgetall(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return items_message<true, true>(std::move(_db_peers.local().hgetall(key)));
+        auto&& u = _db.local().hgetall(std::move(rk));
+        return items_message<true, true>(u);
     }
-    return _db_peers.invoke_on(cpu, &db::hgetall, std::ref(key)).then([] (auto&& items) {
-        return items_message<true, true>(std::move(items));
+    return _db.invoke_on(cpu, &database::hgetall, std::move(rk)).then([] (auto&& u) {
+        return items_message<true, true>(u);
     });
 }
 
@@ -803,22 +846,25 @@ future<message> redis_service::hmget(args_collection& args)
     for (unsigned int i = 1; i < args._command_args_count; ++i) {
       fields.emplace(std::move(args._command_args[i]));
     }
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return items_message<false, true>(std::move(_db_peers.local().hmget(key, fields)));
+        auto&& u = _db.local().hmget(std::move(rk), std::move(fields));
+        return items_message<false, true>(u);
     }
-    return _db_peers.invoke_on(cpu, &db::hmget, std::ref(key), std::ref(fields)).then([] (auto&& items) {
-        return items_message<false, true>(std::move(items));
+    return _db.invoke_on(cpu, &database::hmget, std::move(rk), std::move(fields)).then([] (auto&& u) {
+        return items_message<false, true>(u);
     });
 }
 
-future<std::vector<item_ptr>> redis_service::smembers_impl(sstring& key)
+future<std::pair<std::vector<item_ptr>, int>> redis_service::smembers_impl(sstring& key)
 {
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<std::vector<item_ptr>>(_db_peers.local().smembers(key));
+        return make_ready_future<std::pair<std::vector<item_ptr>, int>>(_db.local().smembers(std::move(rk)));
     }
-    return _db_peers.invoke_on(cpu, &db::smembers, std::ref(key));
+    return _db.invoke_on(cpu, &database::smembers, std::move(rk));
 }
 future<message> redis_service::smembers(args_collection& args)
 {
@@ -826,18 +872,27 @@ future<message> redis_service::smembers(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    return smembers_impl(key).then([] (auto&& items) {
-        return items_message<true, false>(std::move(items));
+    return smembers_impl(key).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return items_message<true, false>(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return nil_message();
+        }
     });
 }
 
-future<int> redis_service::sadds_impl(sstring& key, std::vector<sstring>&& members)
+future<std::pair<size_t, int>> redis_service::sadds_impl(sstring& key, std::vector<sstring>&& members)
 {
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db_peers.local().sadds(key, std::move(members)));
+        return make_ready_future<std::pair<size_t, int>>(_db.local().sadds(std::move(rk), std::move(members)));
     }
-    return _db_peers.invoke_on(cpu, &db::sadds<remote_origin_tag>, std::ref(key), std::move(members));
+    return _db.invoke_on(cpu, &database::sadds<remote_origin_tag>, std::move(rk), std::move(members));
 }
 
 future<message> redis_service::sadd(args_collection& args)
@@ -848,7 +903,7 @@ future<message> redis_service::sadd(args_collection& args)
     sstring& key = args._command_args[0];
     std::vector<sstring> members;
     for (uint32_t i = 1; i < args._command_args_count; ++i) members.emplace_back(std::move(args._command_args[i]));
-    return sadds_impl(key, std::move(members)).then([] (auto u) {
+    return sadds_impl(key, std::move(members)).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -859,11 +914,13 @@ future<message> redis_service::scard(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().scard(key));
+        auto&& u = _db.local().scard(std::move(rk));
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::scard, std::ref(key)).then([] (auto u) {
+    return _db.invoke_on(cpu, &database::scard, std::move(rk)).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -874,11 +931,13 @@ future<message> redis_service::sismember(args_collection& args)
     }
     sstring& key = args._command_args[0];
     sstring& member = args._command_args[1];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().sismember(key, std::move(member)));
+        auto&& u = _db.local().sismember(std::move(rk), std::move(member));
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::sismember, std::ref(key), std::move(member)).then([] (auto u) {
+    return _db.invoke_on(cpu, &database::sismember, std::move(rk), std::move(member)).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -889,13 +948,15 @@ future<message> redis_service::srem(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     std::vector<sstring> members;
     for (uint32_t i = 1; i < args._command_args_count; ++i) members.emplace_back(std::move(args._command_args[i]));
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().srems(key, std::move(members)));
+        auto&& u = _db.local().srems(std::move(rk), std::move(members));
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::srems, std::ref(key), std::move(members)).then([] (auto u) {
+    return _db.invoke_on(cpu, &database::srems, std::move(rk), std::move(members)).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -923,9 +984,8 @@ future<message> redis_service::sdiff_store(args_collection& args)
                members.emplace_back(std::move(member));
             }
             state.result = std::move(items);
-            return this->sadds_impl(state.dest, std::move(members)).then([&state] (auto u) {
-                (void) u;
-                return items_message<true, false>(std::move(state.result));
+            return this->sadds_impl(state.dest, std::move(members)).then([&state] (auto) {
+                return items_message<true, false>(state.result);
             });
         });
     });
@@ -940,8 +1000,8 @@ future<message> redis_service::sdiff(args_collection& args)
     if (args._command_args_count == 1) {
         return smembers(args);
     }
-    return sdiff_impl(std::move(args._command_args)).then([] (auto&& items) {
-        return items_message<true, false>(std::move(items));
+    return sdiff_impl(std::move(args._command_args)).then([] (auto&& u) {
+        return items_message<true, false>(u);
     });
 }
 
@@ -956,8 +1016,10 @@ future<std::vector<item_ptr>> redis_service::sdiff_impl(std::vector<sstring>&& k
     return do_with(sdiff_state{item_unordered_map{}, std::move(keys)}, [this, count] (auto& state) {
         return parallel_for_each(boost::irange<unsigned>(0, count), [this, &state] (unsigned k) {
             sstring& key = state.keys[k];
-            return this->smembers_impl(key).then([&state, index = k] (auto&& sub) {
-                state.items_set[index] = std::move(sub);
+            return this->smembers_impl(key).then([&state, index = k] (auto&& u) {
+                if (u.second == REDIS_OK) {
+                    state.items_set[index] = std::move(u.first);
+                }
             });
         }).then([&state, count] {
             auto& temp = state.items_set[0];
@@ -1009,8 +1071,10 @@ future<std::vector<item_ptr>> redis_service::sinter_impl(std::vector<sstring>&& 
     return do_with(sinter_state{item_unordered_map{}, std::move(keys)}, [this, count] (auto& state) {
         return parallel_for_each(boost::irange<unsigned>(0, count), [this, &state] (unsigned k) {
             sstring& key = state.keys[k];
-            return this->smembers_impl(key).then([&state, index = k] (auto&& sub) {
-                state.items_set[index] = std::move(sub);
+            return this->smembers_impl(key).then([&state, index = k] (auto&& u) {
+                if (u.second == REDIS_OK) {
+                    state.items_set[index] = std::move(u.first);
+                }
             });
         }).then([&state, count] {
             auto&& result = std::move(state.items_set[0]);
@@ -1042,8 +1106,8 @@ future<message> redis_service::sinter(args_collection& args)
     if (args._command_args_count == 1) {
         return smembers(args);
     }
-    return sinter_impl(std::move(args._command_args)).then([] (auto&& items) {
-        return items_message<true, false>(std::move(items));
+    return sinter_impl(std::move(args._command_args)).then([] (auto&& u) {
+        return items_message<true, false>(u);
     });
 }
 
@@ -1070,9 +1134,8 @@ future<message> redis_service::sinter_store(args_collection& args)
                members.emplace_back(std::move(member));
             }
             state.result = std::move(items);
-            return this->sadds_impl(state.dest, std::move(members)).then([&state] (auto u) {
-                (void) u;
-                return items_message<true, false>(std::move(state.result));
+            return this->sadds_impl(state.dest, std::move(members)).then([&state] (auto) {
+                return items_message<true, false>(state.result);
             });
         });
     });
@@ -1088,11 +1151,13 @@ future<std::vector<item_ptr>> redis_service::sunion_impl(std::vector<sstring>&& 
     return do_with(union_state{{}, std::move(keys)}, [this, count] (auto& state) {
         return parallel_for_each(boost::irange<unsigned>(0, count), [this, &state] (unsigned k) {
             sstring& key = state.keys[k];
-            return this->smembers_impl(key).then([&state] (auto&& sub) {
-                auto& result = state.result;
-                for (auto& i : sub) {
-                    if (std::find_if(result.begin(), result.end(), [&i] (auto& o) { return i->key_size() == o->key_size() && i->key() == o->key(); }) == result.end()) {
+            return this->smembers_impl(key).then([&state] (auto&& u) {
+                if (u.second == REDIS_OK) {    
+                    auto& result = state.result;
+                    for (auto& i : u.first) {
+                        if (std::find_if(result.begin(), result.end(), [&i] (auto& o) { return i->key_size() == o->key_size() && i->key() == o->key(); }) == result.end()) {
                         result.emplace_back(std::move(i));
+                        }
                     }
                 }
             });
@@ -1111,7 +1176,7 @@ future<message> redis_service::sunion(args_collection& args)
         return smembers(args);
     }
     return sunion_impl(std::move(args._command_args)).then([] (auto&& items) {
-        return items_message<true, false>(std::move(items));
+        return items_message<true, false>(items);
     });
 }
 
@@ -1138,9 +1203,8 @@ future<message> redis_service::sunion_store(args_collection& args)
                members.emplace_back(std::move(member));
             }
             state.result = std::move(items);
-            return this->sadds_impl(state.dest, std::move(members)).then([&state] (auto u) {
-                (void) u;
-                return items_message<true, false>(std::move(state.result));
+            return this->sadds_impl(state.dest, std::move(members)).then([&state] (auto) {
+                return items_message<true, false>(state.result);
             });
         });
     });
@@ -1148,20 +1212,22 @@ future<message> redis_service::sunion_store(args_collection& args)
 
 future<int> redis_service::srem_impl(sstring& key, sstring& member)
 {
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db_peers.local().srem(key, member));
+        return make_ready_future<int>(_db.local().srem(std::move(rk), std::move(member)));
     }
-    return _db_peers.invoke_on(cpu, &db::srem, std::ref(key), std::ref(member));
+    return _db.invoke_on(cpu, &database::srem, std::move(rk), std::move(member));
 }
 
 future<int> redis_service::sadd_impl(sstring& key, sstring& member)
 {
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db_peers.local().sadd(key, member));
+        return make_ready_future<int>(_db.local().sadd(std::move(rk), std::move(member)));
     }
-    return _db_peers.invoke_on(cpu, &db::sadd, std::ref(key), std::ref(member));
+    return _db.invoke_on(cpu, &database::sadd, std::move(rk), std::move(member));
 }
 
 future<message> redis_service::smove(args_collection& args)
@@ -1195,11 +1261,12 @@ future<message> redis_service::type(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return type_message(_db_peers.local().type(key));
+        return type_message(_db.local().type(std::move(rk)));
     }
-    return _db_peers.invoke_on(cpu, &db::type, std::ref(key)).then([] (auto u) {
+    return _db.invoke_on(cpu, &database::type, std::move(rk)).then([] (auto u) {
         return type_message(u);
     });
 }
@@ -1211,11 +1278,12 @@ future<message> redis_service::expire(args_collection& args)
     }
     sstring& key = args._command_args[0];
     long expir = std::atol(args._command_args[1].c_str());
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().expire(key, expir * 1000));
+        return size_message(_db.local().expire(std::move(rk), expir * 1000));
     }
-    return _db_peers.invoke_on(cpu, &db::expire, std::ref(key), expir).then([] (auto u) {
+    return _db.invoke_on(cpu, &database::expire, std::move(rk), expir).then([] (auto u) {
         return size_message(u);
     });
 }
@@ -1227,11 +1295,12 @@ future<message> redis_service::pexpire(args_collection& args)
     }
     sstring& key = args._command_args[0];
     long expir = std::atol(args._command_args[1].c_str());
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().expire(key, expir));
+        return size_message(_db.local().expire(std::move(rk), expir));
     }
-    return _db_peers.invoke_on(cpu, &db::expire, std::ref(key), expir).then([] (auto u) {
+    return _db.invoke_on(cpu, &database::expire, std::move(rk), expir).then([] (auto u) {
         return size_message(u);
     });
 }
@@ -1242,11 +1311,12 @@ future<message> redis_service::pttl(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().pttl(key));
+        return size_message(_db.local().pttl(std::move(rk)));
     }
-    return _db_peers.invoke_on(cpu, &db::pttl, std::ref(key)).then([] (auto u) {
+    return _db.invoke_on(cpu, &database::pttl, std::move(rk)).then([] (auto u) {
         return size_message(u);
     });
 }
@@ -1257,11 +1327,12 @@ future<message> redis_service::ttl(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().ttl(key));
+        return size_message(_db.local().ttl(std::move(rk)));
     }
-    return _db_peers.invoke_on(cpu, &db::ttl, std::ref(key)).then([] (size_t u) {
+    return _db.invoke_on(cpu, &database::ttl, std::move(rk)).then([] (size_t u) {
         return size_message(u);
     });
 }
@@ -1272,23 +1343,25 @@ future<message> redis_service::persist(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().persist(key));
+        return size_message(_db.local().persist(std::move(rk)));
     }
-    return _db_peers.invoke_on(cpu, &db::persist, std::ref(key)).then([] (auto u) {
+    return _db.invoke_on(cpu, &database::persist, std::move(rk)).then([] (auto u) {
         return size_message(u);
     });
 }
 
 future<std::pair<size_t, int>> redis_service::zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags)
 {
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<std::pair<size_t, int>>(_db_peers.local().zadds(key, std::move(members), flags));
+        return make_ready_future<std::pair<size_t, int>>(_db.local().zadds(std::move(rk), std::move(members), flags));
     }
     else {
-        return _db_peers.invoke_on(cpu, &db::zadds<remote_origin_tag>, std::ref(key), std::move(members), flags);
+        return _db.invoke_on(cpu, &database::zadds<remote_origin_tag>, std::move(rk), std::move(members), flags);
     }
 }
 
@@ -1321,7 +1394,8 @@ future<message> redis_service::zadd(args_collection& args)
         if (args._command_args_count - first_score_index > 2) {
             return syntax_err_message();
         }
-        auto cpu = get_cpu(key);
+        redis_key rk{std::move(key)};
+        auto cpu = get_cpu(rk);
         sstring& member = args._command_args[first_score_index + 1];
         sstring& delta = args._command_args[first_score_index];
         double score = 0;
@@ -1331,11 +1405,11 @@ future<message> redis_service::zadd(args_collection& args)
             return syntax_err_message();
         }
         if (engine().cpu_id() == cpu) {
-            auto&& u = _db_peers.local().zincrby(key, std::move(member), score);
+            auto&& u = _db.local().zincrby(std::move(rk), std::move(member), score);
             return u.second ? double_message<true>(u.first) : err_message();
         }
         else {
-            return _db_peers.invoke_on(cpu, &db::zincrby<remote_origin_tag>, std::ref(key), std::move(member), score).then([] (auto&& u) {
+            return _db.invoke_on(cpu, &database::zincrby<remote_origin_tag>, std::move(rk), std::move(member), score).then([] (auto&& u) {
                 return u.second ? double_message<true>(u.first) : err_message();
             });
         }
@@ -1376,22 +1450,25 @@ future<message> redis_service::zcard(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().zcard(key));
+        auto&& u = _db.local().zcard(std::move(rk));
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::zcard, std::ref(key)).then([] (size_t u) {
+    return _db.invoke_on(cpu, &database::zcard, std::move(rk)).then([] (auto&& u) {
         return size_message(u);
     });
 }
 
-future<std::vector<item_ptr>> redis_service::range_impl(const sstring& key, long begin, long end, bool reverse)
+future<std::pair<std::vector<item_ptr>, int>> redis_service::range_impl(sstring& key, long begin, long end, bool reverse)
 {
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<std::vector<item_ptr>>(_db_peers.local().zrange(key, begin, end, reverse));
+        return make_ready_future<std::pair<std::vector<item_ptr>, int>>(_db.local().zrange(std::move(rk), begin, end, reverse));
     }
-    return _db_peers.invoke_on(cpu, &db::zrange, std::ref(key), begin, end, reverse);
+    return _db.invoke_on(cpu, &database::zrange, std::move(rk), begin, end, reverse);
 }
 
 future<message> redis_service::zrange(args_collection& args, bool reverse)
@@ -1399,7 +1476,7 @@ future<message> redis_service::zrange(args_collection& args, bool reverse)
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return syntax_err_message();
     }
-    const sstring& key = args._command_args[0];
+    sstring& key = args._command_args[0];
     long begin = 0, end = 0;
     try {
         begin = std::stoi(args._command_args[1].c_str());
@@ -1415,8 +1492,16 @@ future<message> redis_service::zrange(args_collection& args, bool reverse)
             with_score = true;
         }
     }
-    return range_impl(key, begin, end, reverse).then([with_score] (auto&& items) {
-        return with_score ? items_message<true, true>(std::move(items)) : items_message<true, false>(std::move(items));
+    return range_impl(key, begin, end, reverse).then([with_score] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return with_score ? items_message<true, true>(u.first) : items_message<true, false>(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return nil_message();
+        }
     });
 }
 
@@ -1426,7 +1511,8 @@ future<message> redis_service::zrangebyscore(args_collection& args, bool reverse
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     double min = 0, max = 0;
     try {
         min = std::stod(args._command_args[1].c_str());
@@ -1443,11 +1529,11 @@ future<message> redis_service::zrangebyscore(args_collection& args, bool reverse
         }
     }
     if (engine().cpu_id() == cpu) {
-        auto&& items = _db_peers.local().zrangebyscore(key, min, max, reverse);
-        return with_score ? items_message<true, true>(std::move(items)) : items_message<true, false>(std::move(items));
+        auto&& items = _db.local().zrangebyscore(std::move(rk), min, max, reverse);
+        return with_score ? items_message<true, true>(items) : items_message<true, false>(items);
     }
-    return _db_peers.invoke_on(cpu, &db::zrangebyscore, std::ref(key), min, max, reverse).then([with_score] (auto&& items) {
-        return with_score ? items_message<true, true>(std::move(items)) : items_message<true, false>(std::move(items));
+    return _db.invoke_on(cpu, &database::zrangebyscore, std::move(rk), min, max, reverse).then([with_score] (auto&& items) {
+        return with_score ? items_message<true, true>(items) : items_message<true, false>(items);
     });
 }
 
@@ -1464,11 +1550,13 @@ future<message> redis_service::zcount(args_collection& args)
     } catch (const std::invalid_argument&) {
         return syntax_err_message();
     }
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().zcount(key, min, max));
+        auto&& u = _db.local().zcount(std::move(rk), min, max);
+        return size_message(u);
     }
-    return _db_peers.invoke_on(cpu, &db::zcount, std::ref(key), min, max).then([] (size_t u) {
+    return _db.invoke_on(cpu, &database::zcount, std::move(rk), min, max).then([] (auto&& u) {
         return size_message(u);
     });
 }
@@ -1486,15 +1574,16 @@ future<message> redis_service::zincrby(args_collection& args)
     } catch (const std::invalid_argument&) {
         return syntax_err_message();
     }
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        auto&& result = _db_peers.local().zincrby(key, std::move(member), delta);
+        auto&& result = _db.local().zincrby(std::move(rk), std::move(member), delta);
         if (result.second) {
             return double_message<true>(result.first);
         }
         return wrong_type_err_message();
     }
-    return _db_peers.invoke_on(cpu, &db::zincrby, std::ref(key), std::move(member), delta).then([] (auto u) {
+    return _db.invoke_on(cpu, &database::zincrby, std::move(rk), std::move(member), delta).then([] (auto u) {
         if (u.second) {
             return double_message<true>(u.first);
         }
@@ -1509,13 +1598,30 @@ future<message> redis_service::zrank(args_collection& args, bool reverse)
     }
     sstring& key = args._command_args[0];
     sstring& member = args._command_args[1];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        auto u = _db_peers.local().zrank(key, std::move(member), reverse);
-        return u >= 0 ? size_message(u) : nil_message();
+        auto&& u = _db.local().zrank(std::move(rk), std::move(member), reverse);
+        if (u.second == REDIS_OK) {
+            return size_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return nil_message();
+        }
     }
-    return _db_peers.invoke_on(cpu, &db::zrank, std::ref(key), std::move(member), reverse).then([] (auto u) {
-        return u >= 0 ? size_message(u) : nil_message();
+    return _db.invoke_on(cpu, &database::zrank, std::move(rk), std::move(member), reverse).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return size_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return nil_message();
+        }
     });
 }
 
@@ -1530,12 +1636,14 @@ future<message> redis_service::zrem(args_collection& args)
         sstring& member = args._command_args[i];
         members.emplace_back(std::move(member));
     }
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db_peers.local().zrem(key, std::move(members)));
+       auto&& u = _db.local().zrem(std::move(rk), std::move(members));
+       return size_message(u);
     }
     else {
-        return _db_peers.invoke_on(cpu, &db::zrem, std::ref(key), std::move(members)).then([] (auto u) {
+        return _db.invoke_on(cpu, &database::zrem, std::move(rk), std::move(members)).then([] (auto&& u) {
             return size_message(u);
         });
     }
@@ -1548,14 +1656,31 @@ future<message> redis_service::zscore(args_collection& args)
     }
     sstring& key = args._command_args[0];
     sstring& member = args._command_args[1];
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        auto&& u = _db_peers.local().zscore(key, std::move(member));
-        return u.second ? double_message<true>(u.first) : nil_message();
+        auto&& u = _db.local().zscore(std::move(rk), std::move(member));
+        if (u.second == REDIS_OK) {
+            return double_message<true>(u.first);
+        }
+        else if(u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return nil_message();
+        }
     }
     else {
-        return _db_peers.invoke_on(cpu, &db::zscore, std::ref(key), std::move(member)).then([] (auto&& u) {
-            return u.second ? double_message<true>(u.first) : nil_message();
+        return _db.invoke_on(cpu, &database::zscore, std::move(rk), std::move(member)).then([] (auto&& u) {
+            if (u.second == REDIS_OK) {
+                return double_message<true>(u.first);
+            }
+            else if(u.second == REDIS_WRONG_TYPE) {
+                return wrong_type_err_message();
+            }
+            else {
+                return nil_message();
+            }
         });
     }
 }
@@ -1642,31 +1767,34 @@ future<message> redis_service::zunionstore(args_collection& args)
         return syntax_err_message();
     }
     struct zunion_store_state {
-        std::unordered_map<sstring, double> wkeys;
+        std::vector<std::pair<sstring, double>> wkeys;
         sstring dest;
-        std::unordered_map<sstring, std::unordered_map<sstring, double>> result;
+        std::vector<std::unordered_map<sstring, double>> result;
         int aggregate_flag;
     };
-    std::unordered_map<sstring, double> wkeys;
+    std::vector<std::pair<sstring, double>> wkeys;
     for (size_t i = 0; i < uargs.numkeys; ++i) {
-        wkeys.emplace(std::move(uargs.keys[i]), uargs.weights[i]);
+        wkeys.emplace_back(std::pair<sstring, double>(std::move(uargs.keys[i]), uargs.weights[i]));
     }
     return do_with(zunion_store_state{std::move(wkeys), std::move(uargs.dest), {}, uargs.aggregate_flag}, [this] (auto& state) {
         return parallel_for_each(std::begin(state.wkeys), std::end(state.wkeys), [this, &state] (auto& entry) {
-            const sstring& key = entry.first;
+            sstring& key = entry.first;
             double weight = entry.second;
-            return this->range_impl(key, static_cast<size_t>(0), static_cast<size_t>(-1), false).then([this, &state, &key, weight] (auto&& items) {
-                std::unordered_map<sstring, double> result;
-                for (size_t i = 0; i < items.size(); ++i) {
-                    const auto& member = items[i]->key();
-                    result.emplace(sstring(member.data(), member.size()), items[i]->Double() * weight);
+            return this->range_impl(key, 0, -1, false).then([this, &state, &key, weight] (auto&& u) {
+                if (u.second == REDIS_OK) {
+                    auto& items = u.first;
+                    std::unordered_map<sstring, double> result;
+                    for (size_t i = 0; i < items.size(); ++i) {
+                        const auto& member = items[i]->key();
+                        result.emplace(sstring(member.data(), member.size()), items[i]->Double() * weight);
+                    }
+                    state.result.emplace_back(std::move(result));
                 }
-                state.result[key] = std::move(result);
             });
         }).then([this, &state] () {
             std::unordered_map<sstring, double> result;
-            for (auto& u : state.result) {
-               auto& member_scores = u.second;
+            for (size_t i = 0; i < state.result.size(); ++i) {
+               auto& member_scores = state.result[i];
                for (auto& e : member_scores) {
                    auto& member = e.first;
                    auto  score = e.second;
@@ -1720,13 +1848,16 @@ future<message> redis_service::zinterstore(args_collection& args)
         return parallel_for_each(boost::irange<size_t>(0, count), [this, &state] (size_t k) {
             sstring& key = state.keys[k];
             double weight = state.weights[k];
-            return this->range_impl(key, static_cast<size_t>(0), static_cast<size_t>(-1), false).then([this, &state, &key, weight, index = k] (auto&& items) {
-                std::unordered_map<sstring, double> result;
-                for (size_t i = 0; i < items.size(); ++i) {
-                    const auto& member = items[i]->key();
-                    result.emplace(sstring(member.data(), member.size()), items[i]->Double() * weight);
+            return this->range_impl(key, static_cast<size_t>(0), static_cast<size_t>(-1), false).then([this, &state, &key, weight, index = k] (auto&& u) {
+                if (u.second == REDIS_OK) {
+                    auto& items = u.first;
+                    std::unordered_map<sstring, double> result;
+                    for (size_t i = 0; i < items.size(); ++i) {
+                        const auto& member = items[i]->key();
+                        result.emplace(sstring(member.data(), member.size()), items[i]->Double() * weight);
+                    }
+                    state.result[index] = std::move(result);
                 }
-                state.result[index] = std::move(result);
             });
         }).then([this, &state, count] {
             auto&& result = std::move(state.result[0]);
@@ -1784,9 +1915,10 @@ future<message> redis_service::zremrangebyscore(args_collection& args)
     } catch (const std::invalid_argument&) {
         return syntax_err_message();
     }
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        auto&& u = _db_peers.local().zremrangebyscore(key, min, max);
+        auto&& u = _db.local().zremrangebyscore(std::move(rk), min, max);
         if (u.second == REDIS_OK) {
             return size_message(u.first);
         }
@@ -1798,7 +1930,7 @@ future<message> redis_service::zremrangebyscore(args_collection& args)
         }
     }
     else {
-        return _db_peers.invoke_on(cpu, &db::zremrangebyscore, std::ref(key), min, max).then([] (auto&& u) {
+        return _db.invoke_on(cpu, &database::zremrangebyscore, std::move(rk), min, max).then([] (auto&& u) {
             if (u.second == REDIS_OK) {
                 return size_message(u.first);
             }
@@ -1828,9 +1960,10 @@ future<message> redis_service::zremrangebyrank(args_collection& args)
     } catch(const std::invalid_argument& e) {
         return syntax_err_message();
     }
-    auto cpu = get_cpu(key);
+    redis_key rk{std::move(key)};
+    auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        auto&& u = _db_peers.local().zremrangebyrank(key, begin, end);
+        auto&& u = _db.local().zremrangebyrank(std::move(rk), begin, end);
         if (u.second == REDIS_OK) {
             return size_message(u.first);
         }
@@ -1842,7 +1975,7 @@ future<message> redis_service::zremrangebyrank(args_collection& args)
         }
     }
     else {
-        return _db_peers.invoke_on(cpu, &db::zremrangebyrank, std::ref(key), begin, end).then([] (auto&& u) {
+        return _db.invoke_on(cpu, &database::zremrangebyrank, std::move(rk), begin, end).then([] (auto&& u) {
             if (u.second == REDIS_OK) {
                 return size_message(u.first);
             }
@@ -1884,6 +2017,33 @@ future<message> redis_service::zrangebylex(args_collection&)
 future<message> redis_service::zlexcount(args_collection&)
 {
     return syntax_err_message();
+}
+
+future<message> redis_service::select(args_collection& args)
+{
+    if (args._command_args_count < 1 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    int index = 0;
+    try {
+        index = std::stoi(args._command_args[0].c_str());
+    } catch (const std::invalid_argument&) {
+        return syntax_err_message();
+    }
+    if (static_cast<size_t>(index) >= smp::count) {
+        return err_message();
+    }
+    return do_with(int {0}, [this, index] (auto& count) {
+        return parallel_for_each(boost::irange<unsigned>(0, smp::count), [this, index, &count] (unsigned cpu) {
+            return _db.invoke_on(cpu, &database::select, index).then([&count] (auto&& u) {
+                if (u == REDIS_OK) {
+                    count++;
+                }
+            });
+        }).then([&count] () {
+            return (static_cast<size_t>(count) == smp::count) ? ok_message() : err_message();
+        });
+    });
 }
 
 } /* namespace redis */

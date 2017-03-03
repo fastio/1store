@@ -122,19 +122,22 @@ class db;
 struct redis_key {
     sstring _key;
     size_t  _hash;
-    redis_key(sstring key) : _key(key), _hash(std::hash<sstring>()(_key)) {}
-    redis_key(sstring key, size_t hash) : _key(key), _hash(hash) {}
+    redis_key(sstring&& key) : _key(std::move(key)), _hash(std::hash<sstring>()(_key)) {}
     redis_key(redis_key&& other) : _key(other._key), _hash(other._hash) {}
-    redis_key(const redis_key& o) : _key(o._key), _hash(o._hash) {}
+    //redis_key(const redis_key& o) : _key(o._key), _hash(o._hash) {}
     redis_key& operator=(const redis_key& o) {
-        _key = o._key;
-        _hash = o._hash;
+        if (this != &o) {
+            _key = o._key;
+            _hash = o._hash;
+        }
         return *this;
     }
     redis_key& operator=(redis_key&& o) {
-        _key = std::move(o._key);
-        _hash = o._hash;
-        o._hash = 0;
+        if (this != &o) {
+            _key = std::move(o._key);
+            _hash = o._hash;
+            o._hash = 0;
+        }
         return *this;
     }
 

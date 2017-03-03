@@ -155,6 +155,10 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.hset(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
+                case redis_protocol_parser::command::hmset:
+                    return _redis.hmset(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
                 case redis_protocol_parser::command::hdel:
                     return _redis.hdel(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
@@ -329,6 +333,10 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     });
                 case redis_protocol_parser::command::zunionstore:
                     return _redis.zunionstore(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
+                case redis_protocol_parser::command::select:
+                    return _redis.select(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
                 default:

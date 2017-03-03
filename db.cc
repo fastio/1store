@@ -21,29 +21,47 @@
 #include "db.hh"
 namespace redis {
 
-static const sstring LIST { "list" };
-static const sstring DICT { "dict" };
-static const sstring MISC { "misc" };
-static const sstring SET  { "set"  };
-static const sstring ZSET  { "zset"  };
-
-
-db::db() : _store(new dict())
-         , _misc_storage(MISC, _store)
-         , _list_storage(LIST, _store)
-         , _dict_storage(DICT, _store)
-         , _set_storage(SET, _store)
-         , _zset_storage(ZSET, _store)
+database::database()
 {
     using namespace std::chrono;
     _timer.set_callback([this] { expired_items(); });
+    _store = &_data_storages[0];
 }
 
-db::~db()
+database::~database()
 {
-    if (_store != nullptr) {
-        delete _store;
+}
+
+int database::del(redis_key&& rk)
+{
+    return _store->remove(rk);
+}
+
+int database::exists(redis_key&& rk)
+{
+    return _store->exists(rk);
+}
+
+item_ptr database::get(redis_key&& rk)
+{
+    return _store->fetch(rk);
+}
+
+int database::strlen(redis_key&& rk)
+{
+    auto i = _store->fetch(rk);
+    if (i) {
+        return i->value_size();
     }
+    return 0;
+}
+int database::type(redis_key&& rk)
+{
+    auto it = _store->fetch_raw(rk);
+    if (!it) {
+        return REDIS_ERR;
+    }
+    return static_cast<int>(it->type());
 }
 
 }

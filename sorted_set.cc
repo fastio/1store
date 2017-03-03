@@ -217,11 +217,11 @@ skiplist_node* skiplist::insert(double score, lw_shared_ptr<item> value)
         _level = level;
     }
     x = create_skiplist_node(level, score, value);
-    for (int level = 0; level < _level; ++level) {
-        x->_next[level]._next = update[level]->_next[level]._next;
-        update[level]->_next[level]._next = x;
-        x->_next[level]._span = update[level]->_next[level]._span - (rank[0] - rank[level]);
-        update[level]->_next[level]._span = (rank[0] - rank[level]) + 1;
+    for (int l = 0; l < level; ++l) {
+        x->_next[l]._next = update[l]->_next[l]._next;
+        update[l]->_next[l]._next = x;
+        x->_next[l]._span = update[l]->_next[l]._span - (rank[0] - rank[l]);
+        update[l]->_next[l]._span = (rank[0] - rank[l]) + 1;
     }
     for (int l  = level; l < _level; l++) {
         update[l]->_next[l]._span++;

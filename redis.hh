@@ -48,7 +48,7 @@ namespace redis {
 namespace stdx = std::experimental;
 
 struct args_collection;
-class db;
+class database;
 class item;
 using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 using message = scattered_message<char>;
@@ -57,9 +57,12 @@ private:
     inline unsigned get_cpu(const sstring& key) {
         return std::hash<sstring>()(key) % smp::count;
     }
-    distributed<db>& _db_peers;
+    inline unsigned get_cpu(const redis_key& key) {
+        return key.hash() % smp::count;
+    }
+    distributed<database>& _db;
 public:
-    redis_service(distributed<db>& db) : _db_peers(db) 
+    redis_service(distributed<database>& db) : _db(db) 
     {
     }
 
@@ -151,20 +154,21 @@ public:
     future<message> zrevrangebylex(args_collection&);
     future<message> zremrangebyscore(args_collection&);
     future<message> zremrangebyrank(args_collection&);
+    future<message> select(args_collection&);
 private:
     future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
-    future<std::vector<item_ptr>> range_impl(const sstring& key, long begin, long end, bool reverse);
+    future<std::pair<std::vector<item_ptr>, int>> range_impl(sstring& key, long begin, long end, bool reverse);
     future<int> exists_impl(sstring& key);
     future<int> srem_impl(sstring& key, sstring& member);
     future<int> sadd_impl(sstring& key, sstring& member);
-    future<int> sadds_impl(sstring& key, std::vector<sstring>&& members);
+    future<std::pair<size_t, int>> sadds_impl(sstring& key, std::vector<sstring>&& members);
     future<std::vector<item_ptr>> sdiff_impl(std::vector<sstring>&& keys);
     future<std::vector<item_ptr>> sinter_impl(std::vector<sstring>&& keys);
     future<std::vector<item_ptr>> sunion_impl(std::vector<sstring>&& keys);
-    future<std::vector<item_ptr>> smembers_impl(sstring& key);
+    future<std::pair<std::vector<item_ptr>, int>> smembers_impl(sstring& key);
     future<message> pop_impl(args_collection& args, bool left);
     future<message> push_impl(args_collection& arg, bool force, bool left);
-    future<int> push_impl(sstring& key, sstring& value, bool force, bool left);
+    future<std::pair<size_t, int>> push_impl(sstring& key, sstring& value, bool force, bool left);
     future<int> set_impl(sstring& key, sstring& value, long expir, uint8_t flag);
     future<item_ptr> get_impl(sstring& key);
     future<int> remove_impl(sstring& key);
@@ -275,7 +279,7 @@ private:
         }
         return make_ready_future<message>(std::move(msg));
     }
-    static future<message> item_message(sstring&& u) 
+    static future<message> item_message(sstring& u) 
     {
         scattered_message<char> msg;
         msg.append_static(msg_batch_tag);
@@ -287,7 +291,7 @@ private:
     }
 
     template<bool Key, bool Value>
-    static future<message>  item_message(item_ptr&& u) 
+    static future<message>  item_message(item_ptr& u) 
     {
         scattered_message<char> msg;
         this_type::append_item<Key, Value>(msg, std::move(u));
@@ -337,7 +341,7 @@ private:
     }
 
     template<bool Key, bool Value>
-    static future<message> items_message(std::vector<item_ptr>&& items) 
+    static future<message> items_message(std::vector<item_ptr>& items) 
     {
         message msg;
         msg.append(msg_sigle_tag);
@@ -411,6 +415,53 @@ private:
             msg.append_static(msg_type_none);
         }
         return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> size_message(std::pair<size_t, int>& u) {
+        if (u.second == REDIS_OK) {
+            return size_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        return err_message();
+    }
+    static future<message> size_message(std::pair<long, int>& u) {
+        if (u.second == REDIS_OK) {
+            return size_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        return err_message();
+    }
+    static future<message> size_message(std::pair<double, int>& u) {
+        if (u.second == REDIS_OK) {
+            return double_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        return err_message();
+    }
+    template<bool Key, bool Value>
+    static future<message> item_message(std::pair<item_ptr, int>& u) {
+        if (u.second == REDIS_OK) {
+            return item_message<Key, Value>(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        return err_message();
+    }
+    template<bool Key, bool Value>
+    static future<message> items_message(std::pair<std::vector<item_ptr>, int>& u) {
+        if (u.second == REDIS_OK) {
+            return items_message<Key, Value>(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        return err_message();
     }
 };
 
