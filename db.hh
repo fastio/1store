@@ -123,31 +123,8 @@ public:
 
     int strlen(redis_key&& key);
 
-    int expire(redis_key&& rk, long expired)
-    {
-        auto expiry = expiration(expired);
-        auto it = _store->fetch_raw(rk);
-        if (it) {
-            it->set_expiry(expiry);
-            if (_alive.insert(it)) {
-                _timer.rearm(it->get_timeout());
-                return REDIS_OK;
-            }
-            it->set_never_expired();
-        }
-        return REDIS_ERR;
-    }
-
-    inline int persist(redis_key&& rk)
-    {
-        auto it = _store->fetch_raw(rk);
-        if (it) {
-            it->set_never_expired();
-            return REDIS_OK;
-        }
-        return REDIS_ERR;
-    }
-
+    int expire(redis_key&& rk, long expired);
+    int persist(redis_key&& rk);
 
     template <typename origin = local_origin_tag> inline
     std::pair<size_t, int> push(redis_key&& rk, sstring&& value, bool force, bool left)
@@ -178,52 +155,9 @@ public:
         return result_type {_list->size(), REDIS_OK};
     }
 
-    std::pair<item_ptr, int> pop(redis_key&& rk, bool left)
-    {
-        using result_type = std::pair<item_ptr, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {nullptr, REDIS_ERR};
-        }
-        else if(it->type() != REDIS_LIST) {
-            return result_type {nullptr, REDIS_WRONG_TYPE};
-        }
-        list* _list = it->list_ptr();
-        auto mit = left ? _list->pop_head() : _list->pop_tail();
-        if (_list->size() == 0) {
-            _store->remove(rk);
-        }
-        return result_type {std::move(mit), REDIS_OK};
-    }
-
-    std::pair<size_t, int> llen(redis_key&& rk) 
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {0, REDIS_ERR};
-        }
-        else if (it->type() != REDIS_LIST) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        list* _list = it->list_ptr();
-        return result_type {_list->size(), REDIS_OK};
-    }
-
-    std::pair<item_ptr, int> lindex(redis_key&& rk, int idx)
-    {
-        using result_type = std::pair<item_ptr, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {nullptr, REDIS_ERR};
-        }
-        else if (it->type() != REDIS_LIST) {
-            return result_type {nullptr, REDIS_WRONG_TYPE};
-        }
-        list* _list = it->list_ptr();
-        return result_type {std::move(_list->index(idx)), REDIS_OK};
-    }
-
+    std::pair<item_ptr, int> pop(redis_key&& rk, bool left);
+    std::pair<size_t, int> llen(redis_key&& rk); 
+    std::pair<item_ptr, int> lindex(redis_key&& rk, int idx);
     template <typename origin = local_origin_tag> inline
     int linsert(redis_key&& rk, sstring&& pivot, sstring&& value, bool after)
     {
@@ -239,20 +173,7 @@ public:
         return REDIS_ERR;
     }
 
-    std::pair<std::vector<item_ptr>, int> lrange(redis_key&& rk, int start, int end)
-    {
-        using result_type = std::pair<std::vector<item_ptr>, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {std::move(std::vector<item_ptr>()), REDIS_ERR};
-        }
-        else if (it->type() != REDIS_LIST) {
-            return result_type {std::move(std::vector<item_ptr>()), REDIS_WRONG_TYPE};
-        }
-        list* _list = it->list_ptr();
-        return result_type {std::move(_list->range(start, end)), REDIS_OK};
-    }
-
+    std::pair<std::vector<item_ptr>, int> lrange(redis_key&& rk, int start, int end);
     template <typename origin = local_origin_tag> inline
     int lset(redis_key&& rk, int idx, sstring&& value)
     {
@@ -270,38 +191,8 @@ public:
         return REDIS_ERR;
     }
 
-    std::pair<size_t, int> lrem(redis_key&& rk, int count, sstring&& value)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {0, REDIS_ERR};
-        }
-        else if (it->type() != REDIS_LIST) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        list* _list = it->list_ptr();
-        auto result = _list->trem(count, value);
-        if (_list->size() == 0) {
-            _store->remove(rk);
-        }
-        return result_type {result, REDIS_OK};
-    }
-
-    int ltrim(redis_key&& rk, int start, int end)
-    {
-        auto it = _store->fetch_raw(rk);
-        if (it) {
-            if (it->type() != REDIS_LIST) {
-                return REDIS_WRONG_TYPE;
-            }
-            list* _list = it->list_ptr();
-            return _list->trim(start, end);
-        }
-        return REDIS_OK;
-    }
-
-
+    std::pair<size_t, int> lrem(redis_key&& rk, int count, sstring&& value);
+    int ltrim(redis_key&& rk, int start, int end);
     template <typename origin = local_origin_tag> inline
     int hset(redis_key&& rk, sstring&& field, sstring&& value)
     {
@@ -353,85 +244,11 @@ public:
         return REDIS_OK;
     }
 
-    std::pair<item_ptr, int> hget(redis_key&& rk, sstring&& field)
-    {
-        using result_type = std::pair<item_ptr, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {nullptr, REDIS_ERR};
-        }
-        else if (it->type() != REDIS_DICT) {
-            return result_type {nullptr, REDIS_WRONG_TYPE};
-        }
-        auto _dict = it->dict_ptr();
-        redis_key field_key {std::move(field)};
-        return result_type {_dict->fetch(field_key), REDIS_OK};
-    }
-
-    int hdel(redis_key&& rk, sstring&& field)
-    {
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return REDIS_ERR;
-        }
-        else if (it->type() != REDIS_DICT) {
-            return REDIS_WRONG_TYPE;
-        }
-        auto _dict = it->dict_ptr();
-        redis_key field_key {std::move(field)};
-        auto result = _dict->remove(field_key);
-        if (_dict->size() == 0) {
-            _store->remove(rk);
-        }
-        return result;
-    }
-
-    int hexists(redis_key&& rk, sstring&& field)
-    {
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return REDIS_ERR;
-        }
-        else if (it->type() != REDIS_DICT) {
-            return REDIS_WRONG_TYPE;
-        }
-        auto _dict = it->dict_ptr();
-        redis_key field_key {std::move(field)};
-        return _dict->exists(field_key);
-    }
-
-    std::pair<size_t, int> hstrlen(redis_key&& rk, sstring&& field)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-
-        if (!it) {
-            return result_type {0, REDIS_ERR};
-        }
-        else if (it->type() != REDIS_DICT) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        auto _dict = it->dict_ptr();
-        redis_key field_key {std::move(field)};
-        auto mit = _dict->fetch(field_key);
-        return result_type {mit->value_size(), REDIS_OK};
-    }
-
-    std::pair<size_t, int> hlen(redis_key&& rk)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-
-        if (!it) {
-            return result_type {0, REDIS_ERR};
-        }
-        else if (it->type() != REDIS_DICT) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        auto _dict = it->dict_ptr();
-        return result_type {_dict->size(), REDIS_OK};
-    }
-
+    std::pair<item_ptr, int> hget(redis_key&& rk, sstring&& field);
+    int hdel(redis_key&& rk, sstring&& field);
+    int hexists(redis_key&& rk, sstring&& field);
+    std::pair<size_t, int> hstrlen(redis_key&& rk, sstring&& field);
+    std::pair<size_t, int> hlen(redis_key&& rk);
     template <typename origin = local_origin_tag> inline
     std::pair<size_t, int> hincrby(redis_key&& rk, sstring&& field, size_t delta)
     {
@@ -493,34 +310,8 @@ public:
         return result_type {0, REDIS_ERR}; 
     }
 
-    std::pair<std::vector<item_ptr>, int> hgetall(redis_key&& rk)
-    {
-        using result_type = std::pair<std::vector<item_ptr>, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {std::move(std::vector<item_ptr>()), REDIS_ERR};
-        }
-        else if (it->type() != REDIS_DICT) {
-            return result_type {std::move(std::vector<item_ptr>()), REDIS_WRONG_TYPE};
-        }
-        auto dict = it->dict_ptr();
-        return result_type {std::move(dict->fetch()), REDIS_OK};
-    }
-
-    std::pair<std::vector<item_ptr>, int> hmget(redis_key&& rk, std::vector<sstring>&& keys)
-    {
-        using result_type = std::pair<std::vector<item_ptr>, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {std::move(std::vector<item_ptr>()), REDIS_ERR};
-        }
-        else if (it->type() != REDIS_DICT) {
-            return result_type {std::move(std::vector<item_ptr>()), REDIS_WRONG_TYPE};
-        }
-        auto dict = it->dict_ptr();
-        return result_type{std::move(dict->fetch(keys)), REDIS_OK};
-    }
-
+    std::pair<std::vector<item_ptr>, int> hgetall(redis_key&& rk);
+    std::pair<std::vector<item_ptr>, int> hmget(redis_key&& rk, std::vector<sstring>&& keys);
     template <typename origin = local_origin_tag> inline
     std::pair<size_t, int> sadds(redis_key&& rk, std::vector<sstring>&& members)
     {
@@ -578,128 +369,15 @@ public:
         return REDIS_ERR;
     }
 
-    std::pair<size_t, int> scard(redis_key&& rk)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {0, REDIS_ERR};
-        }
-        else if(it->type() != REDIS_SET) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        auto set = it->dict_ptr();
-        return result_type {set->size(), REDIS_OK};
-    }
-
-    int sismember(redis_key&& rk, sstring&& member)
-    {
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return REDIS_ERR;
-        }
-        else if(it->type() != REDIS_SET) {
-            return REDIS_WRONG_TYPE;
-        }
-        auto _set = it->dict_ptr();
-        redis_key member_data {std::move(member)};
-        return _set->exists(member_data);
-    }
-
-    std::pair<std::vector<item_ptr>, int> smembers(redis_key&& rk)
-    {
-        using result_type = std::pair<std::vector<item_ptr>, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {std::move(std::vector<item_ptr>()), REDIS_ERR};
-        }
-        if (it->type() == REDIS_SET) {
-            return result_type {std::move(std::vector<item_ptr>()), REDIS_WRONG_TYPE};
-        }
-        auto _set = it->dict_ptr();
-        return result_type {std::move(_set->fetch()), REDIS_OK};
-    }
-
-    std::pair<item_ptr, int> spop(redis_key&& rk)
-    {
-        using result_type = std::pair<item_ptr, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {nullptr, REDIS_ERR};
-        }
-        if (it->type() == REDIS_SET) {
-            return result_type {nullptr, REDIS_WRONG_TYPE};
-        }
-        auto _set = it->dict_ptr();
-        return result_type {std::move(_set->random_fetch_and_remove()), REDIS_OK};
-    }
-
-    int srem(redis_key&& rk, sstring&& member)
-    {
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return REDIS_ERR;
-        }
-        if (it->type() == REDIS_SET) {
-            return REDIS_WRONG_TYPE;
-        }
-        auto _set = it->dict_ptr();
-        redis_key member_data {std::move(member)};
-        return _set->remove(member_data);
-    }
-
-    std::pair<size_t, int> srems(redis_key&& rk, std::vector<sstring>&& members)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {0, REDIS_ERR};
-        }
-        if (it->type() == REDIS_SET) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        auto _set = it->dict_ptr();
-        int count = 0;
-        if (_set != nullptr) {
-            for (sstring& member : members) {
-                redis_key member_data {std::move(member)};
-                if (_set->remove(member_data) == REDIS_OK) {
-                    count++;
-                }
-            }
-            if (_set->size() == 0) {
-                _store->remove(rk);
-            }
-        }
-        return result_type {count, REDIS_OK};
-    }
-
+    std::pair<size_t, int> scard(redis_key&& rk);
+    int sismember(redis_key&& rk, sstring&& member);
+    std::pair<std::vector<item_ptr>, int> smembers(redis_key&& rk);
+    std::pair<item_ptr, int> spop(redis_key&& rk);
+    int srem(redis_key&& rk, sstring&& member);
+    std::pair<size_t, int> srems(redis_key&& rk, std::vector<sstring>&& members);
     int type(redis_key&& rk);
-
-    long pttl(redis_key&& rk)
-    {
-        auto item = get(std::move(rk));
-        if (item) {
-            if (item->ever_expires() == false) {
-                return -1;
-            }
-            auto duration = item->get_timeout() - clock_type::now();
-            return static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
-        }
-        else {
-            return -2;
-        }
-    }
-
-    long ttl(redis_key&& rk)
-    {
-        auto ret = pttl(std::move(rk));
-        if (ret > 0) {
-            return ret / 1000;
-        }
-        return ret;
-    }
-
+    long pttl(redis_key&& rk);
+    long ttl(redis_key&& rk);
     template <typename origin = local_origin_tag> inline
     std::pair<size_t, int> zadds(redis_key&& rk, std::unordered_map<sstring, double>&& members, int flags)
     {
@@ -747,55 +425,9 @@ public:
         return result_type {count, REDIS_OK};
     }
 
-    std::pair<size_t, int> zcard(redis_key&& rk)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {0, REDIS_ERR};
-        }
-        if (it->type() != REDIS_ZSET) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        auto zset = it->zset_ptr();
-        return result_type {zset->size(), REDIS_OK};
-    }
-    std::pair<size_t, int> zrem(redis_key&& rk, std::vector<sstring>&& members)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {0, REDIS_ERR};
-        }
-        if (it->type() != REDIS_ZSET) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        auto zset = it->zset_ptr();
-        size_t count = 0;
-        for (size_t i = 0; i < members.size(); ++i) {
-            redis_key m{std::move(members[i])};
-            if (zset->remove(m) == REDIS_OK) {
-                count++;
-            }
-        }
-        if (zset->size() == 0) {
-            _store->remove(rk);
-        }
-        return result_type {count, REDIS_OK};
-    }
-    std::pair<size_t, int> zcount(redis_key&& rk, double min, double max)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {0, REDIS_ERR};
-        }
-        if (it->type() != REDIS_ZSET) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        auto zset = it->zset_ptr();
-        return result_type {zset->count(min, max), REDIS_OK};
-    }
+    std::pair<size_t, int> zcard(redis_key&& rk);
+    std::pair<size_t, int> zrem(redis_key&& rk, std::vector<sstring>&& members);
+    std::pair<size_t, int> zcount(redis_key&& rk, double min, double max);
     template <typename origin = local_origin_tag> inline
     std::pair<double, int> zincrby(redis_key&& rk, sstring&& member, double delta)
     {
@@ -829,186 +461,19 @@ public:
             return result_type {0, REDIS_ERR}; 
         }
     }
-    std::pair<std::vector<item_ptr>, int> zrange(redis_key&& rk, long begin, long end, bool reverse)
-    {
-        using result_type = std::pair<std::vector<item_ptr>, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {std::move(std::vector<item_ptr>()), REDIS_OK};
-        }
-        if (it->type() != REDIS_ZSET) {
-            return result_type {std::move(std::vector<item_ptr>()), REDIS_WRONG_TYPE};
-        }
-        auto zset = it->zset_ptr();
-        return result_type {std::move(zset->range_by_rank(begin, end, reverse)), REDIS_OK};
-    }
-    std::pair<std::vector<item_ptr>, int> zrangebyscore(redis_key&& rk, double min, double max, bool reverse)
-    {
-        using result_type = std::pair<std::vector<item_ptr>, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {std::move(std::vector<item_ptr>()), REDIS_OK};
-        }
-        if (it->type() != REDIS_ZSET) {
-            return result_type {std::move(std::vector<item_ptr>()), REDIS_WRONG_TYPE};
-        }
-        auto zset = it->zset_ptr();
-        return result_type {std::move(zset->range_by_score(min, max, reverse)), REDIS_OK};
-    }
-
-    std::pair<size_t, int> zrank(redis_key&& rk, sstring&& member, bool reverse)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-           return result_type {0, REDIS_ERR};
-        }
-        else if (it->type() != REDIS_ZSET) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        auto zset = it->zset_ptr();
-        redis_key m{std::move(member)};
-        return result_type {zset->rank(m, reverse), REDIS_OK};
-    }
-
-    std::pair<double, int> zscore(redis_key&& rk, sstring&& member)
-    {
-        using result_type = std::pair<double, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {0, REDIS_ERR};
-        }
-        if (it->type() != REDIS_ZSET) {
-            return result_type{0, REDIS_WRONG_TYPE};
-        }
-        auto zset = it->zset_ptr();
-        redis_key mk {std::move(member)};
-        auto value = zset->fetch(mk);
-        if (!value) {
-            return result_type{0, REDIS_ERR};
-        }
-        return result_type{value->Double(), REDIS_OK};
-    }
-
-    std::pair<size_t, int> zremrangebyscore(redis_key&& rk, double min, double max)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {0, REDIS_OK};
-        }
-        if (it && it->type() != REDIS_ZSET) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        auto zset = it->zset_ptr();
-        return result_type {zset->remove_range_by_score(min, max), REDIS_OK};
-    }
-    std::pair<size_t, int> zremrangebyrank(redis_key&& rk, size_t begin, size_t end)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {0, REDIS_OK};
-        }
-        if (it && it->type() != REDIS_ZSET) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        auto zset = it->zset_ptr();
-        return result_type {zset->remove_range_by_rank(begin, end), REDIS_OK};
-    }
-    int select(int index)
-    {
-        _store = &_data_storages[index];
-        return REDIS_OK;
-    }
-
-    std::pair<double, int> geodist(redis_key&& rk, sstring&& lpos, sstring&& rpos, int flag)
-    {
-        using result_type = std::pair<double, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {0, REDIS_ERR};
-        }
-        else if (it->type() != REDIS_ZSET) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        auto _zset = it->zset_ptr();
-        auto lmember = _zset->fetch(redis_key {std::move(lpos)});
-        auto rmember = _zset->fetch(redis_key {std::move(rpos)});
-        if (lmember || rmember) {
-            return result_type {0, REDIS_ERR};
-        }
-        double lscore = lmember->Double(), rscore = rmember->Double(), dist = 0;
-        if (geo::dist(lscore, rscore, dist)) {
-            return result_type {dist, REDIS_OK};
-        }
-        return result_type {0, REDIS_ERR};
-    }
-
-    std::pair<std::vector<sstring>, int> geohash(redis_key&& rk, std::vector<sstring>&& members)
-    {
-        using result_type = std::pair<std::vector<sstring>, int>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {std::move(std::vector<sstring>()), REDIS_ERR};
-        }
-        else if (it->type() != REDIS_ZSET) {
-            return result_type {std::move(std::vector<sstring>()), REDIS_WRONG_TYPE};
-        }
-        auto _zset = it->zset_ptr();
-        auto&& items = _zset->fetch(members);
-        std::vector<sstring> geohash_set;
-        for (size_t i = 0; i < items.size(); ++i) {
-            auto& item = items[i];
-            sstring hashstr;
-            if (geo::encode_to_geohash_string(item->Double(), hashstr) == false) {
-                return result_type {std::move(std::vector<sstring>()), REDIS_ERR};
-            }
-            geohash_set.emplace_back(std::move(hashstr));;
-        }
-        return result_type {std::move(geohash_set), REDIS_OK};
-    }
-
-    std::pair<std::vector<std::pair<double, double>>, int> geopos(redis_key&& rk, std::vector<sstring>&& members)
-    {
-        using result_type = std::pair<std::vector<std::pair<double, double>>, int>;
-        using result_data_type = std::vector<std::pair<double, double>>;
-        auto it = _store->fetch_raw(rk);
-        if (!it) {
-            return result_type {std::move(result_data_type()), REDIS_ERR};
-        }
-        else if (it->type() != REDIS_ZSET) {
-            return result_type {std::move(result_data_type()), REDIS_WRONG_TYPE};
-        }
-        auto _zset = it->zset_ptr();
-        auto&& items = _zset->fetch(members);
-        result_data_type result;
-        for (size_t i = 0; i < items.size(); ++i) {
-            auto& item = items[i];
-            double longtitude = 0, latitude = 0; 
-            if (geo::decode_from_geohash(item->Double(), longtitude, latitude)) {
-                result.emplace_back(std::move(std::pair<double, double>(longtitude, latitude)));
-            }
-        }
-        return result_type {std::move(result), REDIS_OK};
-    }
-
-    future<> stop() { return make_ready_future<>(); }
+    std::pair<std::vector<item_ptr>, int> zrange(redis_key&& rk, long begin, long end, bool reverse);
+    std::pair<std::vector<item_ptr>, int> zrangebyscore(redis_key&& rk, double min, double max, bool reverse);
+    std::pair<size_t, int> zrank(redis_key&& rk, sstring&& member, bool reverse);
+    std::pair<double, int> zscore(redis_key&& rk, sstring&& member);
+    std::pair<size_t, int> zremrangebyscore(redis_key&& rk, double min, double max);
+    std::pair<size_t, int> zremrangebyrank(redis_key&& rk, size_t begin, size_t end);
+    int select(int index);
+    std::pair<double, int> geodist(redis_key&& rk, sstring&& lpos, sstring&& rpos, int flag);
+    std::pair<std::vector<sstring>, int> geohash(redis_key&& rk, std::vector<sstring>&& members);
+    std::pair<std::vector<std::pair<double, double>>, int> geopos(redis_key&& rk, std::vector<sstring>&& members);
+    future<> stop();
 private:
-    void expired_items()
-    {
-        using namespace std::chrono;
-        auto exp = _alive.expire(clock_type::now());
-        while (!exp.empty()) {
-            auto it = *exp.begin();
-            exp.pop_front();
-            // release expired item
-            if (it && it->ever_expires()) {
-                _store->remove(it);
-            }
-        }
-        _timer.arm(_alive.get_next_timeout());
-    }
+    void expired_items();
 private:
     static const int DEFAULT_DB_COUNT = 32;
     dict* _store = nullptr;

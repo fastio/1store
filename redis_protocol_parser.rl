@@ -161,6 +161,12 @@ zrangebyscore = "zrangebyscore"i ${_command = command::zrangebyscore; };
 zlexcount = "zlexcount"i ${_command = command::zlexcount;};
 zremrangebylex = "zremrangebylex"i ${_command = command::zremrangebylex; };
 select = "select"i ${_command = command::select; };
+geoadd = "geoadd"i ${_command = command::geoadd; };
+geodist = "geodist"i ${_command = command::geodist; };
+geohash = "geohash"i ${_command = command::geohash; };
+geopos = "geopos"i ${_command = command::geopos; };
+georadius = "georadius"i ${_command = command::georadius; };
+georadiusbymember = "georadiusbymember"i ${_command = command::georadiusbymember; };
 
 command = (set | get | del | mget | mset | echo | ping | incr | decr | incrby | decrby | command_ | exists | append |
            strlen | lpush | lpushx | lpop | llen | lindex | linsert | lrange | lset | rpush | rpushx | rpop | lrem |
@@ -169,7 +175,7 @@ command = (set | get | del | mget | mset | echo | ping | incr | decr | incrby | 
            sunionstore | smove | type | expire | pexpire | persist | ttl | pttl | zadd | zcard | zcount | zincrby |
            zrangebyscore | zrank | zremrangebyrank | zremrangebyscore | zremrangebylex | zrem | zrevrangebyscore | zrevrange| zrevrank |
            zscore | zunionstore  | zinterstore | zdiffstore | zunion | zinter | zdiff | zscan | zrangebylex | zlexcount |
-           zrange | select);
+           zrange | select | geoadd | geodist | geohash | geopos | georadius | georadiusbymember);
 arg = '$' u32 crlf ${ _arg_size = _u32;};
 
 main := (args_count (arg command crlf) (arg @{fcall blob; } crlf)+) ${_state = state::ok;};
@@ -277,6 +283,12 @@ public:
         zlexcount,
         zremrangebylex,
         select,
+        geoadd,
+        geohash,
+        geodist,
+        geopos,
+        georadius,
+        georadiusbymember,
     };
 
     state _state;
