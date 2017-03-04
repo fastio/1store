@@ -39,6 +39,7 @@ public:
     int exists(const redis_key& key);
     int insert(const redis_key& key, lw_shared_ptr<item> item);
     lw_shared_ptr<item> fetch(const redis_key& key);
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch(const std::vector<sstring>& keys);
     int replace(const redis_key& key, lw_shared_ptr<item> item);
     size_t size();
     size_t rank(const redis_key& key, bool reverse);

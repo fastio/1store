@@ -49,7 +49,7 @@ public:
     foreign_ptr<lw_shared_ptr<item>> fetch(const redis_key& key);
     foreign_ptr<lw_shared_ptr<item>> random_fetch_and_remove() { return nullptr; }
     std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch();
-    std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch(const std::unordered_set<sstring>& keys);
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch(const std::vector<sstring>& keys);
 };
 
 } // namespace redis

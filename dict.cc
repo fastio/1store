@@ -90,7 +90,7 @@ struct dict::rep
     int clear(dict_hash_table *ht);
     size_t size();
     std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch();
-    std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch(const std::unordered_set<sstring>& keys);
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch(const std::vector<sstring>& keys);
 private:
     static const int DICT_HT_INITAL_SIZE = 4;
     inline bool key_equal(const std::experimental::string_view& k, const sstring& key) {
@@ -443,18 +443,15 @@ int dict::rep::remove_no_free(const redis_key& key) {
     return generic_delete(key);
 }
 
-std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::rep::fetch(const std::unordered_set<sstring>& keys)
+std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::rep::fetch(const std::vector<sstring>& keys)
 {
     std::vector<foreign_ptr<lw_shared_ptr<item>>> items;
-    dict_iterator iter(this);
-    iter.seek_to_first();
-    while (iter.status() == REDIS_OK) {
-        auto n = iter.value();
-        auto k = n->_val->key();
-        if (std::find_if(keys.begin(), keys.end(), [this, &k] (const sstring& key) { return key_equal(k, key); }) != keys.end()) {
-            items.emplace_back(foreign_ptr<lw_shared_ptr<item>>(lw_shared_ptr<item>(n->_val)));
-        }
-        iter.next();
+    for (size_t i = 0; i < keys.size(); ++i) {
+       redis_key rk {keys[i]};
+       auto item = fetch_value(rk);
+       if (item) {
+           items.emplace_back(std::move(item));
+       }
     }
     return std::move(items);
 }
@@ -632,7 +629,7 @@ foreign_ptr<lw_shared_ptr<item>> dict::fetch(const redis_key& key)
     return foreign_ptr<lw_shared_ptr<item>>(_rep->fetch_value(key));
 }
 
-std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::fetch(const std::unordered_set<sstring>& keys)
+std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::fetch(const std::vector<sstring>& keys)
 {
   return _rep->fetch(keys);
 }

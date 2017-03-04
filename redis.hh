@@ -62,7 +62,7 @@ private:
     }
     distributed<database>& _db;
 public:
-    redis_service(distributed<database>& db) : _db(db) 
+    redis_service(distributed<database>& db) : _db(db)
     {
     }
 
@@ -155,6 +155,14 @@ public:
     future<message> zremrangebyscore(args_collection&);
     future<message> zremrangebyrank(args_collection&);
     future<message> select(args_collection&);
+
+    // [GEO]
+    future<message> geoadd(args_collection&);
+    future<message> geopos(args_collection&);
+    future<message> geodist(args_collection&);
+    future<message> geohash(args_collection&);
+    future<message> georadius(args_collection&);
+    future<message> georadiusbymember(args_collection&);
 private:
     future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
     future<std::pair<std::vector<item_ptr>, int>> range_impl(sstring& key, long begin, long end, bool reverse);
@@ -279,7 +287,22 @@ private:
         }
         return make_ready_future<message>(std::move(msg));
     }
-    static future<message> item_message(sstring& u) 
+    static future<message> strings_message(std::vector<sstring>& u)
+    {
+        scattered_message<char> msg;
+        for (size_t i = 0; i < u.size(); ++i) {
+            auto& uu = u[i];
+            msg.append_static(msg_batch_tag);
+            msg.append(to_sstring(uu.size()));
+            msg.append_static(msg_crlf);
+            msg.append_static(std::move(uu));
+            msg.append_static(msg_crlf);
+        }
+        return make_ready_future<message>(std::move(msg));
+    }
+
+    template<bool Key, bool Value>
+    static future<message> item_message(sstring& u)
     {
         scattered_message<char> msg;
         msg.append_static(msg_batch_tag);
@@ -291,7 +314,7 @@ private:
     }
 
     template<bool Key, bool Value>
-    static future<message>  item_message(item_ptr& u) 
+    static future<message>  item_message(item_ptr& u)
     {
         scattered_message<char> msg;
         this_type::append_item<Key, Value>(msg, std::move(u));
@@ -299,7 +322,7 @@ private:
     }
 
     template<bool Key, bool Value>
-    static void  append_item(message& msg, item_ptr&& u) 
+    static void  append_item(message& msg, item_ptr&& u)
     {
         if (!u) {
             msg.append_static(msg_not_found);
@@ -341,7 +364,7 @@ private:
     }
 
     template<bool Key, bool Value>
-    static future<message> items_message(std::vector<item_ptr>& items) 
+    static future<message> items_message(std::vector<item_ptr>& items)
     {
         message msg;
         msg.append(msg_sigle_tag);
@@ -393,7 +416,7 @@ private:
         return make_ready_future<message>(std::move(msg));
     }
 
-    static future<message> type_message(int u) 
+    static future<message> type_message(int u)
     {
         message msg;
         if (u == static_cast<int>(REDIS_RAW_STRING)) {

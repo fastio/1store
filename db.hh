@@ -21,19 +21,16 @@
 #pragma once
 #include "core/shared_ptr.hh"
 #include "core/future.hh"
-#include <sstream>
-#include <iostream>
-#include <boost/intrusive/unordered_set.hpp>
-#include <boost/intrusive/list.hpp>
-#include <boost/intrusive_ptr.hpp>
-#include <boost/lexical_cast.hpp>
 #include "core/shared_ptr.hh"
 #include "core/sharded.hh"
+#include <sstream>
+#include <iostream>
 #include "base.hh"
 #include "dict.hh"
 #include "list.hh"
 #include "sorted_set.hh"
 #include "redis_timer_set.hh"
+#include "geo.hh"
 namespace redis {
 
 namespace stdx = std::experimental;
@@ -510,7 +507,7 @@ public:
         return result_type {std::move(dict->fetch()), REDIS_OK};
     }
 
-    std::pair<std::vector<item_ptr>, int> hmget(redis_key&& rk, std::unordered_set<sstring>&& keys)
+    std::pair<std::vector<item_ptr>, int> hmget(redis_key&& rk, std::vector<sstring>&& keys)
     {
         using result_type = std::pair<std::vector<item_ptr>, int>;
         auto it = _store->fetch_raw(rk);
@@ -924,6 +921,78 @@ public:
         _store = &_data_storages[index];
         return REDIS_OK;
     }
+
+    std::pair<double, int> geodist(redis_key&& rk, sstring&& lpos, sstring&& rpos, int flag)
+    {
+        using result_type = std::pair<double, int>;
+        auto it = _store->fetch_raw(rk);
+        if (!it) {
+            return result_type {0, REDIS_ERR};
+        }
+        else if (it->type() != REDIS_ZSET) {
+            return result_type {0, REDIS_WRONG_TYPE};
+        }
+        auto _zset = it->zset_ptr();
+        auto lmember = _zset->fetch(redis_key {std::move(lpos)});
+        auto rmember = _zset->fetch(redis_key {std::move(rpos)});
+        if (lmember || rmember) {
+            return result_type {0, REDIS_ERR};
+        }
+        double lscore = lmember->Double(), rscore = rmember->Double(), dist = 0;
+        if (geo::dist(lscore, rscore, dist)) {
+            return result_type {dist, REDIS_OK};
+        }
+        return result_type {0, REDIS_ERR};
+    }
+
+    std::pair<std::vector<sstring>, int> geohash(redis_key&& rk, std::vector<sstring>&& members)
+    {
+        using result_type = std::pair<std::vector<sstring>, int>;
+        auto it = _store->fetch_raw(rk);
+        if (!it) {
+            return result_type {std::move(std::vector<sstring>()), REDIS_ERR};
+        }
+        else if (it->type() != REDIS_ZSET) {
+            return result_type {std::move(std::vector<sstring>()), REDIS_WRONG_TYPE};
+        }
+        auto _zset = it->zset_ptr();
+        auto&& items = _zset->fetch(members);
+        std::vector<sstring> geohash_set;
+        for (size_t i = 0; i < items.size(); ++i) {
+            auto& item = items[i];
+            sstring hashstr;
+            if (geo::encode_to_geohash_string(item->Double(), hashstr) == false) {
+                return result_type {std::move(std::vector<sstring>()), REDIS_ERR};
+            }
+            geohash_set.emplace_back(std::move(hashstr));;
+        }
+        return result_type {std::move(geohash_set), REDIS_OK};
+    }
+
+    std::pair<std::vector<std::pair<double, double>>, int> geopos(redis_key&& rk, std::vector<sstring>&& members)
+    {
+        using result_type = std::pair<std::vector<std::pair<double, double>>, int>;
+        using result_data_type = std::vector<std::pair<double, double>>;
+        auto it = _store->fetch_raw(rk);
+        if (!it) {
+            return result_type {std::move(result_data_type()), REDIS_ERR};
+        }
+        else if (it->type() != REDIS_ZSET) {
+            return result_type {std::move(result_data_type()), REDIS_WRONG_TYPE};
+        }
+        auto _zset = it->zset_ptr();
+        auto&& items = _zset->fetch(members);
+        result_data_type result;
+        for (size_t i = 0; i < items.size(); ++i) {
+            auto& item = items[i];
+            double longtitude = 0, latitude = 0; 
+            if (geo::decode_from_geohash(item->Double(), longtitude, latitude)) {
+                result.emplace_back(std::move(std::pair<double, double>(longtitude, latitude)));
+            }
+        }
+        return result_type {std::move(result), REDIS_OK};
+    }
+
     future<> stop() { return make_ready_future<>(); }
 private:
     void expired_items()

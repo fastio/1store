@@ -20,11 +20,6 @@
  *
  **/
 #pragma once
-#include <boost/intrusive/unordered_set.hpp>
-#include <boost/intrusive/list.hpp>
-#include <boost/intrusive_ptr.hpp>
-#include <boost/lexical_cast.hpp>
-#include <boost/optional.hpp>
 #include <iomanip>
 #include <sstream>
 #include <functional>
@@ -124,6 +119,7 @@ struct redis_key {
     size_t  _hash;
     redis_key(sstring&& key) : _key(std::move(key)), _hash(std::hash<sstring>()(_key)) {}
     redis_key(redis_key&& other) : _key(other._key), _hash(other._hash) {}
+    redis_key(const sstring& key) : _key(key), _hash(std::hash<sstring>()(_key)) {}
     redis_key& operator=(redis_key&& o) {
         if (this != &o) {
             _key = std::move(o._key);
@@ -372,6 +368,18 @@ static const sstring msg_type_set {"+set\r\n"};
 static const sstring msg_type_zset {"+zset\r\n"};
 static const sstring msg_type_hash {"+hash\r\n"};
 
+static constexpr const int GEO_HASH_STEP_MAX  = 26; /* 26*2 = 52 bits. */
+
+/* Limits from EPSG:900913 / EPSG:3785 / OSGEO:41001 */
+static constexpr const double GEO_LAT_MIN = -85.05112878;
+static constexpr const double GEO_LAT_MAX = 85.05112878;
+static constexpr const double GEO_LAT_SCALE = GEO_LAT_MAX - GEO_LAT_MIN;
+static constexpr const double GEO_LAT_MIN_STD = -90;
+static constexpr const double GEO_LAT_MAX_STD = 90;
+static constexpr const double GEO_LAT_STD_SCALE = GEO_LAT_MAX_STD - GEO_LAT_MIN_STD;
+static constexpr const double GEO_LONG_MIN = -180;
+static constexpr const double GEO_LONG_MAX = 180;
+static constexpr const double GEO_LONG_SCALE = GEO_LONG_MAX - GEO_LONG_MIN;
 // some flags
 static const int ZADD_NONE = 0;
 static constexpr const int ZADD_INCR = (1 << 0); // increment the score instead of setting it.
@@ -383,4 +391,8 @@ static constexpr const int ZAGGREGATE_MIN = (1 << 0);
 static constexpr const int ZAGGREGATE_MAX = (1 << 1);
 static constexpr const int ZAGGREGATE_SUM = (1 << 2);
 
+static constexpr const int GEODIST_UNIT_M  = (1 << 0);
+static constexpr const int GEODIST_UNIT_KM = (1 << 1);
+static constexpr const int GEODIST_UNIT_MI = (1 << 2);
+static constexpr const int GEODIST_UNIT_FT = (1 << 3);
 } /* namespace redis */

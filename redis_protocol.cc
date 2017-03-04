@@ -339,6 +339,30 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.select(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
+                case redis_protocol_parser::command::geoadd:
+                    return _redis.geoadd(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
+                case redis_protocol_parser::command::geodist:
+                    return _redis.geodist(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
+                case redis_protocol_parser::command::geopos:
+                    return _redis.geopos(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
+                case redis_protocol_parser::command::geohash:
+                    return _redis.geohash(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
+                case redis_protocol_parser::command::georadius:
+                    return _redis.georadius(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
+                case redis_protocol_parser::command::georadiusbymember:
+                    return _redis.georadiusbymember(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
                 default:
                     return out.write("+Not Implemented");
                 };

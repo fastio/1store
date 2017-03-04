@@ -48,8 +48,6 @@ future<> metric_server::start(uint16_t port)
         });
     }).then([this, port] {
         return _httpd.listen(port);
-    }).then([] {
-        return make_ready_future<>();
     });
 }
 

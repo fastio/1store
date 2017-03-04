@@ -410,6 +410,7 @@ struct sorted_set::rep {
     int replace(const redis_key& key, lw_shared_ptr<item> value);
     size_t remove_range_by_rank(long begin, long end);
     size_t remove_range_by_score(double min, double max);
+    std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch(const std::vector<sstring>& keys);
 };
 
 sorted_set::rep::rep()
@@ -422,6 +423,11 @@ sorted_set::rep::~rep()
 {
     delete _list;
     delete _dict;
+}
+
+std::vector<foreign_ptr<lw_shared_ptr<item>>> sorted_set::rep::fetch(const std::vector<sstring>& keys)
+{
+    return std::move(_dict->fetch(keys));
 }
 
 size_t sorted_set::rep::remove_range_by_score(double min, double max)
@@ -678,5 +684,9 @@ size_t sorted_set::remove_range_by_rank(long begin, long end)
 size_t sorted_set::remove_range_by_score(double min, double max)
 {
     return _rep->remove_range_by_score(min, max);
+}
+std::vector<foreign_ptr<lw_shared_ptr<item>>> sorted_set::fetch(const std::vector<sstring>& keys)
+{
+    return _rep->fetch(keys);
 }
 }

@@ -19,14 +19,9 @@
  *
  */
 #include "redis.hh"
-#include <boost/intrusive/unordered_set.hpp>
-#include <boost/intrusive/list.hpp>
-#include <boost/intrusive_ptr.hpp>
-#include <boost/lexical_cast.hpp>
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
-#include <unordered_set>
 #include "core/app-template.hh"
 #include "core/future-util.hh"
 #include "core/timer-set.hh"
@@ -46,6 +41,7 @@
 #include "redis_protocol.hh"
 #include "system_stats.hh"
 #include "db.hh"
+#include "geo.hh"
 using namespace net;
 namespace redis {
 
@@ -842,9 +838,9 @@ future<message> redis_service::hmget(args_collection& args)
         return syntax_err_message();
     }
     sstring& key = args._command_args[0];
-    std::unordered_set<sstring> fields;
+    std::vector<sstring> fields;
     for (unsigned int i = 1; i < args._command_args_count; ++i) {
-      fields.emplace(std::move(args._command_args[i]));
+      fields.emplace_back(std::move(args._command_args[i]));
     }
     redis_key rk{std::move(key)};
     auto cpu = get_cpu(rk);
@@ -2046,4 +2042,142 @@ future<message> redis_service::select(args_collection& args)
     });
 }
 
+future<message> redis_service::geoadd(args_collection& args)
+{
+    if (args._command_args_count < 4 || (args._command_args_count - 1) % 3 != 0 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    std::unordered_map<sstring, double> members;
+    for (size_t i = 1; i < args._command_args_count; i += 3) {
+        sstring& longitude = args._command_args[i];
+        sstring& latitude = args._command_args[i + 1];
+        sstring& member = args._command_args[i + 2];
+        double longitude_ = 0, latitude_ = 0, score = 0;
+        try {
+            longitude_ = std::stod(longitude.c_str());
+            latitude_ = std::stod(latitude.c_str());
+        } catch (const std::invalid_argument&) {
+            return syntax_err_message();
+        }
+        if (geo::encode_to_geohash(longitude_, latitude_, score) == false) {
+            return err_message();
+        }
+        members.emplace(std::pair<sstring, double>(member, score));
+    }
+    return zadds_impl(key, std::move(members), 0).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return size_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    });
+}
+
+future<message> redis_service::geodist(args_collection& args)
+{
+    if (args._command_args_count < 3 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    sstring& lpos = args._command_args[1];
+    sstring& rpos = args._command_args[2];
+    int geodist_flag = GEODIST_UNIT_M;
+    if (args._command_args_count == 4) {
+        sstring& unit = args._command_args[3];
+        if (unit == "km") {
+            geodist_flag = GEODIST_UNIT_KM;
+        }
+        else if (unit == "mi") {
+            geodist_flag = GEODIST_UNIT_MI;
+        }
+        else if (unit == "ft") {
+            geodist_flag = GEODIST_UNIT_FT;
+        }
+        else {
+            return syntax_err_message();
+        }
+    }
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db.local().geodist(std::move(rk), std::move(lpos), std::move(rpos), geodist_flag);
+        if (u.second == REDIS_OK) {
+            return double_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return nil_message();
+        }
+    }
+    return _db.invoke_on(cpu, &database::geodist, std::move(rk), std::move(lpos), std::move(rpos), geodist_flag).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return double_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return nil_message();
+        }
+    });
+}
+
+future<message> redis_service::geohash(args_collection& args)
+{
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    std::vector<sstring> members;
+    for (size_t i = 1; i < args._command_args_count; ++i) {
+        members.emplace_back(std::move(args._command_args[i]));
+    }
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db.local().geohash(std::move(rk), std::move(members));
+        if (u.second == REDIS_OK) {
+            return strings_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    }
+    return _db.invoke_on(cpu, &database::geohash, std::move(rk), std::move(members)).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return strings_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    });
+}
+
+future<message> redis_service::geopos(args_collection& args)
+{
+    return syntax_err_message();
+}
+
+future<message> redis_service::georadius(args_collection& args)
+{
+    return syntax_err_message();
+}
+
+future<message> redis_service::georadiusbymember(args_collection& args)
+{
+    return syntax_err_message();
+}
 } /* namespace redis */
