@@ -447,11 +447,9 @@ std::vector<foreign_ptr<lw_shared_ptr<item>>> dict::rep::fetch(const std::vector
 {
     std::vector<foreign_ptr<lw_shared_ptr<item>>> items;
     for (size_t i = 0; i < keys.size(); ++i) {
-       redis_key rk {keys[i]};
-       auto item = fetch_value(rk);
-       if (item) {
-           items.emplace_back(std::move(item));
-       }
+        redis_key rk {keys[i]};
+        auto item = fetch_value(rk);
+        items.emplace_back(std::move(item));
     }
     return std::move(items);
 }

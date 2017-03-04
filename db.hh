@@ -31,6 +31,7 @@
 #include "sorted_set.hh"
 #include "redis_timer_set.hh"
 #include "geo.hh"
+#include <tuple>
 namespace redis {
 
 namespace stdx = std::experimental;
@@ -470,7 +471,7 @@ public:
     int select(int index);
     std::pair<double, int> geodist(redis_key&& rk, sstring&& lpos, sstring&& rpos, int flag);
     std::pair<std::vector<sstring>, int> geohash(redis_key&& rk, std::vector<sstring>&& members);
-    std::pair<std::vector<std::pair<double, double>>, int> geopos(redis_key&& rk, std::vector<sstring>&& members);
+    std::pair<std::vector<std::tuple<double, double, bool>>, int> geopos(redis_key&& rk, std::vector<sstring>&& members);
     future<> stop();
 private:
     void expired_items();

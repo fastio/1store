@@ -486,6 +486,39 @@ private:
         }
         return err_message();
     }
+    static void double_message(message& msg, double& u)
+    {
+        auto&& n = to_sstring(u);
+        msg.append_static(msg_batch_tag);
+        msg.append(to_sstring(n.size()));
+        msg.append_static(msg_crlf);
+        msg.append(std::move(n));
+        msg.append_static(msg_crlf);
+    }
+
+    static future<message> double_array_message(std::vector<std::tuple<double, double, bool>>& u) {
+        message msg;
+        msg.append(msg_sigle_tag);
+        msg.append(std::move(to_sstring(u.size())));
+        msg.append_static(msg_crlf);
+        int temp = 2;
+        for (size_t i = 0; i < u.size(); ++i) {
+            auto& ui = u[i];
+            if (std::get<2>(ui)) {
+                msg.append_static(msg_sigle_tag);
+                msg.append(std::move(to_sstring(temp)));
+                msg.append_static(msg_crlf);
+                auto& first = std::get<0>(ui);
+                auto& second = std::get<0>(ui);
+                double_message(msg, first); 
+                double_message(msg, second);
+            }
+            else {
+                msg.append_static(msg_nil);
+            }
+        }
+        return make_ready_future<message>(std::move(msg));
+    }
 };
 
 } /* namespace redis */

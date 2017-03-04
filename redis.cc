@@ -2168,7 +2168,39 @@ future<message> redis_service::geohash(args_collection& args)
 
 future<message> redis_service::geopos(args_collection& args)
 {
-    return syntax_err_message();
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    std::vector<sstring> members;
+    for (size_t i = 1; i < args._command_args_count; ++i) {
+        members.emplace_back(std::move(args._command_args[i]));
+    }
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db.local().geopos(std::move(rk), std::move(members));
+        if (u.second == REDIS_OK) {
+            return double_array_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    }
+    return _db.invoke_on(cpu, &database::geopos, std::move(rk), std::move(members)).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return double_array_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    });
 }
 
 future<message> redis_service::georadius(args_collection& args)

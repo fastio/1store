@@ -599,10 +599,10 @@ std::pair<std::vector<sstring>, int> database::geohash(redis_key&& rk, std::vect
     return result_type {std::move(geohash_set), REDIS_OK};
 }
 
-std::pair<std::vector<std::pair<double, double>>, int> database::geopos(redis_key&& rk, std::vector<sstring>&& members)
+std::pair<std::vector<std::tuple<double, double, bool>>, int> database::geopos(redis_key&& rk, std::vector<sstring>&& members)
 {
-    using result_type = std::pair<std::vector<std::pair<double, double>>, int>;
-    using result_data_type = std::vector<std::pair<double, double>>;
+    using result_type = std::pair<std::vector<std::tuple<double, double, bool>>, int>;
+    using result_data_type = std::vector<std::tuple<double, double, bool>>;
     auto it = _store->fetch_raw(rk);
     if (!it) {
         return result_type {std::move(result_data_type()), REDIS_ERR};
@@ -616,8 +616,13 @@ std::pair<std::vector<std::pair<double, double>>, int> database::geopos(redis_ke
     for (size_t i = 0; i < items.size(); ++i) {
         auto& item = items[i];
         double longtitude = 0, latitude = 0;
-        if (geo::decode_from_geohash(item->Double(), longtitude, latitude)) {
-            result.emplace_back(std::move(std::pair<double, double>(longtitude, latitude)));
+        if (item) {
+            if (geo::decode_from_geohash(item->Double(), longtitude, latitude)) {
+                result.emplace_back(std::move(std::tuple<double, double, bool>(longtitude, latitude, true)));
+            }
+        }
+        else {
+            result.emplace_back(std::move(std::tuple<double, double, bool>(0, 0, false)));
         }
     }
     return result_type {std::move(result), REDIS_OK};
