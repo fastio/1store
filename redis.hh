@@ -290,12 +290,15 @@ private:
     static future<message> strings_message(std::vector<sstring>& u)
     {
         scattered_message<char> msg;
+        msg.append(msg_sigle_tag);
+        msg.append(std::move(to_sstring(u.size())));
+        msg.append_static(msg_crlf);
         for (size_t i = 0; i < u.size(); ++i) {
             auto& uu = u[i];
             msg.append_static(msg_batch_tag);
             msg.append(to_sstring(uu.size()));
             msg.append_static(msg_crlf);
-            msg.append_static(std::move(uu));
+            msg.append(std::move(uu));
             msg.append_static(msg_crlf);
         }
         return make_ready_future<message>(std::move(msg));
@@ -308,7 +311,7 @@ private:
         msg.append_static(msg_batch_tag);
         msg.append(to_sstring(u.size()));
         msg.append_static(msg_crlf);
-        msg.append_static(std::move(u));
+        msg.append(std::move(u));
         msg.append_static(msg_crlf);
         return make_ready_future<message>(std::move(msg));
     }
@@ -509,7 +512,7 @@ private:
                 msg.append(std::move(to_sstring(temp)));
                 msg.append_static(msg_crlf);
                 auto& first = std::get<0>(ui);
-                auto& second = std::get<0>(ui);
+                auto& second = std::get<1>(ui);
                 double_message(msg, first); 
                 double_message(msg, second);
             }

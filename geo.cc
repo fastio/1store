@@ -146,7 +146,7 @@ bool geo::encode_to_geohash_string(const double& score, sstring& geohashstr)
         b[i] = ALPHABET[idx];
     }
     b[11] = '\0';
-    geohashstr = std::move(sstring(b, 12));
+    geohashstr = std::move(sstring(b, 11));
     return true;
 }
 
@@ -161,6 +161,29 @@ bool geo::decode_from_geohash(const double& geohash, double& longtitude, double&
     double longtitude_max = GEO_LONG_MIN + ((ilono + 1) * 1.0 / (1ull << GEO_HASH_STEP_MAX)) * GEO_LONG_SCALE;
     longtitude = (longtitude_min + longtitude_max) / 2.0;
     latitude = (latitude_min + latitude_max) / 2.0;
+    return true;
+}
+
+static double deg_rad(double u)
+{
+    static double const pi = std::acos(-1);
+    return u * (pi / 180.0);
+}
+
+bool geo::dist(const double& lhash, const double& rhash, double& output)
+{
+    double llongtitude = 0, llatitude = 0, rlongtitude = 0, rlatitude = 0;
+    if (decode_from_geohash(lhash, llongtitude, llatitude) == false || decode_from_geohash(rhash, rlongtitude, rlatitude) == false) {
+        return false;
+    }
+    double lat1r = 0, lon1r = 0, lat2r = 0, lon2r = 0, u = 0, v = 0;
+    lat1r = deg_rad(llatitude);
+    lon1r = deg_rad(llongtitude);
+    lat2r = deg_rad(rlatitude);
+    lon2r = deg_rad(rlongtitude);
+    u = std::sin((lat2r - lat1r) / 2);
+    v = std::sin((lon2r - lon1r) / 2);
+    output = 2.0 * EARTH_RADIUS_IN_METERS * std::asin(std::sqrt(u * u + std::cos(lat1r) * std::cos(lat2r) * v * v));
     return true;
 }
 }

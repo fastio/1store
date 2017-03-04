@@ -380,6 +380,10 @@ static constexpr const double GEO_LAT_STD_SCALE = GEO_LAT_MAX_STD - GEO_LAT_MIN_
 static constexpr const double GEO_LONG_MIN = -180;
 static constexpr const double GEO_LONG_MAX = 180;
 static constexpr const double GEO_LONG_SCALE = GEO_LONG_MAX - GEO_LONG_MIN;
+// @brief Earth's quatratic mean radius for WGS-84
+static constexpr const double EARTH_RADIUS_IN_METERS = 6372797.560856;
+//
+//const d
 // some flags
 static const int ZADD_NONE = 0;
 static constexpr const int ZADD_INCR = (1 << 0); // increment the score instead of setting it.

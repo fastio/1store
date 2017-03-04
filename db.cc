@@ -565,12 +565,25 @@ std::pair<double, int> database::geodist(redis_key&& rk, sstring&& lpos, sstring
     auto _zset = it->zset_ptr();
     auto lmember = _zset->fetch(redis_key {std::move(lpos)});
     auto rmember = _zset->fetch(redis_key {std::move(rpos)});
-    if (lmember || rmember) {
+    if (!lmember || !rmember) {
         return result_type {0, REDIS_ERR};
+    }
+    double factor = 1;
+    if (flag & GEODIST_UNIT_M) {
+        factor = 1;
+    }
+    else if (flag & GEODIST_UNIT_KM) {
+        factor = 1000;
+    }
+    else if (flag & GEODIST_UNIT_MI) {
+        factor = 0.3048;
+    }
+    else if (flag & GEODIST_UNIT_FT) {
+        factor = 1609.34;
     }
     double lscore = lmember->Double(), rscore = rmember->Double(), dist = 0;
     if (geo::dist(lscore, rscore, dist)) {
-        return result_type {dist, REDIS_OK};
+        return result_type {dist / factor, REDIS_OK};
     }
     return result_type {0, REDIS_ERR};
 }

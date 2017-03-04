@@ -2107,7 +2107,7 @@ future<message> redis_service::geodist(args_collection& args)
     if (engine().cpu_id() == cpu) {
         auto&& u = _db.local().geodist(std::move(rk), std::move(lpos), std::move(rpos), geodist_flag);
         if (u.second == REDIS_OK) {
-            return double_message(u.first);
+            return double_message<true>(u.first);
         }
         else if (u.second == REDIS_WRONG_TYPE) {
             return wrong_type_err_message();
@@ -2118,7 +2118,7 @@ future<message> redis_service::geodist(args_collection& args)
     }
     return _db.invoke_on(cpu, &database::geodist, std::move(rk), std::move(lpos), std::move(rpos), geodist_flag).then([] (auto&& u) {
         if (u.second == REDIS_OK) {
-            return double_message(u.first);
+            return double_message<true>(u.first);
         }
         else if (u.second == REDIS_WRONG_TYPE) {
             return wrong_type_err_message();
