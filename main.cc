@@ -34,31 +34,33 @@ int main(int ac, char** av) {
     distributed<redis::database> db;
     distributed<redis::system_stats> system_stats;
     distributed<redis::server> server;
-
+    redis::metric_server metric(system_stats);
     redis::redis_service redis(db);
 
     namespace bpo = boost::program_options;
     app_template app;
     app.add_options()
-        ("stats",
-         "Print basic statistics periodically (every second)")
-        ("port", bpo::value<uint16_t>()->default_value(6379),
-         "Specify UDP and TCP ports for redis server to listen on")
+        ("port", bpo::value<uint16_t>()->default_value(6379), "Redis server port to listen on")
+        ("metric_port", bpo::value<uint16_t>()->default_value(11218), "Metric server port to listen on")
         ;
 
     return app.run_deprecated(ac, av, [&] {
         engine().at_exit([&] { return server.stop(); });
         engine().at_exit([&] { return db.stop(); });
         engine().at_exit([&] { return system_stats.stop(); });
+        engine().at_exit([&] { return metric.stop(); });
 
         auto&& config = app.configuration();
-        uint16_t port = config["port"].as<uint16_t>();
+        auto port = config["port"].as<uint16_t>();
+        auto metric_port = config["metric_port"].as<uint16_t>();
         return db.start().then([&system_stats] {
             return system_stats.start(redis::clock_type::now());
         }).then([&, port] {
             return server.start(std::ref(redis), std::ref(system_stats), port);
         }).then([&server] {
             return server.invoke_on_all(&redis::server::start);
+        }).then([&, metric_port] {
+            return metric.start(metric_port);
         }).then([&] {
             std::cout << "Parallel Redis ... \n";
             return make_ready_future<>();

@@ -19,5 +19,42 @@
  *
  */
 #include "system_stats.hh"
+#include "http/function_handlers.hh"
+#include "core/scollectd.hh"
+#include "core/scollectd.hh"
+#include "core/scollectd_api.hh"
 namespace redis {
+future<> metric_server::start(uint16_t port)
+{
+    return _httpd.start().then([this] {
+        return _httpd.set_routes([this](httpd::routes& r) {
+            httpd::future_handler_function f = [](std::unique_ptr<request> req, std::unique_ptr<reply> rep) {
+                return do_with(std::vector<scollectd::value_map>(), [rep = std::move(rep)] (auto& vec) mutable {
+                    vec.resize(smp::count);
+                    return parallel_for_each(boost::irange(0u, smp::count), [&vec] (auto cpu) {
+                        return smp::submit_to(cpu, [] {
+                            return scollectd::get_value_map();
+                        }).then([&vec, cpu] (auto res) {
+                            vec[cpu] = res;
+                        });
+                    }).then([rep = std::move(rep), &vec]() mutable {
+                        // encode metric data to rep
+                        rep->_content += "{\"message\": \"ok\"}";
+                        return make_ready_future<std::unique_ptr<reply>>(std::move(rep));
+                    });
+                });
+            };
+            r.put(GET, "/metrics", new httpd::function_handler(f, "proto"));
+        });
+    }).then([this, port] {
+        return _httpd.listen(port);
+    }).then([] {
+        return make_ready_future<>();
+    });
+}
+
+future<> metric_server::stop()
+{
+    return _httpd.stop();
+}
 }

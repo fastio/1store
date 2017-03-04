@@ -19,10 +19,6 @@
  *
  */
 #pragma once
-#include <boost/intrusive/unordered_set.hpp>
-#include <boost/intrusive/list.hpp>
-#include <boost/intrusive_ptr.hpp>
-#include <boost/lexical_cast.hpp>
 #include <iomanip>
 #include <sstream>
 #include "core/app-template.hh"
@@ -39,6 +35,7 @@
 #include "core/align.hh"
 #include "net/api.hh"
 #include "net/packet-data-source.hh"
+#include "http/httpd.hh"
 #include <unistd.h>
 #include <cstdlib>
 namespace redis {
@@ -63,5 +60,16 @@ public:
         _start_time = std::min(_start_time, other._start_time);
     }
     future<> stop() { return make_ready_future<>(); }
+};
+
+class metric_server
+{
+public:
+    metric_server(distributed<redis::system_stats>& stats) : _system_stats(stats) {}
+    future<> start(uint16_t port);
+    future<> stop();
+protected:
+    httpd::http_server_control _httpd;
+    distributed<redis::system_stats>& _system_stats;
 };
 }
