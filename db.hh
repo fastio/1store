@@ -469,11 +469,18 @@ public:
     std::pair<size_t, int> zremrangebyscore(redis_key&& rk, double min, double max);
     std::pair<size_t, int> zremrangebyrank(redis_key&& rk, size_t begin, size_t end);
     int select(int index);
+
+    // [GEO]
     std::pair<double, int> geodist(redis_key&& rk, sstring&& lpos, sstring&& rpos, int flag);
     std::pair<std::vector<sstring>, int> geohash(redis_key&& rk, std::vector<sstring>&& members);
     std::pair<std::vector<std::tuple<double, double, bool>>, int> geopos(redis_key&& rk, std::vector<sstring>&& members);
+    using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double>>, int>;
+    georadius_result_type georadius(redis_key&& rk, double longtitude, double latitude, double radius, int flag);
+    georadius_result_type georadius(redis_key&& rk, sstring&& pos, double radius, int flag);
+
     future<> stop();
 private:
+    georadius_result_type georadius(sorted_set* zset, double longtitude, double latitude, double radius, int flag);
     void expired_items();
 private:
     static const int DEFAULT_DB_COUNT = 32;

@@ -382,6 +382,8 @@ static constexpr const double GEO_LONG_MAX = 180;
 static constexpr const double GEO_LONG_SCALE = GEO_LONG_MAX - GEO_LONG_MIN;
 // @brief Earth's quatratic mean radius for WGS-84
 static constexpr const double EARTH_RADIUS_IN_METERS = 6372797.560856;
+static constexpr const double MERCATOR_MAX = 20037726.37;
+static constexpr const double MERCATOR_MIN = -20037726.37;
 //
 //const d
 // some flags
