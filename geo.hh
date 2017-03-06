@@ -1,6 +1,7 @@
 #pragma once
 #include "core/sstring.hh"
 namespace redis {
+//struct std::tuple<sstring, double, double, double, double>;
 class geo {
 public:
     struct geo_hash
@@ -17,20 +18,20 @@ public:
     };
     struct geo_hash_area
     {
-        goe_hash _hash;
+        geo_hash _hash;
         geo_hash_range _longitude_range;
         geo_hash_range _latitude_range;
         geo_hash_area() : _hash(), _longitude_range(), _latitude_range() {}
     };
     struct geo_hash_neighbors {
-        goe_hash _north;
-        goe_hash _east;
-        goe_hash _west;
-        goe_hash _south;
-        goe_hash _north_east;
-        goe_hash _south_east;
-        goe_hash _north_west;
-        goe_hash _south_west;
+        geo_hash _north;
+        geo_hash _east;
+        geo_hash _west;
+        geo_hash _south;
+        geo_hash _north_east;
+        geo_hash _south_east;
+        geo_hash _north_west;
+        geo_hash _south_west;
         geo_hash_neighbors() : _north(), _east(), _west(), _south(), _north_east(), _south_east(), _north_west(), _south_west() {}
     };
     struct geo_radius
@@ -48,9 +49,10 @@ public:
     static bool dist(const double& llongitude, const double& llatitude, const double& rlongtitude, const double& rlatitude, double& line);
     static sstring to_sstring(const long long& u);
 
-    using points_type = std::vector<std::tuple<sstring, double, double, double>>;
-    using fetch_point = std::function<int (uint64_t, uint64_t, const double, const double, const double, points_type& points)>;
-    static bool fetch_points_from_location(const double& longitude, const double& latitude, const double& radius, fetch_point&& f, points_type& points);
+    //[key, dist, score, longitude, latitude]
+    using points_type = std::vector<std::tuple<sstring, double, double, double, double>>;
+    using fetch_point = std::function<size_t (uint64_t, uint64_t, const double, const double, const double, points_type& points)>;
+    static bool fetch_points_from_location(double longitude, double latitude, double radius, fetch_point&& f, points_type& points);
 };
 
 }

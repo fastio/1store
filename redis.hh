@@ -161,8 +161,7 @@ public:
     future<message> geopos(args_collection&);
     future<message> geodist(args_collection&);
     future<message> geohash(args_collection&);
-    future<message> georadius(args_collection&);
-    future<message> georadiusbymember(args_collection&);
+    future<message> georadius(args_collection&, bool);
 private:
     future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
     future<std::pair<std::vector<item_ptr>, int>> range_impl(sstring& key, long begin, long end, bool reverse);
@@ -182,6 +181,8 @@ private:
     future<int> remove_impl(sstring& key);
     future<int> hdel_impl(sstring& key, sstring& field);
     future<message> counter_by(args_collection& args, bool incr, bool with_step);
+    future<std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>> fetch_points_by_coord_radius(sstring& key, double log, double lat, double radius, size_t count, int flags);
+    future<std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>> fetch_points_by_coord_radius(sstring& key, sstring& member_key, double radius, size_t count, int flags);
     struct zset_args
     {
         sstring dest;
@@ -513,7 +514,7 @@ private:
                 msg.append_static(msg_crlf);
                 auto& first = std::get<0>(ui);
                 auto& second = std::get<1>(ui);
-                double_message(msg, first); 
+                double_message(msg, first);
                 double_message(msg, second);
             }
             else {
@@ -521,6 +522,9 @@ private:
             }
         }
         return make_ready_future<message>(std::move(msg));
+    }
+    static future<message> geo_radius_message(std::vector<std::tuple<sstring, double, double, double, double>>& u, bool with_dist, bool with_score, bool with_coord) {
+        return nil_message();
     }
 };
 

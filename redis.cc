@@ -1148,7 +1148,7 @@ future<std::vector<item_ptr>> redis_service::sunion_impl(std::vector<sstring>&& 
         return parallel_for_each(boost::irange<unsigned>(0, count), [this, &state] (unsigned k) {
             sstring& key = state.keys[k];
             return this->smembers_impl(key).then([&state] (auto&& u) {
-                if (u.second == REDIS_OK) {    
+                if (u.second == REDIS_OK) {
                     auto& result = state.result;
                     for (auto& i : u.first) {
                         if (std::find_if(result.begin(), result.end(), [&i] (auto& o) { return i->key_size() == o->key_size() && i->key() == o->key(); }) == result.end()) {
@@ -2203,13 +2203,149 @@ future<message> redis_service::geopos(args_collection& args)
     });
 }
 
-future<message> redis_service::georadius(args_collection& args)
+future<message> redis_service::georadius(args_collection& args, bool member)
 {
-    return syntax_err_message();
+    size_t option_index = member ? 4 : 5;
+    if (args._command_args_count < option_index || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    sstring unit{}, member_key{};
+    double log = 0, lat = 0, radius = 0;
+    if (member) {
+        sstring& longitude = args._command_args[1];
+        sstring& latitude = args._command_args[2];
+        sstring& rad = args._command_args[3];
+        unit = std::move(args._command_args[4]);
+        try {
+            log = std::stod(longitude.c_str());
+            lat = std::stod(latitude.c_str());
+            radius = std::stod(rad.c_str());
+        } catch (const std::invalid_argument&) {
+            return syntax_err_message();
+        }
+    }
+    else {
+        member_key = std::move(args._command_args[1]);
+        sstring& rad = args._command_args[2];
+        unit = std::move(args._command_args[3]);
+        try {
+            radius = std::stod(rad.c_str());
+        } catch (const std::invalid_argument&) {
+            return syntax_err_message();
+        }
+    }
+    int flags = 0;
+    size_t count = 0, stored_key_index = 0;
+    if (args._command_args_count > option_index) {
+        for (size_t i = option_index; i < args._command_args_count; ++i) {
+            sstring& cc = args._command_args[i];
+            if (cc == "WITHCOORD") {
+                flags |= GEORADIUS_WITHCOORD;
+            }
+            else if (cc == "WITHDIST") {
+                flags |= GEORADIUS_WITHDIST;
+            }
+            else if (cc == "WITHHASH") {
+                flags |= GEORADIUS_WITHHASH;
+            }
+            else if (cc == "COUNT") {
+                flags |= GEORADIUS_COUNT;
+                sstring& c = args._command_args[i];
+                try {
+                    count = std::stol(c.c_str());
+                } catch (const std::invalid_argument&) {
+                    return syntax_err_message();
+                }
+                ++i;
+            }
+            else if (cc == "ASC") {
+                flags |= GEORADIUS_ASC;
+            }
+            else if (cc == "DESC") {
+                flags |= GEORADIUS_DESC;
+            }
+            else if (cc == "STORE") {
+                flags |= GEORADIUS_STORE_SCORE;
+                ++i;
+                stored_key_index = i;
+            }
+            else if (cc == "STOREDIST") {
+                flags |= GEORADIUS_STORE_DIST;
+                ++i;
+                stored_key_index = i;
+            }
+            else {
+                return syntax_err_message();
+            }
+        }
+    }
+    if (((flags & GEORADIUS_STORE_SCORE) || (flags & GEORADIUS_STORE_DIST)) && (stored_key_index == 0 || stored_key_index >= args._command_args_count)) {
+        return syntax_err_message();
+    }
+
+    auto points_ready =  !member ? fetch_points_by_coord_radius(key, log, lat, radius, count, flags) : fetch_points_by_coord_radius(key, member_key, radius, count, flags);
+    return  points_ready.then([this, &flags, &args, stored_key_index] (std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>&& u) {
+        using data_type = std::vector<std::tuple<sstring, double, double, double, double>>;
+        if (u.second == REDIS_OK) {
+            bool store_with_score = flags & GEORADIUS_STORE_SCORE, store_with_dist = flags & GEORADIUS_STORE_DIST;
+            if (store_with_score || store_with_dist) {
+                std::unordered_map<sstring, double> members;
+                data_type& data = u.first;
+                for (size_t i = 0; i < data.size(); ++i) {
+                   auto& data_tuple = data[i];
+                   auto& key = std::get<0>(data_tuple);
+                   auto  score = store_with_score ? std::get<1>(data_tuple) : std::get<2>(data_tuple);
+                   members.emplace(std::pair<sstring, double>(std::move(key), score));
+                }
+                struct store_state
+                {
+                    std::unordered_map<sstring, double> members;
+                    sstring stored_key;
+                    data_type data;
+                };
+                sstring& stored_key = args._command_args[stored_key_index];
+                return do_with(store_state{std::move(members), std::move(stored_key), std::move(u.first)}, [this, flags] (auto& state) {
+                    return this->zadds_impl(state.stored_key, std::move(state.members), 0).then([this, &state, flags] (auto&& u) {
+                       if (u.second == REDIS_OK) {
+                           return geo_radius_message(state.data, flags & GEORADIUS_WITHCOORD, flags & GEORADIUS_WITHSCORE, flags & GEORADIUS_WITHHASH);
+                       }
+                       else {
+                          return err_message();
+                       }
+                    });
+                });
+            }
+            return geo_radius_message(u.first, flags & GEORADIUS_WITHCOORD, flags & GEORADIUS_WITHSCORE, flags & GEORADIUS_WITHHASH);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return nil_message();
+        }
+    });
 }
 
-future<message> redis_service::georadiusbymember(args_collection& args)
+future<std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>> redis_service::fetch_points_by_coord_radius(sstring& key, double log, double lat, double radius, size_t count, int flags)
 {
-    return syntax_err_message();
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db.local().georadius_coord(std::move(rk), log, lat, radius, count, flags);
+        return make_ready_future<std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>>(std::move(u));
+    }
+    return _db.invoke_on(cpu, &database::georadius_coord, std::move(rk), log, lat, radius, count, flags);
+}
+
+future<std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>> redis_service::fetch_points_by_coord_radius(sstring& key, sstring& member_key, double radius, size_t count, int flags)
+{
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db.local().georadius_member(std::move(rk), std::move(member_key), radius, count, flags);
+        return make_ready_future<std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>>(std::move(u));
+    }
+    return _db.invoke_on(cpu, &database::georadius_member, std::move(rk), std::move(member_key), radius, count, flags);
 }
 } /* namespace redis */

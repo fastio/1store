@@ -50,6 +50,6 @@ public:
     std::vector<item_ptr> range_by_rank(long begin, long end, bool reverse);
     std::vector<item_ptr> range_by_score(double min, double max, bool reverse);
     using pred = std::function<bool (lw_shared_ptr<item> m)>;
-    void range_by_score_if(double min, double max, pred&& p);
+    size_t range_by_score_if(double min, double max, size_t count, pred&& p);
 };
 }

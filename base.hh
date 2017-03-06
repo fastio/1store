@@ -401,4 +401,26 @@ static constexpr const int GEODIST_UNIT_M  = (1 << 0);
 static constexpr const int GEODIST_UNIT_KM = (1 << 1);
 static constexpr const int GEODIST_UNIT_MI = (1 << 2);
 static constexpr const int GEODIST_UNIT_FT = (1 << 3);
+
+static constexpr const int GEORADIUS_ASC         = (1 << 0);
+static constexpr const int GEORADIUS_DESC        = (1 << 1);
+static constexpr const int GEORADIUS_WITHCOORD   = (1 << 2);
+static constexpr const int GEORADIUS_WITHSCORE   = (1 << 3);
+static constexpr const int GEORADIUS_WITHHASH    = (1 << 4);
+static constexpr const int GEORADIUS_WITHDIST    = (1 << 5);
+static constexpr const int GEORADIUS_COUNT       = (1 << 6);
+static constexpr const int GEORADIUS_STORE_SCORE = (1 << 7);
+static constexpr const int GEORADIUS_STORE_DIST  = (1 << 8);
+
+struct geo_point
+{
+    sstring _key;
+    double _dist;
+    double _score;
+    double _longitude;
+    double _latitude;
+    bool _nill = false;
+    geo_point(sstring&& key, double dist, double score, double log, double lat) : _key(std::move(key)), _dist(dist), _score(score), _longitude(log), _latitude(lat), _nill(false) {}
+    geo_point() : _nill(true) {}
+};
 } /* namespace redis */

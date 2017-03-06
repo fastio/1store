@@ -406,7 +406,7 @@ struct sorted_set::rep {
     double score(const redis_key& key);
     std::vector<item_ptr> range_by_score(double min, double max, bool reverse);
     using pred = std::function<bool (lw_shared_ptr<item> m)>;
-    void range_by_score_if(double min, double max, pred&& p);
+    size_t range_by_score_if(double min, double max, size_t count, pred&& p);
     std::vector<item_ptr> range_by_rank(long begin, long end, bool reverse);
     lw_shared_ptr<item> fetch(const redis_key& key);
     int replace(const redis_key& key, lw_shared_ptr<item> value);
@@ -566,12 +566,13 @@ size_t sorted_set::rep::count_in_range(double min, double max)
     return count;
 }
 
-void sorted_set::rep::range_by_score_if(double min, double max, pred&& p)
+size_t sorted_set::rep::range_by_score_if(double min, double max, size_t count, pred&& p)
 {
+    size_t _count = 0;
     struct range r(min, max);
-    if (r.empty() || !p) return;
+    if (r.empty() || !p || count <= 0) return count;
     if (_list->include_range(r) == false) {
-        return;
+        return count;
     }
     auto n =  _list->find_first_of_range(r);
     if (n) {
@@ -580,10 +581,15 @@ void sorted_set::rep::range_by_score_if(double min, double max, pred&& p)
                 break;
             if (!r.less_than_max(n->_score))
                 break;
+            ++_count;
             p(n->_value);
+            if (_count == count) {
+                break;
+            }
             n = n->_prev;
         }
     }
+    return count;
 }
 
 std::vector<item_ptr> sorted_set::rep::range_by_score(double min, double max, bool reverse)
@@ -658,9 +664,9 @@ size_t sorted_set::size()
     return _rep->size();
 }
 
-void sorted_set::range_by_score_if(double min, double max, pred&& p)
+size_t sorted_set::range_by_score_if(double min, double max, size_t count, pred&& p)
 {
-    return _rep->range_by_score_if(min, max, std::move(p));
+    return _rep->range_by_score_if(min, max, count, std::move(p));
 }
 
 std::vector<item_ptr> sorted_set::range_by_score(double min, double max, bool reverse)

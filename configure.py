@@ -319,7 +319,8 @@ deps = {
       'system_stats.cc',
       'redis_protocol_parser.rl',
       'redis_protocol.cc',
-      ] + libnet + core,
+      'geo.cc',
+      ] + libnet + core + http,
 }
 
 warnings = [

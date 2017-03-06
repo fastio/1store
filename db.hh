@@ -157,7 +157,7 @@ public:
     }
 
     std::pair<item_ptr, int> pop(redis_key&& rk, bool left);
-    std::pair<size_t, int> llen(redis_key&& rk); 
+    std::pair<size_t, int> llen(redis_key&& rk);
     std::pair<item_ptr, int> lindex(redis_key&& rk, int idx);
     template <typename origin = local_origin_tag> inline
     int linsert(redis_key&& rk, sstring&& pivot, sstring&& value, bool after)
@@ -188,7 +188,7 @@ public:
             if (_list->set(idx, new_item) == REDIS_OK) {
                 return REDIS_OK;
             }
-        } 
+        }
         return REDIS_ERR;
     }
 
@@ -273,13 +273,13 @@ public:
         auto mit = _dict->fetch(field_key);
         auto new_value = delta;
         if (!mit) {
-            new_value += mit->int64(); 
+            new_value += mit->int64();
         }
         auto new_item = item::create(field_key, static_cast<int64_t>(new_value));
         if (_dict->replace(field_key, new_item) == REDIS_OK) {
             return result_type {new_value, REDIS_OK};
         }
-        return result_type {0, REDIS_ERR}; 
+        return result_type {0, REDIS_ERR};
     }
 
     template <typename origin = local_origin_tag> inline
@@ -308,7 +308,7 @@ public:
         if (_dict->replace(field_key, new_item) == REDIS_OK) {
             return result_type {new_value, REDIS_OK};
         }
-        return result_type {0, REDIS_ERR}; 
+        return result_type {0, REDIS_ERR};
     }
 
     std::pair<std::vector<item_ptr>, int> hgetall(redis_key&& rk);
@@ -384,7 +384,7 @@ public:
     {
         using result_type = std::pair<size_t, int>;
         auto it = _store->fetch_raw(rk);
-        sorted_set* zset = nullptr; 
+        sorted_set* zset = nullptr;
         if (!it) {
             zset = new sorted_set();
             auto zset_item = item::create(rk, zset, REDIS_ZSET);
@@ -459,7 +459,7 @@ public:
             return result_type {new_value, REDIS_OK};
         }
         else {
-            return result_type {0, REDIS_ERR}; 
+            return result_type {0, REDIS_ERR};
         }
     }
     std::pair<std::vector<item_ptr>, int> zrange(redis_key&& rk, long begin, long end, bool reverse);
@@ -474,13 +474,13 @@ public:
     std::pair<double, int> geodist(redis_key&& rk, sstring&& lpos, sstring&& rpos, int flag);
     std::pair<std::vector<sstring>, int> geohash(redis_key&& rk, std::vector<sstring>&& members);
     std::pair<std::vector<std::tuple<double, double, bool>>, int> geopos(redis_key&& rk, std::vector<sstring>&& members);
-    using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double>>, int>;
-    georadius_result_type georadius(redis_key&& rk, double longtitude, double latitude, double radius, int flag);
-    georadius_result_type georadius(redis_key&& rk, sstring&& pos, double radius, int flag);
+    // [key, dist, score, longitude, latitude]
+    std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int> georadius_coord(redis_key&& rk, double longtitude, double latitude, double radius, size_t count, int flag);
+    std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int> georadius_member(redis_key&& rk, sstring&& pos, double radius, size_t count, int flag);
 
     future<> stop();
 private:
-    georadius_result_type georadius(sorted_set* zset, double longtitude, double latitude, double radius, int flag);
+    std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int> georadius(sorted_set* zset, double longtitude, double latitude, double radius, size_t count, int flag);
     void expired_items();
 private:
     static const int DEFAULT_DB_COUNT = 32;

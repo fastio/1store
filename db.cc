@@ -628,10 +628,10 @@ std::pair<std::vector<std::tuple<double, double, bool>>, int> database::geopos(r
     result_data_type result;
     for (size_t i = 0; i < items.size(); ++i) {
         auto& item = items[i];
-        double longtitude = 0, latitude = 0;
+        double longitude = 0, latitude = 0;
         if (item) {
-            if (geo::decode_from_geohash(item->Double(), longtitude, latitude)) {
-                result.emplace_back(std::move(std::tuple<double, double, bool>(longtitude, latitude, true)));
+            if (geo::decode_from_geohash(item->Double(), longitude, latitude)) {
+                result.emplace_back(std::move(std::tuple<double, double, bool>(longitude, latitude, true)));
             }
         }
         else {
@@ -641,74 +641,75 @@ std::pair<std::vector<std::tuple<double, double, bool>>, int> database::geopos(r
     return result_type {std::move(result), REDIS_OK};
 }
 
-georadius_result_type database::georadius(redis_key&& rk, double longtitude, double latitude, double radius, int flag)
+std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int> database::georadius_coord(redis_key&& rk, double longitude, double latitude, double radius, size_t count, int flag)
 {
-    using result_data_type = std::vector<std::tuple<sstring, double, double, double, bool>>;
+    using result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
     auto it = _store->fetch_raw(rk);
     if (!it) {
-        return result_type {std::move(result_data_type()), REDIS_ERR};
+        return result_type {{}, REDIS_ERR};
     }
     else if (it->type() != REDIS_ZSET) {
-        return result_type {std::move(result_data_type()), REDIS_WRONG_TYPE};
+        return result_type {{}, REDIS_WRONG_TYPE};
     }
     auto _zset = it->zset_ptr();
-    return georadius(_zset, longtitude, latitude, radius, flag);
+    return georadius(_zset, longitude, latitude, radius, count, flag);
 }
 
-georadius_result_type database::georadius(redis_key&& rk, sstring&& pos, double radius, int flag)
+std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int> database::georadius_member(redis_key&& rk, sstring&& pos, double radius, size_t count, int flag)
 {
-    using result_data_type = std::vector<std::tuple<sstring, double, double, double, bool>>;
+    using result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
     auto it = _store->fetch_raw(rk);
     if (!it) {
-        return result_type {std::move(result_data_type()), REDIS_ERR};
+        return result_type {{}, REDIS_ERR};
     }
     else if (it->type() != REDIS_ZSET) {
-        return result_type {std::move(result_data_type()), REDIS_WRONG_TYPE};
+        return result_type {{}, REDIS_WRONG_TYPE};
     }
     auto _zset = it->zset_ptr();
     auto member = _zset->fetch(redis_key {std::move(pos)});
     if (!member) {
-        return result_type {std::move(result_data_type()), REDIS_ERR};
+        return result_type {{}, REDIS_ERR};
     }
-    double score = member->Double(), longtitude = 0, latitude = 0;
-    if (decode_from_geohash(score, longtitude, latitude) == false) {
-        return result_type {std::move(result_data_type()), REDIS_ERR};
+    double score = member->Double(), longitude = 0, latitude = 0;
+    if (geo::decode_from_geohash(score, longitude, latitude) == false) {
+        return result_type {{}, REDIS_ERR};
     }
-    return georadius(_zset, longtitude, latitude, radius, flag);
+    return georadius(_zset, longitude, latitude, radius, count, flag);
 }
 
-georadius_result_type database::georadius(sorted_set* zset, double longtitude, double latitude, double radius, int flag)
+std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int> database::georadius(sorted_set* zset, double longitude, double latitude, double radius, size_t count, int flag)
 {
-    using data_type = std::vector<std::tuple<sstring, double, double, double>>;
-    georadius_result_data_type points;
-    auto fetch_point = [zset] (double min, double max, double log, double lat, double r, data_type& points) -> int {
-        zset->range_by_score_if(min, max, [&log, &lat, &r, &points] (lw_shared_ptr<item> m) -> bool {
-             double score = m->Double(), longtitude = 0, latitude = 0, dist;
-             if (decode_from_geohash(score, longtitude, latitude) == false) {
-                 return false;
-             }
-             if (geo::dist(log, lat, longitude, latitude, dist) == false) {
-                 return false;
-             }
-             if (dist < r) {
-                 sstring n(m->key().data(), m->key().size());
-                 points.emplace_back(std::tuple(n, dist, longtitude, latitude));
-                 return true;
-             }
-             return false;
+    using result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
+    using data_type = std::vector<std::tuple<sstring, double, double, double, double>>;
+    data_type points;
+    auto fetch_point = [zset, count] (double min, double max, double log, double lat, double r, data_type& points) -> size_t {
+        return zset->range_by_score_if(min, max, count, [&log, &lat, &r, &points] (lw_shared_ptr<item> m) -> bool {
+            double score = m->Double(), longitude = 0, latitude = 0, dist = 0;
+            if (geo::decode_from_geohash(score, longitude, latitude) == false) {
+                return false;
+            }
+            if (geo::dist(log, lat, longitude, latitude, dist) == false) {
+                return false;
+            }
+            if (dist < r) {
+                sstring n(m->key().data(), m->key().size());
+                points.emplace_back(std::move(std::tuple<sstring, double, double, double, double>{std::move(n), score, dist, longitude, latitude}));
+                return true;
+            }
+            return false;
         });
     };
-    if (geo::fetch_points_from_location(longtitude, latitude, radius, std::move(fetch_point), points) == false) {
+    if (geo::fetch_points_from_location(longitude, latitude, radius, std::move(fetch_point), points) == false) {
         points.clear();
-        return georadius_result_type{std::move(points), REDIS_ERR};
+        return result_type{std::move(points), REDIS_ERR};
     }
     if (flag & GEORADIUS_ASC) {
-        std::sort(points.begin(), points.end(), [] (const auto& l, const auto& r) { std::get<1>(l) > std::get<1>(r); });
+        std::sort(points.begin(), points.end(), [] (const auto& l, const auto& r) { return std::get<2>(l) > std::get<2>(r); });
     }
     else if (flag & GEORADIUS_DESC) {
-        std::sort(points.begin(), points.end(), [] (const auto& l, const auto& r) { std::get<1>(l) < std::get<1>(r); });
+        std::sort(points.begin(), points.end(), [] (const auto& l, const auto& r) { return std::get<2>(l) < std::get<2>(r); });
     }
-    return georadius_result_type{std::move(points), REDIS_OK};
+    return result_type{std::move(points), REDIS_OK};
 }
 
 future<> database::stop()

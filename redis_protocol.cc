@@ -356,11 +356,11 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                         return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::georadius:
-                    return _redis.georadius(_command_args).then([&out] (auto&& m) {
+                    return _redis.georadius(_command_args, false).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::georadiusbymember:
-                    return _redis.georadiusbymember(_command_args).then([&out] (auto&& m) {
+                    return _redis.georadius(_command_args, true).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
                 default:
