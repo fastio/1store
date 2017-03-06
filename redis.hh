@@ -181,8 +181,9 @@ private:
     future<int> remove_impl(sstring& key);
     future<int> hdel_impl(sstring& key, sstring& field);
     future<message> counter_by(args_collection& args, bool incr, bool with_step);
-    future<std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>> fetch_points_by_coord_radius(sstring& key, double log, double lat, double radius, size_t count, int flags);
-    future<std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>> fetch_points_by_coord_radius(sstring& key, sstring& member_key, double radius, size_t count, int flags);
+    using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
+    future<georadius_result_type> fetch_points_by_coord_radius(sstring& key, double log, double lat, double radius, size_t count, int flags);
+    future<georadius_result_type> fetch_points_by_coord_radius(sstring& key, sstring& member_key, double radius, size_t count, int flags);
     struct zset_args
     {
         sstring dest;
@@ -523,8 +524,41 @@ private:
         }
         return make_ready_future<message>(std::move(msg));
     }
-    static future<message> geo_radius_message(std::vector<std::tuple<sstring, double, double, double, double>>& u, bool with_dist, bool with_score, bool with_coord) {
-        return nil_message();
+    static future<message> geo_radius_message(std::vector<std::tuple<sstring, double, double, double, double>>& u, bool wdist, bool wscore, bool wcoord) {
+        message msg;
+        msg.append(msg_sigle_tag);
+        msg.append(std::move(to_sstring(u.size())));
+        msg.append_static(msg_crlf);
+        int temp = 1, temp2 = 2;
+        if (wdist) temp++;
+        if (wscore) temp++;
+        if (wcoord) temp++;
+        for (size_t i = 0; i < u.size(); ++i) {
+            msg.append_static(msg_sigle_tag);
+            msg.append(std::move(to_sstring(temp)));
+            msg.append_static(msg_crlf);
+
+            //key
+            sstring& key = std::get<0>(u[i]);
+            msg.append_static(msg_batch_tag);
+            msg.append(to_sstring(key.size()));
+            msg.append_static(msg_crlf);
+            msg.append(std::move(key));
+            msg.append_static(msg_crlf);
+            //dist
+            if (wdist) {
+                double_message(msg, std::get<2>(u[i]));
+            }
+            //coord
+            if (wcoord) {
+                msg.append_static(msg_sigle_tag);
+                msg.append(std::move(to_sstring(temp2)));
+                msg.append_static(msg_crlf);
+                double_message(msg, std::get<3>(u[i]));
+                double_message(msg, std::get<4>(u[i]));
+            }
+        }
+        return make_ready_future<message>(std::move(msg));
     }
 };
 

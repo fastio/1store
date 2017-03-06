@@ -2285,7 +2285,7 @@ future<message> redis_service::georadius(args_collection& args, bool member)
     }
 
     auto points_ready =  !member ? fetch_points_by_coord_radius(key, log, lat, radius, count, flags) : fetch_points_by_coord_radius(key, member_key, radius, count, flags);
-    return  points_ready.then([this, &flags, &args, stored_key_index] (std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>&& u) {
+    return  points_ready.then([this, &flags, &args, stored_key_index] (georadius_result_type&& u) {
         using data_type = std::vector<std::tuple<sstring, double, double, double, double>>;
         if (u.second == REDIS_OK) {
             bool store_with_score = flags & GEORADIUS_STORE_SCORE, store_with_dist = flags & GEORADIUS_STORE_DIST;
@@ -2327,24 +2327,25 @@ future<message> redis_service::georadius(args_collection& args, bool member)
     });
 }
 
-future<std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>> redis_service::fetch_points_by_coord_radius(sstring& key, double log, double lat, double radius, size_t count, int flags)
+using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
+future<georadius_result_type> redis_service::fetch_points_by_coord_radius(sstring& key, double log, double lat, double radius, size_t count, int flags)
 {
     redis_key rk {std::move(key)};
     auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
         auto&& u = _db.local().georadius_coord(std::move(rk), log, lat, radius, count, flags);
-        return make_ready_future<std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>>(std::move(u));
+        return make_ready_future<georadius_result_type>(std::move(u));
     }
     return _db.invoke_on(cpu, &database::georadius_coord, std::move(rk), log, lat, radius, count, flags);
 }
 
-future<std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>> redis_service::fetch_points_by_coord_radius(sstring& key, sstring& member_key, double radius, size_t count, int flags)
+future<georadius_result_type> redis_service::fetch_points_by_coord_radius(sstring& key, sstring& member_key, double radius, size_t count, int flags)
 {
     redis_key rk {std::move(key)};
     auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
         auto&& u = _db.local().georadius_member(std::move(rk), std::move(member_key), radius, count, flags);
-        return make_ready_future<std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>>(std::move(u));
+        return make_ready_future<georadius_result_type>(std::move(u));
     }
     return _db.invoke_on(cpu, &database::georadius_member, std::move(rk), std::move(member_key), radius, count, flags);
 }

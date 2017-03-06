@@ -475,12 +475,13 @@ public:
     std::pair<std::vector<sstring>, int> geohash(redis_key&& rk, std::vector<sstring>&& members);
     std::pair<std::vector<std::tuple<double, double, bool>>, int> geopos(redis_key&& rk, std::vector<sstring>&& members);
     // [key, dist, score, longitude, latitude]
-    std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int> georadius_coord(redis_key&& rk, double longtitude, double latitude, double radius, size_t count, int flag);
-    std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int> georadius_member(redis_key&& rk, sstring&& pos, double radius, size_t count, int flag);
+    using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
+    georadius_result_type georadius_coord(redis_key&& rk, double longtitude, double latitude, double radius, size_t count, int flag);
+    georadius_result_type georadius_member(redis_key&& rk, sstring&& pos, double radius, size_t count, int flag);
 
     future<> stop();
 private:
-    std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int> georadius(sorted_set* zset, double longtitude, double latitude, double radius, size_t count, int flag);
+    georadius_result_type georadius(sorted_set* zset, double longtitude, double latitude, double radius, size_t count, int flag);
     void expired_items();
 private:
     static const int DEFAULT_DB_COUNT = 32;
