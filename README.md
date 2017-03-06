@@ -2,20 +2,22 @@
 
 ## What's Pedis?
 
-NoSQL data store using the SEASTAR framework, compatible with REDIS.
+Pedis is the NoSQL data store using the SEASTAR framework, compatible with REDIS. The name of Pedis is an acronym of parallel redis, which with high throughput and low latency.
 
 Redis is very popular *data structures* server. For more infomation, see here: http://redis.io/
 Seastar is an advanced, open-source C++ framework for high-performance server applications on modern hardware.
 For more infomation, see here: http://www.seastar-project.org/
 
 
-Now, the redis commands were supported as follow:
-  * Key: DEL, EXISTS
-  * String: GET, SET, DECR, INCR, DECRBY, INCRBY, APPEND, STRLEN, MGET, MSET
-  * List: LINDEX, LINSERT, LLEN, LPUSH, LPUSHX, LPOP, LRANGE, LREM, LTRIM, LSET, RPOP, RPUSH, RPUSHX
-  * Hash: HSET, HDEL, HGET, HLEN, HSTRLEN, HMSET, HMGET, HKEYS, HVALS, HEXISTS, HINCRBY
+Now, the redis commands were supported by Pedis as follow:
+  * KEY: DEL, EXISTS, TTL, PTTL, EXPIRE, PEXPIRE
+  * STRING: GET, SET, DECR, INCR, DECRBY, INCRBY, APPEND, STRLEN, MGET, MSET
+  * LIST: LINDEX, LINSERT, LLEN, LPUSH, LPUSHX, LPOP, LRANGE, LREM, LTRIM, LSET, RPOP, RPUSH, RPUSHX
+  * HASH: HSET, HDEL, HGET, HLEN, HSTRLEN, HMSET, HMGET, HKEYS, HVALS, HEXISTS, HINCRBY
   * SET: SADD, SMEMBERS, SISMEMBER, SREM, SDIFF, SDIFFSTORE, SINTER, SINTERSTORE, SUNION, SUNIONSTORE, SMOVE, SPOP
-  * Other: ECHO, PING
+  * SORTED SET: ZADD, ZCARD, ZCOUNT, ZINCRBY, ZRANGE, ZRANK, ZREM, ZREMRANGEBYSCORE, ZREMRANGEBYRANK, ZREVRANGE, ZREVRANGEBYSCORE, ZREVRANK, ZSCORE, ZUNIONSTORE, ZINTERSTORE
+  * GEO: GEOADD, GEOPOS, GEOHASH, GEODIST, GEORADIUS, GEORADIUSMEMBER
+  * OTHER: ECHO, PING, SELECT
 
 ## Building Pedis on Ubuntu 14.04
 
