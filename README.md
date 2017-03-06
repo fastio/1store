@@ -2,7 +2,7 @@
 
 ## What's Pedis?
 
-Pedis is the NoSQL data store using the SEASTAR framework, compatible with REDIS. The name of Pedis is an acronym of parallel redis, which with high throughput and low latency.
+Pedis is the NoSQL data store using the SEASTAR framework, compatible with REDIS. The name of Pedis is an acronym of **P**arallel r**edis**, which with high throughput and low latency.
 
 Redis is very popular *data structures* server. For more infomation, see here: http://redis.io/
 Seastar is an advanced, open-source C++ framework for high-performance server applications on modern hardware.
