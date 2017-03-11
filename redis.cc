@@ -2252,13 +2252,15 @@ future<message> redis_service::georadius(args_collection& args, bool member)
             }
             else if (cc == "COUNT") {
                 flags |= GEORADIUS_COUNT;
-                sstring& c = args._command_args[i];
+                if (i + 1 == args._command_args_count) {
+                    return syntax_err_message();
+                }
+                sstring& c = args._command_args[++i];
                 try {
                     count = std::stol(c.c_str());
                 } catch (const std::invalid_argument&) {
                     return syntax_err_message();
                 }
-                ++i;
             }
             else if (cc == "ASC") {
                 flags |= GEORADIUS_ASC;
@@ -2268,11 +2270,17 @@ future<message> redis_service::georadius(args_collection& args, bool member)
             }
             else if (cc == "STORE") {
                 flags |= GEORADIUS_STORE_SCORE;
+                if (i + 1 == args._command_args_count) {
+                    return syntax_err_message();
+                }
                 ++i;
                 stored_key_index = i;
             }
             else if (cc == "STOREDIST") {
                 flags |= GEORADIUS_STORE_DIST;
+                if (i + 1 == args._command_args_count) {
+                    return syntax_err_message();
+                }
                 ++i;
                 stored_key_index = i;
             }

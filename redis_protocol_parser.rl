@@ -175,7 +175,7 @@ command = (set | get | del | mget | mset | echo | ping | incr | decr | incrby | 
            sunionstore | smove | type | expire | pexpire | persist | ttl | pttl | zadd | zcard | zcount | zincrby |
            zrangebyscore | zrank | zremrangebyrank | zremrangebyscore | zremrangebylex | zrem | zrevrangebyscore | zrevrange| zrevrank |
            zscore | zunionstore  | zinterstore | zdiffstore | zunion | zinter | zdiff | zscan | zrangebylex | zlexcount |
-           zrange | select | geoadd | geodist | geohash | geopos | georadiusbymember | georadius);
+           zrange | select | geoadd | geodist | geohash | geopos | georadius | georadiusbymember);
 arg = '$' u32 crlf ${ _arg_size = _u32;};
 
 main := (args_count (arg command crlf) (arg @{fcall blob; } crlf)+) ${_state = state::ok;};
