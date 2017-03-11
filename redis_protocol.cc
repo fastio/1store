@@ -363,6 +363,18 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.georadius(_command_args, true).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
+                case redis_protocol_parser::command::setbit:
+                    return _redis.setbit(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
+                case redis_protocol_parser::command::getbit:
+                    return _redis.getbit(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
+                case redis_protocol_parser::command::bitcount:
+                    return _redis.bitcount(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
                 default:
                     return out.write("+Not Implemented");
                 };

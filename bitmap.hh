@@ -32,5 +32,6 @@ public:
     size_t set_bit(size_t offset, bool value);
     bool   get_bit(size_t offset);
     size_t bit_count(long start, long end);
+    size_t size();
 };
 }

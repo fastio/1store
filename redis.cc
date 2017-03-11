@@ -2419,10 +2419,79 @@ future<message> redis_service::setbit(args_collection& args)
 
 future<message> redis_service::getbit(args_collection& args)
 {
-    return syntax_err_message();
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    size_t offset = 0;
+    try {
+        offset = std::stol(args._command_args[1]);
+    } catch (const std::invalid_argument&) {
+        return syntax_err_message();
+    }
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db.local().getbit(std::move(rk), offset);
+        if (u.second == REDIS_OK) {
+            return u.first ? one_message() : zero_message();
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    }
+    return _db.invoke_on(cpu, &database::getbit, std::move(rk), offset).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return u.first ? one_message() : zero_message();
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    });
 }
 future<message> redis_service::bitcount(args_collection& args)
 {
-    return syntax_err_message();
+    if (args._command_args_count < 3 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    long start = 0, end = 0;
+    try {
+        start = std::stol(args._command_args[1]);
+        end = std::stol(args._command_args[2]);
+    } catch (const std::invalid_argument&) {
+        return syntax_err_message();
+    }
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db.local().bitcount(std::move(rk), start, end);
+        if (u.second == REDIS_OK) {
+            return size_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    }
+    return _db.invoke_on(cpu, &database::bitcount, std::move(rk), start, end).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return size_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    });
 }
 } /* namespace redis */

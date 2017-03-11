@@ -712,6 +712,9 @@ database::georadius_result_type database::georadius(sorted_set* zset, double lon
 std::pair<bool, int> database::setbit(redis_key&& rk, size_t offset, bool value)
 {
     using result_type = std::pair<bool, int>;
+    if (offset >= BITMAP_MAX_OFFSET) {
+        return result_type {false, REDIS_ERR};
+    }
     auto it = _store->fetch_raw(rk);
     bitmap* bm = nullptr;
     if (!it) {

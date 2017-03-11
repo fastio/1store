@@ -414,6 +414,8 @@ static constexpr const int GEO_UNIT_KM     = (1 << 10);
 static constexpr const int GEO_UNIT_MI     = (1 << 11);
 static constexpr const int GEO_UNIT_FT     = (1 << 12);
 
+static constexpr const size_t BITMAP_MAX_OFFSET  = (1 << 31);
+
 struct geo_point
 {
     sstring _key;

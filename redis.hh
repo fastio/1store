@@ -165,7 +165,6 @@ public:
     future<message> georadius(args_collection&, bool);
 
     // [BITMAP]
-    future<message> bitset(args_collection&);
     future<message> setbit(args_collection&);
     future<message> getbit(args_collection&);
     future<message> bitcount(args_collection&);

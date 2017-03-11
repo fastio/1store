@@ -37,16 +37,24 @@ struct bitmap::rep
     bool set_bit(size_t offset, bool value);
     bool get_bit(size_t offset);
     size_t bit_count(long start, long end);
-    size_t size();
+    size_t size() { return _data.size(); }
     inline void group_if_needed(size_t offset)
     {
         if (offset > _data.size()) {
-            _data.resize(offset, 0);
+            auto size = _data.size();
+            while (size < offset) {
+                size *= 2;
+            }
+            if ((size << 3) > BITMAP_MAX_OFFSET) {
+                size = BITMAP_MAX_OFFSET >> 3;
+            }
+            _data.resize(size, 0);
         }
     }
 
     rep()
     {
+        _data.resize(GROUP_STEP_COUNT_IN_BYTES, 0);
     }
     ~rep()
     {
@@ -84,6 +92,9 @@ bool bitmap::get_bit(size_t offset)
 }
 bool bitmap::rep::get_bit(size_t offset)
 {
+    if (offset > BITMAP_MAX_OFFSET) {
+        return false;
+    }
     auto index = offset >> 3;
     auto byte_val = _data.at(index);
     auto bit = 7 - (offset & 0x7);
@@ -159,5 +170,8 @@ size_t bitmap::rep::bit_count(long start, long end)
     return bits_count;
 }
 
-
+size_t bitmap::size()
+{
+    return _rep->size();
+}
 }
