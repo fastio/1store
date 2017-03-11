@@ -384,7 +384,7 @@ bool geo::fetch_points_from_location(double longitude, double latitude, double r
     if (geohash_bounding_box(longitude, latitude, radius, bounds) == false) {
         return false;
     }
-    double min_lon = bounds[0], max_lon = bounds[1], min_lat = bounds[2], max_lat = bounds[3];
+    double min_lon = bounds[0], max_lon = bounds[2], min_lat = bounds[1], max_lat = bounds[3];
 
     // 1. step
     output._hash._step = geohash_estimate_steps_by_radius(radius, latitude);
@@ -398,8 +398,10 @@ bool geo::fetch_points_from_location(double longitude, double latitude, double r
     // 3. neighbors
     geohash_neighbors(output);
 
+
     // 4. area
     if (geohash_decode_internal(bounds, output) == false) {
+
         return false;
     }
 
@@ -446,4 +448,41 @@ bool geo::fetch_points_from_location(double longitude, double latitude, double r
     return true;
 }
 
+bool geo::to_meters(double& n, int flags)
+{
+    if (flags & GEO_UNIT_M) {
+    }
+    else if (flags & GEO_UNIT_KM) {
+        n *= 1000;
+    }
+    else if (flags & GEO_UNIT_MI) {
+        n *= 0.3048;
+    }
+    else if (flags & GEO_UNIT_FT) {
+        n *= 1609.34;
+    }
+    else {
+        return false;
+    }
+    return true;
+}
+
+bool geo::from_meters(double& n, int flags)
+{
+    if (flags & GEO_UNIT_M) {
+    }
+    else if (flags & GEO_UNIT_KM) {
+        n /= 1000;
+    }
+    else if (flags & GEO_UNIT_MI) {
+        n /= 0.3048;
+    }
+    else if (flags & GEO_UNIT_FT) {
+        n /= 1609.34;
+    }
+    else {
+        return false;
+    }
+    return true;
+}
 }

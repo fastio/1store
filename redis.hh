@@ -43,6 +43,7 @@
 #include <unistd.h>
 #include <cstdlib>
 #include "base.hh"
+#include "geo.hh"
 namespace redis {
 
 namespace stdx = std::experimental;
@@ -524,15 +525,18 @@ private:
         }
         return make_ready_future<message>(std::move(msg));
     }
-    static future<message> geo_radius_message(std::vector<std::tuple<sstring, double, double, double, double>>& u, bool wdist, bool wscore, bool wcoord) {
+    static future<message> geo_radius_message(std::vector<std::tuple<sstring, double, double, double, double>>& u, int flags) {
         message msg;
         msg.append(msg_sigle_tag);
         msg.append(std::move(to_sstring(u.size())));
         msg.append_static(msg_crlf);
         int temp = 1, temp2 = 2;
-        if (wdist) temp++;
-        if (wscore) temp++;
-        if (wcoord) temp++;
+        bool wd = flags & GEORADIUS_WITHDIST;
+        bool ws = flags & GEORADIUS_WITHSCORE;
+        bool wc = flags & GEORADIUS_WITHCOORD;
+        if (wd) temp++;
+        if (ws) temp++;
+        if (wc) temp++;
         for (size_t i = 0; i < u.size(); ++i) {
             msg.append_static(msg_sigle_tag);
             msg.append(std::move(to_sstring(temp)));
@@ -546,11 +550,13 @@ private:
             msg.append(std::move(key));
             msg.append_static(msg_crlf);
             //dist
-            if (wdist) {
-                double_message(msg, std::get<2>(u[i]));
+            if (wd) {
+                double dist = std::get<2>(u[i]);
+                geo::from_meters(dist, flags);
+                double_message(msg, dist);
             }
             //coord
-            if (wcoord) {
+            if (wc) {
                 msg.append_static(msg_sigle_tag);
                 msg.append(std::move(to_sstring(temp2)));
                 msg.append_static(msg_crlf);

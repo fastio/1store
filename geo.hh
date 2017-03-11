@@ -53,6 +53,8 @@ public:
     using points_type = std::vector<std::tuple<sstring, double, double, double, double>>;
     using fetch_point = std::function<size_t (uint64_t, uint64_t, const double, const double, const double, points_type& points)>;
     static bool fetch_points_from_location(double longitude, double latitude, double radius, fetch_point&& f, points_type& points);
+    static bool to_meters(double& n, int flags);
+    static bool from_meters(double& n, int flags);
 };
 
 }

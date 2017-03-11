@@ -411,6 +411,10 @@ static constexpr const int GEORADIUS_WITHDIST    = (1 << 5);
 static constexpr const int GEORADIUS_COUNT       = (1 << 6);
 static constexpr const int GEORADIUS_STORE_SCORE = (1 << 7);
 static constexpr const int GEORADIUS_STORE_DIST  = (1 << 8);
+static constexpr const int GEO_UNIT_M      = (1 << 9);
+static constexpr const int GEO_UNIT_KM     = (1 << 10);
+static constexpr const int GEO_UNIT_MI     = (1 << 11);
+static constexpr const int GEO_UNIT_FT     = (1 << 12);
 
 struct geo_point
 {

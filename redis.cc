@@ -41,7 +41,6 @@
 #include "redis_protocol.hh"
 #include "system_stats.hh"
 #include "db.hh"
-#include "geo.hh"
 using namespace net;
 namespace redis {
 
@@ -2212,7 +2211,7 @@ future<message> redis_service::georadius(args_collection& args, bool member)
     sstring& key = args._command_args[0];
     sstring unit{}, member_key{};
     double log = 0, lat = 0, radius = 0;
-    if (member) {
+    if (!member) {
         sstring& longitude = args._command_args[1];
         sstring& latitude = args._command_args[2];
         sstring& rad = args._command_args[3];
@@ -2235,11 +2234,13 @@ future<message> redis_service::georadius(args_collection& args, bool member)
             return syntax_err_message();
         }
     }
+
     int flags = 0;
     size_t count = 0, stored_key_index = 0;
     if (args._command_args_count > option_index) {
         for (size_t i = option_index; i < args._command_args_count; ++i) {
             sstring& cc = args._command_args[i];
+            std::transform(cc.begin(), cc.end(), cc.begin(), ::toupper);
             if (cc == "WITHCOORD") {
                 flags |= GEORADIUS_WITHCOORD;
             }
@@ -2283,9 +2284,26 @@ future<message> redis_service::georadius(args_collection& args, bool member)
     if (((flags & GEORADIUS_STORE_SCORE) || (flags & GEORADIUS_STORE_DIST)) && (stored_key_index == 0 || stored_key_index >= args._command_args_count)) {
         return syntax_err_message();
     }
+    std::transform(unit.begin(), unit.end(), unit.begin(), ::tolower);
+    if (unit == "m") {
+        flags |= GEO_UNIT_M;
+    }
+    else if (unit == "km") {
+        flags |= GEO_UNIT_KM;
+    }
+    else if (unit == "mi") {
+        flags |= GEO_UNIT_MI;
+    }
+    else if (unit == "ft") {
+        flags |= GEO_UNIT_FT;
+    }
+    else {
+        return syntax_err_message();
+    }
+    geo::to_meters(radius, flags);
 
     auto points_ready =  !member ? fetch_points_by_coord_radius(key, log, lat, radius, count, flags) : fetch_points_by_coord_radius(key, member_key, radius, count, flags);
-    return  points_ready.then([this, &flags, &args, stored_key_index] (georadius_result_type&& u) {
+    return  points_ready.then([this, flags, &args, stored_key_index] (georadius_result_type&& u) {
         using data_type = std::vector<std::tuple<sstring, double, double, double, double>>;
         if (u.second == REDIS_OK) {
             bool store_with_score = flags & GEORADIUS_STORE_SCORE, store_with_dist = flags & GEORADIUS_STORE_DIST;
@@ -2308,7 +2326,7 @@ future<message> redis_service::georadius(args_collection& args, bool member)
                 return do_with(store_state{std::move(members), std::move(stored_key), std::move(u.first)}, [this, flags] (auto& state) {
                     return this->zadds_impl(state.stored_key, std::move(state.members), 0).then([this, &state, flags] (auto&& u) {
                        if (u.second == REDIS_OK) {
-                           return geo_radius_message(state.data, flags & GEORADIUS_WITHCOORD, flags & GEORADIUS_WITHSCORE, flags & GEORADIUS_WITHHASH);
+                           return geo_radius_message(state.data, flags);
                        }
                        else {
                           return err_message();
@@ -2316,7 +2334,7 @@ future<message> redis_service::georadius(args_collection& args, bool member)
                     });
                 });
             }
-            return geo_radius_message(u.first, flags & GEORADIUS_WITHCOORD, flags & GEORADIUS_WITHSCORE, flags & GEORADIUS_WITHHASH);
+            return geo_radius_message(u.first, flags);
         }
         else if (u.second == REDIS_WRONG_TYPE) {
             return wrong_type_err_message();

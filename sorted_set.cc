@@ -570,9 +570,10 @@ size_t sorted_set::rep::range_by_score_if(double min, double max, size_t count, 
 {
     size_t _count = 0;
     struct range r(min, max);
-    if (r.empty() || !p || count <= 0) return count;
+    if (count == 0) count = _list->size();
+    if (r.empty() || !p) return _count;
     if (_list->include_range(r) == false) {
-        return count;
+        return _count;
     }
     auto n =  _list->find_first_of_range(r);
     if (n) {
@@ -586,10 +587,10 @@ size_t sorted_set::rep::range_by_score_if(double min, double max, size_t count, 
             if (_count == count) {
                 break;
             }
-            n = n->_prev;
+            n = n->_next[0]._next;
         }
     }
-    return count;
+    return _count;
 }
 
 std::vector<item_ptr> sorted_set::rep::range_by_score(double min, double max, bool reverse)
