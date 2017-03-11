@@ -31,6 +31,7 @@
 #include "sorted_set.hh"
 #include "redis_timer_set.hh"
 #include "geo.hh"
+#include "bitmap.hh"
 #include <tuple>
 namespace redis {
 
@@ -141,7 +142,7 @@ public:
                 return result_type {0, REDIS_ERR};
             }
             _list = new list();
-            auto list_item = item::create(rk, _list, REDIS_LIST);
+            auto list_item = item::create(rk, _list);
             if (_store->set(rk, list_item) != REDIS_OK) {
                 return result_type {0, REDIS_ERR};
             }
@@ -204,7 +205,7 @@ public:
         dict* _dict = nullptr;
         if (!it) {
             _dict = new dict();
-            auto dict_item = item::create(rk, _dict, REDIS_DICT);
+            auto dict_item = item::create(rk, _dict);
             if (_store->set(rk, dict_item) != REDIS_OK) {
                 return REDIS_ERR;
             }
@@ -227,7 +228,7 @@ public:
         dict* _dict = nullptr;
         if (!it) {
             _dict = new dict();
-            auto dict_item = item::create(rk, _dict, REDIS_DICT);
+            auto dict_item = item::create(rk, _dict);
             if (_store->set(rk, dict_item) != REDIS_OK) {
                 return REDIS_ERR;
             }
@@ -261,7 +262,7 @@ public:
         dict* _dict = nullptr;
         if (!it) {
             _dict = new dict();
-            auto dict_item = item::create(rk, _dict, REDIS_DICT);
+            auto dict_item = item::create(rk, _dict);
             if (_store->set(rk, dict_item) != REDIS_OK) {
                 return result_type {0, REDIS_ERR};
             }
@@ -293,7 +294,7 @@ public:
         dict* _dict = nullptr;
         if (!it) {
             _dict = new dict();
-            auto dict_item = item::create(rk, _dict, REDIS_DICT);
+            auto dict_item = item::create(rk, _dict);
             if (_store->set(rk, dict_item) != REDIS_OK) {
                 return result_type {0, REDIS_ERR};
             }
@@ -324,7 +325,7 @@ public:
         dict* _set = nullptr;
         if (!it) {
             _set = new dict();
-            auto dict_item = item::create(rk, _set, REDIS_SET);
+            auto dict_item = item::create(rk, _set);
             if (_store->set(rk, dict_item) != REDIS_OK) {
                 return result_type {0, REDIS_ERR};
             }
@@ -354,7 +355,7 @@ public:
         dict* _set = nullptr;
         if (!it) {
             auto _set = new dict();
-            auto dict_item = item::create(rk, _set, REDIS_SET);
+            auto dict_item = item::create(rk, _set);
             if (_store->set(rk, dict_item) != REDIS_OK) {
                 return REDIS_ERR;
             }
@@ -387,7 +388,7 @@ public:
         sorted_set* zset = nullptr;
         if (!it) {
             zset = new sorted_set();
-            auto zset_item = item::create(rk, zset, REDIS_ZSET);
+            auto zset_item = item::create(rk, zset);
             if (_store->set(rk, zset_item) != 0) {
                 return result_type {0, REDIS_ERR};
             }
@@ -440,7 +441,7 @@ public:
         sorted_set* zset = nullptr;
         if (!it) {
             zset = new sorted_set();
-            auto zset_item = item::create(rk, zset, REDIS_ZSET);
+            auto zset_item = item::create(rk, zset);
             if (_store->set(rk, zset_item) != REDIS_OK) {
                 return result_type{0, REDIS_ERR};
             }
@@ -478,6 +479,11 @@ public:
     using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
     georadius_result_type georadius_coord(redis_key&& rk, double longtitude, double latitude, double radius, size_t count, int flag);
     georadius_result_type georadius_member(redis_key&& rk, sstring&& pos, double radius, size_t count, int flag);
+
+    // [BITMAP]
+    std::pair<bool, int> setbit(redis_key&& rk, size_t offset, bool value);
+    std::pair<bool, int> getbit(redis_key&& rk, size_t offset);
+    std::pair<size_t, int> bitcount(redis_key&& rk, long start, long end);
 
     future<> stop();
 private:

@@ -163,6 +163,12 @@ public:
     future<message> geodist(args_collection&);
     future<message> geohash(args_collection&);
     future<message> georadius(args_collection&, bool);
+
+    // [BITMAP]
+    future<message> bitset(args_collection&);
+    future<message> setbit(args_collection&);
+    future<message> getbit(args_collection&);
+    future<message> bitcount(args_collection&);
 private:
     future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
     future<std::pair<std::vector<item_ptr>, int>> range_impl(sstring& key, long begin, long end, bool reverse);

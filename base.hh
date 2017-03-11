@@ -62,6 +62,7 @@ enum {
     REDIS_DICT,
     REDIS_SET,
     REDIS_ZSET,
+    REDIS_BITMAP,
 };
 
 struct args_collection {
@@ -72,12 +73,6 @@ struct args_collection {
 };
 
 class item;
-class redis_commands;
-extern __thread redis_commands* _redis_commands_ptr;
-inline redis_commands* redis_commands_ptr() {
-    return _redis_commands_ptr;
-}
-
 using clock_type = lowres_clock;
 static constexpr clock_type::time_point never_expire_timepoint = clock_type::time_point(clock_type::duration::min());
 
@@ -139,6 +134,7 @@ struct redis_key {
 class list;
 class dict;
 class sorted_set;
+class bitmap;
 class item {
 public:
     using time_point = expiration::time_point;
@@ -272,9 +268,10 @@ public:
         }
     }
 
-    item(const redis_key& key, list* ptr, uint8_t type) : item(key, reinterpret_cast<uintptr_t>(ptr), type) {}
-    item(const redis_key& key, dict* ptr, uint8_t type) : item(key, reinterpret_cast<uintptr_t>(ptr), type) {}
-    item(const redis_key& key, sorted_set* ptr, uint8_t type) : item(key, reinterpret_cast<uintptr_t>(ptr), type) {}
+    item(const redis_key& key, list* ptr) : item(key, reinterpret_cast<uintptr_t>(ptr), REDIS_LIST) {}
+    item(const redis_key& key, dict* ptr) : item(key, reinterpret_cast<uintptr_t>(ptr), REDIS_DICT) {}
+    item(const redis_key& key, sorted_set* ptr) : item(key, reinterpret_cast<uintptr_t>(ptr), REDIS_ZSET) {}
+    item(const redis_key& key, bitmap* ptr) : item(key, reinterpret_cast<uintptr_t>(ptr), REDIS_BITMAP) {}
 
     item(const redis_key& key, uintptr_t ptr, uint8_t type)
         : _value_size(0)
@@ -326,6 +323,7 @@ public:
     inline list* list_ptr() const { return reinterpret_cast<list*>(_u._ptr); }
     inline dict* dict_ptr() const { return reinterpret_cast<dict*>(_u._ptr); }
     inline sorted_set* zset_ptr() const { return reinterpret_cast<sorted_set*>(_u._ptr); }
+    inline bitmap* bitmap_ptr() const { return reinterpret_cast<bitmap*>(_u._ptr); }
 
     inline const uint64_t uint64() const { return _u._uint64; }
     inline const int64_t int64() const { return _u._int64; }

@@ -2375,4 +2375,54 @@ future<georadius_result_type> redis_service::fetch_points_by_coord_radius(sstrin
     }
     return _db.invoke_on(cpu, &database::georadius_member, std::move(rk), std::move(member_key), radius, count, flags);
 }
+
+future<message> redis_service::setbit(args_collection& args)
+{
+    if (args._command_args_count < 3 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    size_t offset = 0;
+    int value = 0;
+    try {
+        offset = std::stol(args._command_args[1]);
+        value = std::stoi(args._command_args[2]);
+    } catch (const std::invalid_argument&) {
+        return syntax_err_message();
+    }
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db.local().setbit(std::move(rk), offset, value == 1);
+        if (u.second == REDIS_OK) {
+            return u.first ? one_message() : zero_message();
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    }
+    return _db.invoke_on(cpu, &database::setbit, std::move(rk), offset, value == 1).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return u.first ? one_message() : zero_message();
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    });
+}
+
+future<message> redis_service::getbit(args_collection& args)
+{
+    return syntax_err_message();
+}
+future<message> redis_service::bitcount(args_collection& args)
+{
+    return syntax_err_message();
+}
 } /* namespace redis */

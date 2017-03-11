@@ -320,6 +320,7 @@ deps = {
       'redis_protocol_parser.rl',
       'redis_protocol.cc',
       'geo.cc',
+      'bitmap.cc',
       ] + libnet + core + http,
 }
 

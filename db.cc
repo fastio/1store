@@ -709,6 +709,53 @@ database::georadius_result_type database::georadius(sorted_set* zset, double lon
     return georadius_result_type {std::move(points), REDIS_OK};
 }
 
+std::pair<bool, int> database::setbit(redis_key&& rk, size_t offset, bool value)
+{
+    using result_type = std::pair<bool, int>;
+    auto it = _store->fetch_raw(rk);
+    bitmap* bm = nullptr;
+    if (!it) {
+        bm = new bitmap();
+        auto new_item = item::create(rk, bm);
+        _store->set(rk, new_item);
+    }
+    else if (it->type() != REDIS_BITMAP) {
+        return result_type {false, REDIS_WRONG_TYPE};
+    }
+    else {
+        bm = it->bitmap_ptr();
+    }
+    return result_type {bm->set_bit(offset, value), REDIS_OK};
+}
+
+std::pair<bool, int> database::getbit(redis_key&& rk, size_t offset)
+{
+    using result_type = std::pair<bool, int>;
+    auto it = _store->fetch_raw(rk);
+    if (!it) {
+        return result_type {false, REDIS_OK};
+    }
+    else if (it->type() != REDIS_BITMAP) {
+        return result_type {false, REDIS_WRONG_TYPE};
+    }
+    auto bm = it->bitmap_ptr();
+    return result_type {bm->get_bit(offset), REDIS_OK};
+}
+
+std::pair<size_t, int> database::bitcount(redis_key&& rk, long start, long end)
+{
+    using result_type = std::pair<size_t, int>;
+    auto it = _store->fetch_raw(rk);
+    if (!it) {
+        return result_type {0, REDIS_OK};
+    }
+    else if (it->type() != REDIS_BITMAP) {
+        return result_type {0, REDIS_WRONG_TYPE};
+    }
+    auto bm = it->bitmap_ptr();
+    return result_type {bm->bit_count(start, end), REDIS_OK};
+}
+
 future<> database::stop()
 {
     return make_ready_future<>();
