@@ -308,7 +308,7 @@ deps = {
     'libseastar.a' : core + libnet + http + protobuf + prometheus,
     'seastar.pc': [],
     'pedis': [
-      'base.cc',
+      'common.cc',
       'redis.cc',
       'dict.cc',
       'list.cc',

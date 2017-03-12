@@ -23,7 +23,7 @@
 #include "core/memory.hh"
 #include "core/shared_ptr.hh"
 #include "core/sharded.hh"
-#include "base.hh"
+#include "common.hh"
 namespace redis {
 using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 class item;

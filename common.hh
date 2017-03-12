@@ -129,7 +129,20 @@ struct redis_key {
     inline const size_t size() const { return _key.size(); }
     inline const char* data() const { return _key.c_str(); }
 };
-
+/*
+class redis_entry
+{
+private:
+    sstring _key;
+    size_t  _key_hash;
+    union {
+      uintptr_t  _ptr;
+      uint64_t   _uint64;
+      int64_t    _int64;
+      double   _double;
+    } _u { 0 };
+};
+*/
 // The defination of `item was copied from apps/memcached
 class list;
 class dict;
@@ -147,7 +160,6 @@ private:
     uint8_t  _type;
     uint8_t _volatile = false;
     expiration _expired;
-    bi::list_member_hook<> _timer_link;
     union {
       uintptr_t  _ptr;
       uint64_t _uint64;
@@ -415,16 +427,4 @@ static constexpr const int GEO_UNIT_MI     = (1 << 11);
 static constexpr const int GEO_UNIT_FT     = (1 << 12);
 
 static constexpr const size_t BITMAP_MAX_OFFSET  = (1 << 31);
-
-struct geo_point
-{
-    sstring _key;
-    double _dist;
-    double _score;
-    double _longitude;
-    double _latitude;
-    bool _nill = false;
-    geo_point(sstring&& key, double dist, double score, double log, double lat) : _key(std::move(key)), _dist(dist), _score(score), _longitude(log), _latitude(lat), _nill(false) {}
-    geo_point() : _nill(true) {}
-};
 } /* namespace redis */

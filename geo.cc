@@ -1,5 +1,5 @@
 #include "geo.hh"
-#include "base.hh"
+#include "common.hh"
 namespace redis {
 static inline uint64_t interleave64(uint32_t xlo, uint32_t ylo) {
     static const uint64_t B[] = {

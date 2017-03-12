@@ -19,7 +19,7 @@
  *
  */
 #pragma once
-#include "base.hh"
+#include "common.hh"
 namespace redis {
 class bitmap
 {

@@ -2494,4 +2494,16 @@ future<message> redis_service::bitcount(args_collection& args)
         }
     });
 }
+future<message> redis_service::bitop(args_collection& args)
+{
+    return err_message();
+}
+future<message> redis_service::bitpos(args_collection& args)
+{
+    return err_message();
+}
+future<message> redis_service::bitfield(args_collection& args)
+{
+    return err_message();
+}
 } /* namespace redis */

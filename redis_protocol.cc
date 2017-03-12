@@ -20,7 +20,7 @@
  */
 #include "redis_protocol.hh"
 #include "redis.hh"
-#include "base.hh"
+#include "common.hh"
 #include <algorithm>
 namespace redis {
 

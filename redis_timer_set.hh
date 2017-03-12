@@ -17,7 +17,7 @@
 #include <list>
 #include <array>
 #include "core/bitset-iter.hh"
-#include "base.hh"
+#include "common.hh"
 
 namespace redis {
 /**

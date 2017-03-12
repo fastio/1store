@@ -26,7 +26,7 @@
 #include <boost/lexical_cast.hpp>
 #include "core/shared_ptr.hh"
 #include "core/sharded.hh"
-#include "base.hh"
+#include "common.hh"
 namespace redis {
 class item;
 class dict_iterator;

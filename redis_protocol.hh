@@ -19,7 +19,7 @@
  *
  */
 #pragma once
-#include "base.hh"
+#include "common.hh"
 #include "core/stream.hh"
 #include "redis_protocol_parser.hh"
 #include "net/packet-data-source.hh"

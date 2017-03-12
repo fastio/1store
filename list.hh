@@ -23,7 +23,7 @@
 #include "core/memory.hh"
 #include "core/shared_ptr.hh"
 #include "core/sharded.hh"
-#include "base.hh"
+#include "common.hh"
 #include <vector>
 namespace redis {
 class item;

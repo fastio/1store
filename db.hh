@@ -25,7 +25,7 @@
 #include "core/sharded.hh"
 #include <sstream>
 #include <iostream>
-#include "base.hh"
+#include "common.hh"
 #include "dict.hh"
 #include "list.hh"
 #include "sorted_set.hh"
@@ -484,6 +484,7 @@ public:
     std::pair<bool, int> setbit(redis_key&& rk, size_t offset, bool value);
     std::pair<bool, int> getbit(redis_key&& rk, size_t offset);
     std::pair<size_t, int> bitcount(redis_key&& rk, long start, long end);
+    std::pair<size_t, int> bitop(redis_key&& rk, int flags, std::vector<sstring>&& keys);
 
     future<> stop();
 private:
