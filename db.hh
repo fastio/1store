@@ -485,6 +485,7 @@ public:
     std::pair<bool, int> getbit(redis_key&& rk, size_t offset);
     std::pair<size_t, int> bitcount(redis_key&& rk, long start, long end);
     std::pair<size_t, int> bitop(redis_key&& rk, int flags, std::vector<sstring>&& keys);
+    std::pair<size_t, int> bitpos(redis_key&& rk, bool bit, long start, long end);
 
     future<> stop();
 private:

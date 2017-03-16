@@ -175,14 +175,14 @@ bitfield = "bitfield"i ${_command = command::bitfield; };
 bitpos = "bitpos"i ${_command = command::bitpos; };
 
 
-command = (set | get | del | mget | mset | echo | ping | incr | decr | incrby | decrby | command_ | exists | append |
+command = (setbit | set | getbit | get | del | mget | mset | echo | ping | incr | decr | incrby | decrby | command_ | exists | append |
            strlen | lpush | lpushx | lpop | llen | lindex | linsert | lrange | lset | rpush | rpushx | rpop | lrem |
            ltrim | hset | hget | hdel | hlen | hexists | hstrlen | hincrby | hincrbyfloat | hkeys | hvals | hmget | hmset |
            hgetall   | sadd | scard | sismember | smembers | srem | sdiff | sdiffstore | sinter | sinterstore | sunion |
            sunionstore | smove | type | expire | pexpire | persist | ttl | pttl | zadd | zcard | zcount | zincrby |
            zrangebyscore | zrank | zremrangebyrank | zremrangebyscore | zremrangebylex | zrem | zrevrangebyscore | zrevrange| zrevrank |
            zscore | zunionstore  | zinterstore | zdiffstore | zunion | zinter | zdiff | zscan | zrangebylex | zlexcount |
-           zrange | select | geoadd | geodist | geohash | geopos | georadius | georadiusbymember | setbit | getbit | bitcount |
+           zrange | select | geoadd | geodist | geohash | geopos | georadius | georadiusbymember | bitcount |
            bitpos | bitop | bitfield);
 arg = '$' u32 crlf ${ _arg_size = _u32;};
 

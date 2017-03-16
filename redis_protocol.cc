@@ -375,6 +375,14 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.bitcount(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
+                case redis_protocol_parser::command::bitpos:
+                    return _redis.bitpos(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
+                case redis_protocol_parser::command::bitop:
+                    return _redis.bitop(_command_args).then([&out] (auto&& m) {
+                        return out.write(std::move(m));
+                    });
                 default:
                     return out.write("+Not Implemented");
                 };

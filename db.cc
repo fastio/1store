@@ -759,6 +759,12 @@ std::pair<size_t, int> database::bitcount(redis_key&& rk, long start, long end)
     return result_type {bm->bit_count(start, end), REDIS_OK};
 }
 
+std::pair<size_t, int> database::bitpos(redis_key&& rk, bool bit, long start, long end)
+{
+    using result_type = std::pair<size_t, int>;
+    return result_type {0, REDIS_OK};
+}
+
 future<> database::stop()
 {
     return make_ready_future<>();

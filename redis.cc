@@ -2500,8 +2500,53 @@ future<message> redis_service::bitop(args_collection& args)
 }
 future<message> redis_service::bitpos(args_collection& args)
 {
-    return err_message();
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return syntax_err_message();
+    }
+    sstring& key = args._command_args[0];
+    sstring& b = args._command_args[1];
+    long start = 0, end = 0;
+    bool bit = false;
+    if (args._command_args_count == 4) {
+        try {
+            auto bb = std::stoi(b);
+            if (bb != 0 && bb != 1) {
+                return syntax_err_message();
+            }
+            bit = bb == 1;
+            start = std::stol(args._command_args[2]);
+            end = std::stol(args._command_args[3]);
+        } catch (const std::invalid_argument&) {
+            return syntax_err_message();
+        }
+    }
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
+    if (engine().cpu_id() == cpu) {
+        auto&& u = _db.local().bitpos(std::move(rk), bit, start, end);
+        if (u.second == REDIS_OK) {
+            return size_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    }
+    return _db.invoke_on(cpu, &database::bitpos, std::move(rk), bit, start, end).then([] (auto&& u) {
+        if (u.second == REDIS_OK) {
+            return size_message(u.first);
+        }
+        else if (u.second == REDIS_WRONG_TYPE) {
+            return wrong_type_err_message();
+        }
+        else {
+            return err_message();
+        }
+    });
 }
+
 future<message> redis_service::bitfield(args_collection& args)
 {
     return err_message();
