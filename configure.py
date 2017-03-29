@@ -279,9 +279,6 @@ http = ['seastar/http/transformers.cc',
         'seastar/http/api_docs.cc',
         ]
 
-boost_test_lib = [
-]
-
 
 def maybe_static(flag, libs):
     if flag and not args.static:
@@ -340,6 +337,12 @@ if args.staticcxx:
 if args.staticcxx or args.static:
     defines.append("NO_EXCEPTION_INTERCEPT");
 
+utils =  [
+    'utils/logalloc.cc',
+    'utils/managed_bytes.cc',
+    'utils/bytes.cc',
+    'utils/dynamic_bitset.cc',
+]
 deps = {
     'libseastar.a' : core + libnet + http + protobuf + prometheus,
     'seastar.pc': [],
@@ -357,7 +360,7 @@ deps = {
       'redis_protocol.cc',
       'geo.cc',
       'bitmap.cc',
-      ] + libnet + core + http,
+      ] + libnet + core + http + utils,
 }
 
 warnings = [
@@ -397,7 +400,6 @@ if args.dpdk:
         raise Exception('--enable-dpdk: dpdk/ is empty. Run "git submodule update --init".')
     cflags = args.user_cflags.split()
     dpdk_machine = ([dpdk_arch_xlat[cflag[7:]]
-
                      for cflag in cflags
                      if cflag.startswith('-march')] or ['native'])[0]
     subprocess.check_call('make -C dpdk RTE_OUTPUT=$PWD/build/dpdk/ config T=x86_64-native-linuxapp-gcc'.format(
@@ -546,7 +548,7 @@ dpdk_sources = ' '.join(dpdk_sources)
 
 # both source and builddir location
 cares_dir = 'seastar/c-ares'
-cares_lib = 'cares-seastar'
+cares_lib = 'seastar/cares-seastar'
 cares_src_lib = cares_dir + '/lib/libcares.a'
 
 if not os.path.exists(cares_dir) or not os.listdir(cares_dir):
@@ -584,7 +586,7 @@ with open(buildfile, 'w') as f:
         builddir = {outdir}
         cxx = {cxx}
         # we disable _FORTIFY_SOURCE because it generates false positives with longjmp() (core/thread.cc)
-        cxxflags = -std=gnu++1y {dbgflag} {fpie} -Wall -Werror -Wno-error-deprecated -fvisibility=hidden -pthread -I. -I./seastar -I./seastar/fmt -U_FORTIFY_SOURCE {user_cflags} {warnings} {defines}
+        cxxflags = -std=gnu++1y {dbgflag} {fpie} -Wall -Werror -Wno-error-deprecated -fvisibility=hidden -pthread  -U_FORTIFY_SOURCE {user_cflags} {warnings} {defines}
         ldflags = {dbgflag} -Wl,--no-as-needed {static} {pie} -fvisibility=hidden -pthread {user_ldflags}
         libs = {libs}
         pool link_pool
@@ -620,7 +622,7 @@ with open(buildfile, 'w') as f:
         elif modeval['sanitize']:
             modeval['sanitize'] += ' -DASAN_ENABLED'
         f.write(textwrap.dedent('''\
-            cxxflags_{mode} = {sanitize} {opt} -I $builddir/{mode}/gen  -I$builddir/{mode}/gen/seastar -I$builddir/{mode}/gen/seastar/seastar -I$builddir/{mode}/seastar/c-ares -I $builddir/{mode}/c-ares
+            cxxflags_{mode} = {sanitize} {opt} -I $builddir/{mode}/gen  -I$builddir/{mode}/gen/seastar -I$builddir/{mode}/gen/seastar/seastar -I $builddir/{mode}/seastar/c-ares -I. -I./seastar -I./seastar/fmt
             libs_{mode} = {sanitize_libs} {libs}
             rule cxx.{mode}
               command = $cxx -MD -MT $out -MF $out.d $cxxflags_{mode} $cxxflags -c -o $out $in
@@ -701,8 +703,6 @@ with open(buildfile, 'w') as f:
                     compiles[obj] = src
                 elif src.endswith('.proto'):
                     hh = '$builddir/' + mode + '/gen/' + src.replace('.proto', '.pb.h')
-                   # protobufs[hh] = src
-                   # compiles[hh.replace('.h', '.o')] = hh.replace('.h', '.cc')
                     protobufs[hh.replace('/seastar/', '/')] = src.replace('/seastar/', '/')
                     compiles[hh.replace('.h', '.o')] = hh.replace('.h', '.cc')
                 elif src.endswith('.rl'):

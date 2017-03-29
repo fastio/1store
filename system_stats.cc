@@ -26,6 +26,7 @@
 namespace redis {
 future<> metric_server::start(uint16_t port)
 {
+    /*
     return _httpd.start().then([this] {
         return _httpd.set_routes([this](httpd::routes& r) {
             httpd::future_handler_function f = [](std::unique_ptr<request> req, std::unique_ptr<reply> rep) {
@@ -49,10 +50,15 @@ future<> metric_server::start(uint16_t port)
     }).then([this, port] {
         return _httpd.listen(port);
     });
+    */
+    return make_ready_future<>();
 }
 
 future<> metric_server::stop()
 {
+    /*
     return _httpd.stop();
+    */
+    return make_ready_future<>();
 }
 }
