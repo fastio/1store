@@ -703,8 +703,8 @@ with open(buildfile, 'w') as f:
                     compiles[obj] = src
                 elif src.endswith('.proto'):
                     hh = '$builddir/' + mode + '/gen/' + src.replace('.proto', '.pb.h')
-                    protobufs[hh.replace('/seastar/', '/')] = src.replace('/seastar/', '/')
-                    compiles[hh.replace('.h', '.o')] = hh.replace('.h', '.cc')
+                    protobufs[hh.replace('/seastar/', '/seastar/seastar/')] = src.replace('/seastar/', '/seastar/seastar/')
+                    compiles[hh.replace('.h', '.o')] = hh.replace('.h', '.cc').replace('/seastar/', '/seastar/seastar/')
                 elif src.endswith('.rl'):
                     hh = '$builddir/' + mode + '/gen/' + src.replace('.rl', '.hh')
                     ragels[hh] = src
