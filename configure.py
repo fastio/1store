@@ -399,7 +399,7 @@ dpdk_machine = 'native'
 
 if args.dpdk:
     if not os.path.exists('dpdk') or not os.listdir('dpdk'):
-        raise Exception('--enable-dpdk: dpdk/ is empty. Run "git submodule update --init".')
+        raise Exception('--enable-dpdk: dpdk/ is empty. Run "git submodule update --init --recursive".')
     cflags = args.user_cflags.split()
     dpdk_machine = ([dpdk_arch_xlat[cflag[7:]]
                      for cflag in cflags
@@ -554,7 +554,7 @@ cares_lib = 'seastar/cares-seastar'
 cares_src_lib = cares_dir + '/lib/libcares.a'
 
 if not os.path.exists(cares_dir) or not os.listdir(cares_dir):
-    raise Exception(cares_dir + ' is empty. Run "git submodule update --init".')
+    raise Exception(cares_dir + ' is empty. Run "git submodule update --init --recursive".')
 
 cares_sources = []
 for root, dirs, files in os.walk('c-ares'):
