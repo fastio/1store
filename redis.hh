@@ -76,12 +76,12 @@ public:
 
     // [STRING APIs]
     future<message> mset(args_collection& args);
-    future<message> set(args_collection& args);
+    future<> set(args_collection& args, output_stream<char>& out);
     future<message> del(args_collection& args);
     future<message> exists(args_collection& args);
     future<message> append(args_collection& args);
     future<message> strlen(args_collection& args);
-    future<message> get(args_collection& args);
+    future<> get(args_collection& args, output_stream<char>& out);
     future<message> mget(args_collection& args);
 
     // [LIST APIs]

@@ -14,7 +14,7 @@
 * KIND, either express or implied.  See the License for the
 * specific language governing permissions and limitations
 * under the License.
-* 
+*
 *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
@@ -61,14 +61,14 @@ future<int> redis_service::set_impl(sstring& key, sstring& val, long expir, uint
     if (engine().cpu_id() == cpu) {
         return make_ready_future<int>(_db.local().set(std::move(rk), std::move(val), expir, flag));
     }
-    return _db.invoke_on(cpu, &database::set<remote_origin_tag>, std::move(rk), std::move(val), expir, flag);
+    return _db.invoke_on(cpu, &database::set, std::move(rk), std::move(val), expir, flag);
 }
 
-future<message> redis_service::set(args_collection& args)
+future<> redis_service::set(args_collection& args, output_stream<char>& out)
 {
     // parse args
     if (args._command_args_count < 2) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
     sstring& val = args._command_args[1];
@@ -80,19 +80,19 @@ future<message> redis_service::set(args_collection& args)
             sstring* v = (i == args._command_args_count - 1) ? nullptr : &(args._command_args[i + 1]);
             sstring& o = args._command_args[i];
             if (o.size() != 3) {
-                return syntax_err_message();
+                return out.write(msg_syntax_err);
             }
             if ((o[0] == 'e' || o[0] == 'E') && (o[1] == 'x' || o[1] == 'X') && o[2] == '\0') {
                 flag |= FLAG_SET_EX;
                 if (v == nullptr) {
-                    return syntax_err_message();
+                    return out.write(msg_syntax_err);
                 }
                 expir = std::atol(v->c_str()) * 1000;
             }
             if ((o[0] == 'p' || o[0] == 'P') && (o[1] == 'x' || o[1] == 'X') && o[2] == '\0') {
                 flag |= FLAG_SET_PX;
                 if (v == nullptr) {
-                    return syntax_err_message();
+                    return out.write(msg_syntax_err);
                 }
                 expir = std::atol(v->c_str());
             }
@@ -104,9 +104,15 @@ future<message> redis_service::set(args_collection& args)
             }
         }
     }
-    return set_impl(key, val, expir, flag).then([] (auto r) {
-        return r == REDIS_OK ? ok_message() : err_message();
-    });
+    redis_key rk { std::move(key) };
+    auto cpu = get_cpu(rk);
+    if (engine().cpu_id() == cpu) {
+        auto u = _db.local().set(std::move(rk), std::move(val), expir, flag);
+        return u == REDIS_OK ? out.write(msg_ok) : out.write(msg_err);
+    }
+    return _db.invoke_on(cpu, &database::set, std::move(rk), std::move(val), expir, flag).then([&out] (auto&& u) {
+        return u == REDIS_OK ? out.write(msg_ok) : out.write(msg_err);
+    });;
 }
 
 future<int> redis_service::remove_impl(sstring& key) {
@@ -182,23 +188,30 @@ future<message> redis_service::mset(args_collection& args)
 
 future<item_ptr> redis_service::get_impl(sstring& key)
 {
+    /*
     redis_key rk {std::move(key)};
     auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
         return make_ready_future<item_ptr>(_db.local().get(std::move(rk)));
     }
     return _db.invoke_on(cpu, &database::get, std::move(rk));
+    */
+    return make_ready_future<item_ptr>();
 }
 
-future<message> redis_service::get(args_collection& args)
+future<> redis_service::get(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
-    return get_impl(key).then([] (auto&& u) {
-        return item_message<false, true>(u);
-    });
+    redis_key rk {std::move(key)};
+    auto cpu = get_cpu(rk);
+    if (engine().cpu_id() == cpu) {
+        _db.local().get(std::move(rk), std::ref(out));
+        return make_ready_future<>();
+    }
+    return _db.invoke_on(cpu, &database::get, std::move(rk), std::ref(out));
 }
 
 future<message> redis_service::mget(args_collection& args)

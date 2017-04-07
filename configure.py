@@ -360,6 +360,8 @@ deps = {
       'redis_protocol.cc',
       'geo.cc',
       'bitmap.cc',
+      'list_lsa.cc',
+      'cache.cc',
       ] + libnet + core + http + utils,
 }
 
@@ -702,9 +704,9 @@ with open(buildfile, 'w') as f:
                     obj = '$builddir/' + mode + '/' + src.replace('.cc', '.o')
                     compiles[obj] = src
                 elif src.endswith('.proto'):
-                    hh = '$builddir/' + mode + '/gen/' + src.replace('.proto', '.pb.h')
-                    protobufs[hh.replace('/seastar/', '/seastar/seastar/')] = src.replace('/seastar/', '/seastar/seastar/')
-                    compiles[hh.replace('.h', '.o')] = hh.replace('.h', '.cc').replace('/seastar/', '/seastar/seastar/')
+                    hh = '$builddir/' + mode + '/gen/seastar/' + src.replace('.proto', '.pb.h')
+                    protobufs[hh.replace('/seastar/', '/')] = src.replace('/seastar/', '/')
+                    compiles[hh.replace('/seastar/', '/').replace('.h', '.o')] = hh.replace('/seastar/', '/').replace('.h', '.cc')
                 elif src.endswith('.rl'):
                     hh = '$builddir/' + mode + '/gen/' + src.replace('.rl', '.hh')
                     ragels[hh] = src

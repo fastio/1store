@@ -33,6 +33,7 @@
 #include "geo.hh"
 #include "bitmap.hh"
 #include <tuple>
+#include "cache.hh"
 namespace redis {
 
 namespace stdx = std::experimental;
@@ -54,17 +55,18 @@ struct local_origin_tag {
     }
 };
 
-class database {
+class database final : private logalloc::region {
 public:
     database();
     ~database();
 
-    template  <typename origin = local_origin_tag> inline
     int set(redis_key&& rk, sstring&& val, long expire, uint32_t flag)
     {
-        _store->remove(rk);
-        auto new_item = item::create(rk, origin::move_if_local(val));
-        return _store->set(rk, new_item);
+        with_allocator(allocator(), [this, &rk, &val] {
+            auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
+            _cache_store.replace(entry);
+        });
+        return REDIS_OK;
     }
 
     template  <typename origin = local_origin_tag> inline
@@ -121,7 +123,7 @@ public:
 
     int exists(redis_key&& key);
 
-    item_ptr get(redis_key&& key);
+    void get(redis_key&& key, output_stream<char>& out);
 
     int strlen(redis_key&& key);
 
@@ -497,5 +499,6 @@ private:
     dict  _data_storages[DEFAULT_DB_COUNT];
     timer_set<item> _alive;
     timer<clock_type> _timer;
+    cache _cache_store;
 };
 }

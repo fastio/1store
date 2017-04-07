@@ -42,9 +42,8 @@ int database::exists(redis_key&& rk)
     return _store->exists(rk);
 }
 
-item_ptr database::get(redis_key&& rk)
+void database::get(redis_key&& rk, output_stream<char>& out)
 {
-    return _store->fetch(rk);
 }
 
 int database::strlen(redis_key&& rk)
@@ -385,6 +384,7 @@ std::pair<size_t, int> database::srems(redis_key&& rk, std::vector<sstring>&& me
 
 long database::pttl(redis_key&& rk)
 {
+    /*
     auto item = get(std::move(rk));
     if (item) {
         if (item->ever_expires() == false) {
@@ -396,6 +396,8 @@ long database::pttl(redis_key&& rk)
     else {
         return -2;
     }
+    */
+    return -2;
 }
 
 long database::ttl(redis_key&& rk)

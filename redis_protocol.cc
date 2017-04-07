@@ -48,17 +48,13 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                 prepare_request();
                 switch (_parser._command) {
                 case redis_protocol_parser::command::set:
-                    return _redis.set(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.set(_command_args, out);
                 case redis_protocol_parser::command::mset:
                     return _redis.mset(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::get:
-                    return _redis.get(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.get(_command_args, out);
                 case redis_protocol_parser::command::del:
                     return _redis.del(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));

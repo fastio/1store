@@ -120,7 +120,7 @@ struct redis_key {
     redis_key(sstring&& key) : _key(std::move(key)), _hash(std::hash<sstring>()(_key)) {}
     redis_key(redis_key&& other) : _key(other._key), _hash(other._hash) {}
     redis_key(const sstring& key) : _key(key), _hash(std::hash<sstring>()(_key)) {}
-    redis_key& operator=(redis_key&& o) {
+    redis_key& operator = (redis_key&& o) {
         if (this != &o) {
             _key = std::move(o._key);
             _hash = o._hash;
