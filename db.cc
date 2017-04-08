@@ -14,7 +14,7 @@
 * KIND, either express or implied.  See the License for the
 * specific language governing permissions and limitations
 * under the License.
-* 
+*
 *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
@@ -44,6 +44,9 @@ int database::exists(redis_key&& rk)
 
 void database::get(redis_key&& rk, output_stream<char>& out)
 {
+    with_linearized_managed_bytes([this, rk = std::move(rk), &out] {
+        _cache_store.run_with_entry(rk, [&out] (const cache_entry* e) { database::build_reply<false, true>(out, e); });
+    });
 }
 
 int database::strlen(redis_key&& rk)

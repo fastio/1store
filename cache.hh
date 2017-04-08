@@ -34,28 +34,6 @@
 #include "core/sstring.hh"
 namespace redis {
 namespace bi = boost::intrusive;
-struct cache_entry_key
-{
-    managed_bytes _key;
-    size_t  _hash;
-    cache_entry_key(const sstring& key) noexcept : _key(), _hash(std::hash<managed_bytes>()(_key))
-    {
-        auto entry = current_allocator().construct<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(key.data()), key.size()});
-        _key = std::move(*entry);
-    }
-    cache_entry_key(const sstring& key, size_t hash) noexcept : _key(), _hash(hash)
-    {
-        auto entry = current_allocator().construct<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(key.data()), key.size()});
-        _key = std::move(*entry);
-    }
-    cache_entry_key(const cache_entry_key& o) noexcept : _key(o._key), _hash(o._hash)
-    {
-    }
-    cache_entry_key(cache_entry_key&& o) noexcept : _key(std::move(o._key)), _hash(std::move(o._hash))
-    {
-    }
-};
-
 class cache;
 // cache_entry should be allocated by LSA.
 class cache_entry
@@ -73,7 +51,8 @@ protected:
         ENTRY_LIST  = 3,
     };
     entry_type _type;
-    cache_entry_key _key;
+    managed_bytes _key;
+    size_t _key_hash;
     union storage {
         double _float_number;
         int64_t _integer_number;
@@ -82,24 +61,44 @@ protected:
         storage() {}
         ~storage() {}
     } _storage;
-    inline const cache_entry_key& key() const { return _key; }
+    inline size_t key_hash() const
+    {
+        return _key_hash;
+    }
+    inline size_t key_size() const
+    {
+        return _key.size();
+    }
+    inline const bytes_view key() const
+    {
+        return { _key.data(), _key.size() };
+    }
+    inline const signed char* key_data() const
+    {
+        return static_cast<const signed char*>(_key.data());
+    }
 public:
     cache_entry(const sstring& key, size_t hash, entry_type type) noexcept
         : _cache_link()
         , _type(type)
-        , _key(key, hash)
+        , _key_hash(hash)
     {
+        auto entry = current_allocator().construct<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(key.data()), key.size()});
+        _key = std::move(*entry);
     }
+
     cache_entry(const sstring& key, size_t hash, double data) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_FLOAT)
     {
         _storage._float_number = data;
     }
+
     cache_entry(const std::string key, size_t hash, int64_t data) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_INT64)
     {
         _storage._integer_number = data;
     }
+
     cache_entry(const sstring& key, size_t hash, const sstring& data) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_BYTES)
     {
@@ -116,6 +115,7 @@ public:
         : _cache_link(std::move(o._cache_link))
         , _type(o._type)
         , _key(std::move(_key))
+        , _key_hash(std::move(o._key_hash))
     {
         switch (_type) {
             case entry_type::ENTRY_FLOAT:
@@ -137,34 +137,25 @@ public:
     }
 
     friend inline bool operator == (const cache_entry &l, const cache_entry &r) {
-        const auto& lk = l.key();
-        const auto& rk = r.key();
-        return (lk._hash == rk._hash) && (lk._key == rk._key);
+        return (l._key_hash == r._key_hash) && (l._key == r._key);
     }
 
     friend inline std::size_t hash_value(const cache_entry& e) {
-        return e.key()._hash;
+        return e._key_hash;
     }
 
     struct compare {
-    private:
-        inline bool compare_key (const cache_entry_key& l, const cache_entry_key& r) const {
-            return (l._hash == r._hash) && (l._key == r._key);
-        }
-
     public:
-        bool operator () (const cache_entry& l, const cache_entry& r) const {
+        inline bool operator () (const cache_entry& l, const cache_entry& r) const {
             const auto& lk = l._key;
             const auto& rk = r._key;
-            return compare_key(lk, rk);
+            return (l.key_hash() == r.key_hash()) && (lk == rk);
         }
-        bool operator () (const cache_entry_key& k, const cache_entry& e) const {
-            const auto& ek = e._key;
-            return compare_key(k, ek);
+        inline bool operator () (const redis_key& k, const cache_entry& e) const {
+            return (k.hash() == e.key_hash()) && (k.size() == e.key_size()) && (memcmp(k.data(), e.key_data(), k.size()) == 0);
         }
-        bool operator () (const cache_entry& e, const cache_entry_key& k) const {
-            const auto& ek = e._key;
-            return compare_key(k, ek);
+        inline bool operator () (const cache_entry& e, const redis_key& k) const {
+            return (k.hash() == e.key_hash()) && (k.size() == e.key_size()) && (memcmp(k.data(), e.key_data(), k.size()) == 0);
         }
     };
 };
@@ -196,29 +187,27 @@ public:
     
     void flush_all()
     {
-        _store.erase_and_dispose(_store.begin(), _store.end(), [this] (const cache_entry* it) {
-            //release memory
-        });
-    }
+        _store.erase_and_dispose(_store.begin(), _store.end(), current_deleter<cache_entry>());
+   }
 
-    inline void erase(const cache_entry_key& key)
+    inline void erase(const redis_key& key)
     {
-        static auto hash_fn = [] (const cache_entry_key& k) -> size_t { return k._hash; };
+        static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
         auto it = _store.find(key, hash_fn, cache_entry::compare());
         if (it != _store.end()) {
-            _store.erase(it);
+            _store.erase_and_dispose(it, current_deleter<cache_entry>());
         } 
-    }
-
-    inline cache_iterator find(const cache_entry_key& key)
-    {
-        static auto hash_fn = [] (const cache_entry_key& k) -> size_t { return k._hash; };
-        return _store.find(key, hash_fn, cache_entry::compare());
     }
 
     inline void replace(cache_entry* entry)
     {
-        erase(entry->key());
+        if (entry) {
+            static auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
+            auto it = _store.find(*entry, hash_fn, cache_entry::compare());
+            if (it != _store.end()) {
+                _store.erase_and_dispose(it, current_deleter<cache_entry>());
+            }
+        }
         insert(entry);
     }
 
@@ -229,6 +218,27 @@ public:
         // maybe cache will be rehashed.
         maybe_rehash();
     }
+
+    inline void run_with_entry(const redis_key& rk, std::function<void(const cache_entry* e)>&& func)
+    {
+        static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
+        auto it = _store.find(rk, hash_fn, cache_entry::compare());
+        if (it != _store.end()) {
+            const auto& e = *it;
+            func(&e);
+        }
+        else {
+            func(nullptr);
+        }
+    }
+
+    inline bool exists(const redis_key& rk)
+    {
+        static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
+        auto it = _store.find(rk, hash_fn, cache_entry::compare());
+        return it != _store.end();
+    }
+
     void maybe_rehash()
     {
         if (_store.size() >= _resize_up_threshold) {

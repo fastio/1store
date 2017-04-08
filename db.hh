@@ -493,6 +493,20 @@ public:
 private:
     georadius_result_type georadius(sorted_set* zset, double longtitude, double latitude, double radius, size_t count, int flag);
     void expired_items();
+    template<bool Key, bool Value>
+    static void build_reply(output_stream<char>& out, const cache_entry* e)
+    {
+        if (e) {
+            //build reply
+            if (Key) {
+            }
+            if (Value) {
+            }
+        }
+        else {
+            out.write(msg_not_found);
+        }
+    }
 private:
     static const int DEFAULT_DB_COUNT = 32;
     dict* _store = nullptr;
