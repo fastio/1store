@@ -362,6 +362,7 @@ deps = {
       'bitmap.cc',
       'list_lsa.cc',
       'cache.cc',
+      'reply_builder.cc',
       ] + libnet + core + http + utils,
 }
 
