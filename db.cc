@@ -19,8 +19,8 @@
 *
 */
 #include "db.hh"
+#include "reply_builder.hh"
 namespace redis {
-
 database::database()
 {
     using namespace std::chrono;
@@ -32,31 +32,44 @@ database::~database()
 {
 }
 
-int database::del(redis_key&& rk)
+bool database::del(redis_key&& rk)
 {
-    return _store->remove(rk);
+    return _cache_store.erase(rk);
 }
 
-int database::exists(redis_key&& rk)
+bool database::exists(redis_key&& rk)
 {
-    return _store->exists(rk);
+    return _cache_store.exists(rk);
 }
 
 void database::get(redis_key&& rk, output_stream<char>& out)
 {
     with_linearized_managed_bytes([this, rk = std::move(rk), &out] {
-        _cache_store.run_with_entry(rk, [&out] (const cache_entry* e) { database::build_reply<false, true>(out, e); });
+         _cache_store.run_with_entry(rk, [&out] (const cache_entry* e) {
+             if (e->type_of_bytes()) {
+                 reply_builder::build<false, true>(out, e);
+             }
+             else {
+                 out.write(msg_type_err);
+             }
+         });
     });
 }
 
-int database::strlen(redis_key&& rk)
+void database::strlen(redis_key&& rk, output_stream<char>& out)
 {
-    auto i = _store->fetch(rk);
-    if (i) {
-        return i->value_size();
-    }
-    return 0;
+    with_linearized_managed_bytes([this, rk = std::move(rk), &out] {
+        _cache_store.run_with_entry(rk, [&out] (const cache_entry* e) {
+            if (e->type_of_bytes()) {
+                reply_builder::build(out, e->value_bytes_size());
+            }
+            else {
+                out.write(msg_type_err);
+            }
+        });
+   });
 }
+
 int database::type(redis_key&& rk)
 {
     auto it = _store->fetch_raw(rk);

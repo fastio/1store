@@ -77,10 +77,10 @@ public:
     // [STRING APIs]
     future<message> mset(args_collection& args);
     future<> set(args_collection& args, output_stream<char>& out);
-    future<message> del(args_collection& args);
-    future<message> exists(args_collection& args);
+    future<> del(args_collection& args, output_stream<char>& out);
+    future<> exists(args_collection& args, output_stream<char>& out);
     future<message> append(args_collection& args);
-    future<message> strlen(args_collection& args);
+    future<> strlen(args_collection& args, output_stream<char>& out);
     future<> get(args_collection& args, output_stream<char>& out);
     future<message> mget(args_collection& args);
 
@@ -173,7 +173,7 @@ public:
 private:
     future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
     future<std::pair<std::vector<item_ptr>, int>> range_impl(sstring& key, long begin, long end, bool reverse);
-    future<int> exists_impl(sstring& key);
+    future<bool> exists_impl(sstring& key);
     future<int> srem_impl(sstring& key, sstring& member);
     future<int> sadd_impl(sstring& key, sstring& member);
     future<std::pair<size_t, int>> sadds_impl(sstring& key, std::vector<sstring>&& members);
@@ -186,7 +186,7 @@ private:
     future<std::pair<size_t, int>> push_impl(sstring& key, sstring& value, bool force, bool left);
     future<int> set_impl(sstring& key, sstring& value, long expir, uint8_t flag);
     future<item_ptr> get_impl(sstring& key);
-    future<int> remove_impl(sstring& key);
+    future<bool> remove_impl(sstring& key);
     future<int> hdel_impl(sstring& key, sstring& field);
     future<message> counter_by(args_collection& args, bool incr, bool with_step);
     using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;

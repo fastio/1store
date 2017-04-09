@@ -41,6 +41,7 @@
 #include "redis_protocol.hh"
 #include "system_stats.hh"
 #include "db.hh"
+#include "reply_builder.hh"
 using namespace net;
 namespace redis {
 
@@ -115,24 +116,24 @@ future<> redis_service::set(args_collection& args, output_stream<char>& out)
     });;
 }
 
-future<int> redis_service::remove_impl(sstring& key) {
+future<bool> redis_service::remove_impl(sstring& key) {
     redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db.local().del(std::move(rk)));
+        return make_ready_future<bool>(_db.local().del(std::move(rk)));
     }
     return _db.invoke_on(cpu, &database::del, std::move(rk));
 }
 
-future<message> redis_service::del(args_collection& args)
+future<> redis_service::del(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 0 || args._command_args.empty()) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     if (args._command_args.size() == 1) {
         sstring& key = args._command_args[0];
-        return remove_impl(key).then([] (auto r) {
-            return r == REDIS_OK ? one_message() : zero_message();
+        return remove_impl(key).then([&out] (auto r) {
+            return out.write( r ? msg_one : msg_zero);
         });
     }
     else {
@@ -144,13 +145,13 @@ future<message> redis_service::del(args_collection& args)
         for (size_t i = 0; i < args._command_args_count; ++i) {
             keys.emplace_back(args._command_args[i]);
         }
-        return do_with(mdel_state{std::move(keys), 0}, [this] (auto& state) {
+        return do_with(mdel_state{std::move(keys), 0}, [this, &out] (auto& state) {
             return parallel_for_each(std::begin(state.keys), std::end(state.keys), [this, &state] (auto& key) {
                 return this->remove_impl(key).then([&state] (auto r) {
-                    if (r == REDIS_OK) state.success_count++;
+                    if (r) state.success_count++;
                 });
-            }).then([&state] {
-                return size_message(state.success_count);
+            }).then([&state, &out] {
+                return reply_builder::build(out, state.success_count);
             });
         });
     }
@@ -238,41 +239,42 @@ future<message> redis_service::mget(args_collection& args)
    });
 }
 
-future<message> redis_service::strlen(args_collection& args)
+future<> redis_service::strlen(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 0 || args._command_args.empty()) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
     redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return size_message(_db.local().strlen(std::move(rk)));
+        _db.local().strlen(std::move(rk), std::ref(out));
+        return make_ready_future<>();
     }
-    return _db.invoke_on(cpu, &database::strlen, std::move(rk)).then([] (size_t u) {
-        return size_message(u);
+    return _db.invoke_on(cpu, &database::strlen, std::move(rk), std::ref(out)).then([] {
+        return make_ready_future<>();
     });
 }
 
-future<int> redis_service::exists_impl(sstring& key)
+future<bool> redis_service::exists_impl(sstring& key)
 {
     redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        return make_ready_future<int>(_db.local().exists(std::move(rk)));
+        return make_ready_future<bool>(_db.local().exists(std::move(rk)));
     }
     return _db.invoke_on(cpu, &database::exists, std::move(rk));
 }
 
-future<message> redis_service::exists(args_collection& args)
+future<> redis_service::exists(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 0 || args._command_args.empty()) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     if (args._command_args_count == 1) {
         sstring& key = args._command_args[0];
-        return exists_impl(key).then([] (auto u) {
-            return size_message(u);
+        return exists_impl(key).then([&out] (auto r) {
+            return out.write( r ? msg_one : msg_zero);
         });
     }
     else {
@@ -284,13 +286,13 @@ future<message> redis_service::exists(args_collection& args)
         for (size_t i = 0; i < args._command_args_count; ++i) {
             keys.emplace_back(args._command_args[i]);
         }
-        return do_with(mexists_state{std::move(keys), 0}, [this] (auto& state) {
+        return do_with(mexists_state{std::move(keys), 0}, [this, &out] (auto& state) {
             return parallel_for_each(std::begin(state.keys), std::end(state.keys), [this, &state] (auto& key) {
                 return this->exists_impl(key).then([&state] (auto r) {
-                    if (r == 1) state.success_count++;
+                    if (r) state.success_count++;
                 });
-            }).then([&state] {
-                return size_message(state.success_count);
+            }).then([&state, &out] {
+                return reply_builder::build(out, state.success_count);
             });
         });
     }

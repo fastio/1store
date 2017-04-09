@@ -61,22 +61,6 @@ protected:
         storage() {}
         ~storage() {}
     } _storage;
-    inline size_t key_hash() const
-    {
-        return _key_hash;
-    }
-    inline size_t key_size() const
-    {
-        return _key.size();
-    }
-    inline const bytes_view key() const
-    {
-        return { _key.data(), _key.size() };
-    }
-    inline const signed char* key_data() const
-    {
-        return static_cast<const signed char*>(_key.data());
-    }
 public:
     cache_entry(const sstring& key, size_t hash, entry_type type) noexcept
         : _cache_link()
@@ -158,6 +142,55 @@ public:
             return (k.hash() == e.key_hash()) && (k.size() == e.key_size()) && (memcmp(k.data(), e.key_data(), k.size()) == 0);
         }
     };
+public:
+    inline size_t key_hash() const
+    {
+        return _key_hash;
+    }
+    inline size_t key_size() const
+    {
+        return _key.size();
+    }
+    inline const bytes_view key() const
+    {
+        return { _key.data(), _key.size() };
+    }
+    inline const char* key_data() const
+    {
+        return reinterpret_cast<const char*>(_key.data());
+    }
+    inline size_t value_bytes_size() const
+    {
+        return _storage._bytes.size();
+    }
+    inline const char* value_bytes_data() const
+    {
+        return reinterpret_cast<const char*>(_storage._bytes.data());
+    }
+    inline bool type_of_float() const
+    {
+        return _type == entry_type::ENTRY_FLOAT;
+    }
+    inline bool type_of_integer() const
+    {
+        return _type == entry_type::ENTRY_INT64;
+    }
+    inline bool type_of_bytes() const
+    {
+        return _type == entry_type::ENTRY_BYTES;
+    }
+    inline bool type_of_list() const
+    {
+        return _type == entry_type::ENTRY_LIST;
+    }
+    inline int64_t value_integer() const
+    {
+        return _storage._integer_number;
+    }
+    inline double value_float() const
+    {
+        return _storage._float_number;
+    }
 };
 
 static constexpr const size_t DEFAULT_INITIAL_SIZE = 1 << 20;
@@ -190,13 +223,15 @@ public:
         _store.erase_and_dispose(_store.begin(), _store.end(), current_deleter<cache_entry>());
    }
 
-    inline void erase(const redis_key& key)
+    inline bool erase(const redis_key& key)
     {
         static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
         auto it = _store.find(key, hash_fn, cache_entry::compare());
         if (it != _store.end()) {
             _store.erase_and_dispose(it, current_deleter<cache_entry>());
+            return true;
         } 
+        return false;
     }
 
     inline void replace(cache_entry* entry)

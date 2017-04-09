@@ -119,13 +119,13 @@ public:
         return result_type {current_size, REDIS_OK};
     }
 
-    int del(redis_key&& key);
+    bool del(redis_key&& key);
 
-    int exists(redis_key&& key);
+    bool exists(redis_key&& key);
 
     void get(redis_key&& key, output_stream<char>& out);
 
-    int strlen(redis_key&& key);
+    void strlen(redis_key&& key, output_stream<char>& out);
 
     int expire(redis_key&& rk, long expired);
     int persist(redis_key&& rk);
@@ -493,20 +493,6 @@ public:
 private:
     georadius_result_type georadius(sorted_set* zset, double longtitude, double latitude, double radius, size_t count, int flag);
     void expired_items();
-    template<bool Key, bool Value>
-    static void build_reply(output_stream<char>& out, const cache_entry* e)
-    {
-        if (e) {
-            //build reply
-            if (Key) {
-            }
-            if (Value) {
-            }
-        }
-        else {
-            out.write(msg_not_found);
-        }
-    }
 private:
     static const int DEFAULT_DB_COUNT = 32;
     dict* _store = nullptr;
