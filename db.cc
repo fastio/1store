@@ -34,7 +34,9 @@ database::~database()
 
 bool database::del(redis_key&& rk)
 {
-    return _cache_store.erase(rk);
+    return with_allocator(allocator(), [this, &rk] {
+        return _cache_store.erase(rk);
+    });
 }
 
 bool database::exists(redis_key&& rk)
@@ -46,11 +48,11 @@ void database::get(redis_key&& rk, output_stream<char>& out)
 {
     with_linearized_managed_bytes([this, rk = std::move(rk), &out] {
          _cache_store.run_with_entry(rk, [&out] (const cache_entry* e) {
-             if (e->type_of_bytes()) {
-                 reply_builder::build<false, true>(out, e);
+             if (e && e->type_of_bytes() == false) {
+                 out.write(msg_type_err);
              }
              else {
-                 out.write(msg_type_err);
+                 reply_builder::build<false, true>(out, e);
              }
          });
     });
