@@ -209,8 +209,7 @@ future<> redis_service::get(args_collection& args, output_stream<char>& out)
     redis_key rk {std::move(key)};
     auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        _db.local().get(std::move(rk), std::ref(out));
-        return make_ready_future<>();
+        return _db.local().get(std::move(rk), std::ref(out));
     }
     return _db.invoke_on(cpu, &database::get, std::move(rk), std::ref(out));
 }
@@ -248,12 +247,9 @@ future<> redis_service::strlen(args_collection& args, output_stream<char>& out)
     redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        _db.local().strlen(std::move(rk), std::ref(out));
-        return make_ready_future<>();
+        return _db.local().strlen(std::move(rk), std::ref(out));
     }
-    return _db.invoke_on(cpu, &database::strlen, std::move(rk), std::ref(out)).then([] {
-        return make_ready_future<>();
-    });
+    return _db.invoke_on(cpu, &database::strlen, std::move(rk), std::ref(out));
 }
 
 future<bool> redis_service::exists_impl(sstring& key)

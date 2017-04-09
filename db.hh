@@ -123,9 +123,9 @@ public:
 
     bool exists(redis_key&& key);
 
-    void get(redis_key&& key, output_stream<char>& out);
+    future<> get(redis_key&& key, output_stream<char>& out);
 
-    void strlen(redis_key&& key, output_stream<char>& out);
+    future<> strlen(redis_key&& key, output_stream<char>& out);
 
     int expire(redis_key&& rk, long expired);
     int persist(redis_key&& rk);

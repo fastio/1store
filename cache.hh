@@ -254,16 +254,16 @@ public:
         maybe_rehash();
     }
 
-    inline void run_with_entry(const redis_key& rk, std::function<void(const cache_entry* e)>&& func)
-    {
+    template <typename Func>
+    inline std::result_of_t<Func(const cache_entry* e)> with_entry_run(const redis_key& rk, Func&& func) {
         static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
         auto it = _store.find(rk, hash_fn, cache_entry::compare());
         if (it != _store.end()) {
             const auto& e = *it;
-            func(&e);
+            return func(&e);
         }
         else {
-            func(nullptr);
+            return func(nullptr);
         }
     }
 

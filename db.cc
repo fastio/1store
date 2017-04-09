@@ -44,30 +44,31 @@ bool database::exists(redis_key&& rk)
     return _cache_store.exists(rk);
 }
 
-void database::get(redis_key&& rk, output_stream<char>& out)
+future<> database::get(redis_key&& rk, output_stream<char>& out)
 {
-    with_linearized_managed_bytes([this, rk = std::move(rk), &out] {
-         _cache_store.run_with_entry(rk, [&out] (const cache_entry* e) {
-             if (e && e->type_of_bytes() == false) {
-                 out.write(msg_type_err);
-             }
-             else {
-                 reply_builder::build<false, true>(out, e);
-             }
-         });
+    return with_linearized_managed_bytes([this, rk = std::move(rk), &out] {
+        return _cache_store.with_entry_run(rk, [&out] (const cache_entry* e) {
+           if (e && e->type_of_bytes() == false) {
+               return out.write(msg_type_err);
+           }
+           else {
+               return reply_builder::build<false, true>(out, e);
+           }
+        });
     });
 }
 
-void database::strlen(redis_key&& rk, output_stream<char>& out)
+future<> database::strlen(redis_key&& rk, output_stream<char>& out)
 {
-    with_linearized_managed_bytes([this, rk = std::move(rk), &out] {
-        _cache_store.run_with_entry(rk, [&out] (const cache_entry* e) {
-            if (e->type_of_bytes()) {
-                reply_builder::build(out, e->value_bytes_size());
+    return with_linearized_managed_bytes([this, rk = std::move(rk), &out] {
+        return _cache_store.with_entry_run(rk, [&out] (const cache_entry* e) {
+            if (e) {
+                if (e->type_of_bytes()) {
+                    return reply_builder::build(out, e->value_bytes_size());
+                }
+                return out.write(msg_type_err);
             }
-            else {
-                out.write(msg_type_err);
-            }
+            return out.write(msg_zero);
         });
    });
 }
