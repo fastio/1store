@@ -23,6 +23,7 @@
 #include "core/future.hh"
 #include "core/shared_ptr.hh"
 #include "core/sharded.hh"
+#include "core/temporary_buffer.hh"
 #include <sstream>
 #include <iostream>
 #include "common.hh"
@@ -62,11 +63,11 @@ public:
 
     int set(redis_key&& rk, sstring&& val, long expire, uint32_t flag)
     {
-        with_allocator(allocator(), [this, &rk, &val] {
+        return with_allocator(allocator(), [this, &rk, &val] {
             auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
             _cache_store.replace(entry);
+            return REDIS_OK;
         });
-        return REDIS_OK;
     }
 
     template  <typename origin = local_origin_tag> inline
@@ -90,34 +91,7 @@ public:
         }
     }
 
-    template  <typename origin = local_origin_tag> inline
-    std::pair<size_t, int> append(redis_key&& rk, sstring&& val)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (it && it->type() != REDIS_RAW_STRING) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        size_t current_size = -1;
-        if (it) {
-            auto exist_val = it->value();
-            current_size = exist_val.size() + val.size();
-            auto new_item = item::create(rk,
-                    origin::move_if_local(exist_val),
-                    origin::move_if_local(val));
-            if (_store->replace(rk, new_item) != REDIS_OK) {
-                return result_type {0, REDIS_ERR};
-            }
-        }
-        else {
-            current_size = val.size();
-            auto new_item = item::create(rk, origin::move_if_local(val));
-            if (_store->set(rk, new_item) != REDIS_OK) {
-                return result_type {0, REDIS_ERR};
-            }
-        }
-        return result_type {current_size, REDIS_OK};
-    }
+    future<> append(redis_key&& rk, sstring&& val, output_stream<char>& out);
 
     bool del(redis_key&& key);
 

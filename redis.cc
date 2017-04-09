@@ -157,13 +157,13 @@ future<> redis_service::del(args_collection& args, output_stream<char>& out)
     }
 }
 
-future<message> redis_service::mset(args_collection& args)
+future<> redis_service::mset(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 1 || args._command_args.empty()) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     if (args._command_args.size() % 2 != 0) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     struct mset_state {
         std::vector<std::pair<sstring, sstring>> key_value_pairs;
@@ -174,15 +174,15 @@ future<message> redis_service::mset(args_collection& args)
     for (size_t i = 0; i < pair_size; ++i) {
         key_value_pairs.emplace_back(std::make_pair(std::move(args._command_args[i * 2]), std::move(args._command_args[i * 2 + 1])));
     }
-    return do_with(mset_state{std::move(key_value_pairs), 0}, [this] (auto& state) {
+    return do_with(mset_state{std::move(key_value_pairs), 0}, [this, &out] (auto& state) {
         return parallel_for_each(std::begin(state.key_value_pairs), std::end(state.key_value_pairs), [this, &state] (auto& entry) {
             sstring& key = entry.first;
             sstring& value = entry.second;
             return this->set_impl(key, value, 0, 0).then([&state] (auto) {
                 state.success_count++ ;
             });
-        }).then([&state] {
-            return state.key_value_pairs.size() == state.success_count ? ok_message() : err_message();
+        }).then([&state, &out] {
+            return out.write(state.key_value_pairs.size() == state.success_count ? msg_ok : msg_err);
         });
    });
 }
@@ -214,10 +214,11 @@ future<> redis_service::get(args_collection& args, output_stream<char>& out)
     return _db.invoke_on(cpu, &database::get, std::move(rk), std::ref(out));
 }
 
-future<message> redis_service::mget(args_collection& args)
+future<> redis_service::mget(args_collection& args, output_stream<char>& out)
 {
+    /*
     if (args._command_args_count < 1) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     struct mget_state {
         std::vector<sstring> keys;
@@ -236,6 +237,8 @@ future<message> redis_service::mget(args_collection& args)
             return make_ready_future<message>(std::move(state.msg));
         });
    });
+   */
+    return make_ready_future<>();
 }
 
 future<> redis_service::strlen(args_collection& args, output_stream<char>& out)
@@ -294,22 +297,19 @@ future<> redis_service::exists(args_collection& args, output_stream<char>& out)
     }
 }
 
-future<message> redis_service::append(args_collection& args)
+future<> redis_service::append(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 1 || args._command_args.empty()) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
     sstring& val = args._command_args[1];
     redis_key rk {std::move(key)};
     auto cpu = get_cpu(rk);
     if (engine().cpu_id() == cpu) {
-        auto&& u = _db.local().append(std::move(rk), std::move(val));
-        return size_message(u);
+        return _db.local().append(std::move(rk), std::move(val), std::ref(out));
     }
-    return _db.invoke_on(cpu, &database::append<remote_origin_tag>, std::move(rk), std::move(val)).then([] (auto&& u) {
-        return size_message(u);
-    });
+    return _db.invoke_on(cpu, &database::append, std::move(rk), std::move(val), std::ref(out));
 }
 
 future<std::pair<size_t, int>> redis_service::push_impl(sstring& key, sstring& val, bool force, bool left)

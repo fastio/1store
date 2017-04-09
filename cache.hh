@@ -191,6 +191,9 @@ public:
     {
         return _storage._float_number;
     }
+    inline managed_bytes& value_bytes() {
+        return _storage._bytes;
+    }
 };
 
 static constexpr const size_t DEFAULT_INITIAL_SIZE = 1 << 20;
@@ -255,7 +258,7 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(const cache_entry* e)> with_entry_run(const redis_key& rk, Func&& func) {
+    inline std::result_of_t<Func(const cache_entry* e)> with_entry_run(const redis_key& rk, Func&& func) const {
         static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
         auto it = _store.find(rk, hash_fn, cache_entry::compare());
         if (it != _store.end()) {
@@ -266,6 +269,20 @@ public:
             return func(nullptr);
         }
     }
+
+    template <typename Func>
+    inline std::result_of_t<Func(cache_entry* e)> with_entry_run(const redis_key& rk, Func&& func) {
+        static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
+        auto it = _store.find(rk, hash_fn, cache_entry::compare());
+        if (it != _store.end()) {
+            auto& e = *it;
+            return func(&e);
+        }
+        else {
+            return func(nullptr);
+        }
+    }
+
 
     inline bool exists(const redis_key& rk)
     {

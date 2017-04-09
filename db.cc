@@ -44,6 +44,34 @@ bool database::exists(redis_key&& rk)
     return _cache_store.exists(rk);
 }
 
+future<> database::append(redis_key&& rk, sstring&& val, output_stream<char>& out)
+{
+    return with_allocator(allocator(), [this, &rk, &val, &out] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &val, &out] (cache_entry* e) {
+            if (!e) {
+                // not exists
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
+                _cache_store.replace(entry);
+                return reply_builder::build(out, val.size());
+            }
+            if (!e->type_of_bytes()) {
+                return out.write(msg_type_err);
+            }
+            return with_linearized_managed_bytes([this, e, &val, &out] {
+                size_t new_size = e->value_bytes_size() + val.size();
+                auto data = std::unique_ptr<bytes_view::value_type[]>(new bytes_view::value_type[new_size]);
+                std::copy_n(e->value_bytes_data(), e->value_bytes_size(), data.get());
+                std::copy_n(val.data(), val.size(), data.get() + e->value_bytes_size());
+                auto new_value = current_allocator().construct<managed_bytes>(data.get(), new_size);
+                auto& old_value = e->value_bytes();
+                current_allocator().destroy<managed_bytes>(&old_value);
+                e->value_bytes() = std::move(*new_value);
+                return reply_builder::build(out, new_size);
+            });
+        });
+    });
+}
+
 future<> database::get(redis_key&& rk, output_stream<char>& out)
 {
     return with_linearized_managed_bytes([this, rk = std::move(rk), &out] {

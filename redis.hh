@@ -75,14 +75,14 @@ public:
     future<message> decrby(args_collection& args);
 
     // [STRING APIs]
-    future<message> mset(args_collection& args);
+    future<> mset(args_collection& args, output_stream<char>& out);
     future<> set(args_collection& args, output_stream<char>& out);
     future<> del(args_collection& args, output_stream<char>& out);
     future<> exists(args_collection& args, output_stream<char>& out);
-    future<message> append(args_collection& args);
+    future<> append(args_collection& args, output_stream<char>& out);
     future<> strlen(args_collection& args, output_stream<char>& out);
     future<> get(args_collection& args, output_stream<char>& out);
-    future<message> mget(args_collection& args);
+    future<> mget(args_collection& args, output_stream<char>& out);
 
     // [LIST APIs]
     future<message> lpush(args_collection& arg);
