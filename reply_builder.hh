@@ -35,60 +35,109 @@
 #include "net/packet-data-source.hh"
 #include "cache.hh"
 namespace redis {
+using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
+
 class reply_builder final {
 public:
-static future<> build(output_stream<char>& out, size_t size)
+static future<scattered_message_ptr> build(size_t size)
 {
-    scattered_message<char> msg;
-    msg.append_static(msg_num_tag);
-    msg.append(to_sstring(size));
-    msg.append_static(msg_crlf);
-    return out.write(std::move(msg));
+    auto m = make_lw_shared<scattered_message<char>>();
+    m->append_static(msg_num_tag);
+    m->append(to_sstring(size));
+    m->append_static(msg_crlf);
+    return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
+}
+static future<> build_local(output_stream<char>& out, size_t size)
+{
+    auto m = make_lw_shared<scattered_message<char>>();
+    m->append_static(msg_num_tag);
+    m->append(to_sstring(size));
+    m->append_static(msg_crlf);
+    return out.write(std::move(*m));
+}
+
+static future<scattered_message_ptr> build(const sstring& message)
+{
+   auto m = make_lw_shared<scattered_message<char>>();
+   m->append_static(message);
+   return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
+}
+
+inline static future<> build_local(output_stream<char>& out, const sstring& message)
+{
+   return out.write(message);
 }
 
 template<bool Key, bool Value>
-static future<> build(output_stream<char>& out, const cache_entry* e)
+static future<scattered_message_ptr> build(const cache_entry* e)
 {
     if (e) {
         //build reply
+        auto m = make_lw_shared<scattered_message<char>>();
         if (Key) {
-            out.write(msg_batch_tag);
-            out.write(to_sstring(e->key_size()));
-            out.write(msg_crlf);
-            out.write(e->key_data(), e->key_size());
-            out.write(msg_crlf);
+            m->append(msg_batch_tag);
+            m->append(to_sstring(e->key_size()));
+            m->append_static(msg_crlf);
+            m->append(sstring{e->key_data(), e->key_size()});
+            m->append_static(msg_crlf);
         }
         if (Value) {
-            out.write(msg_batch_tag);
+            m->append_static(msg_batch_tag);
             if (e->type_of_integer()) {
                auto&& n = to_sstring(e->value_integer());
-               out.write(to_sstring(n.size()));
-               out.write(msg_crlf);
-               out.write(n);
-               out.write(msg_crlf);
+               m->append(to_sstring(n.size()));
+               m->append_static(msg_crlf);
+               m->append(n);
+               m->append_static(msg_crlf);
             }
             else if (e->type_of_float()) {
                auto&& n = to_sstring(e->value_float());
-               out.write(to_sstring(n.size()));
-               out.write(msg_crlf);
-               out.write(n);
-               out.write(msg_crlf);
+               m->append(to_sstring(n.size()));
+               m->append_static(msg_crlf);
+               m->append(n);
+               m->append_static(msg_crlf);
             }
             else if (e->type_of_bytes()) {
-                out.write(to_sstring(e->value_bytes_size()));
-                out.write(msg_crlf);
-                out.write(e->value_bytes_data(), e->value_bytes_size());
-                out.write(msg_crlf);
+                m->append(to_sstring(e->value_bytes_size()));
+                m->append_static(msg_crlf);
+                m->append(sstring{e->value_bytes_data(), e->value_bytes_size()});
+                m->append_static(msg_crlf);
             }
             else {
-               out.write(msg_type_err);
+               m->append_static(msg_type_err);
             }
+            return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
         }
     }
     else {
-        out.write(msg_not_found);
+        return reply_builder::build(msg_not_found);
     }
-    return make_ready_future<>();
+}
+
+static future<scattered_message_ptr> build(const std::vector<const managed_bytes*>& data)
+{
+    auto m = make_lw_shared<scattered_message<char>>();
+    m->append(msg_sigle_tag);
+    m->append(to_sstring(data.size()));
+    m->append_static(msg_crlf);
+    for (size_t i = 0; i < data.size(); ++i) {
+        m->append_static(msg_batch_tag);
+        m->append(to_sstring(data[i]->size()));
+        m->append_static(msg_crlf);
+        m->append(sstring{reinterpret_cast<const char*>(data[i]->data()), data[i]->size()});
+        m->append_static(msg_crlf);
+    }
+    return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
+}
+
+static future<scattered_message_ptr> build(const managed_bytes& data)
+{
+    auto m = make_lw_shared<scattered_message<char>>();
+    m->append(to_sstring(data.size()));
+    m->append_static(msg_crlf);
+    m->append(sstring{reinterpret_cast<const char*>(data.data()), data.size()});
+    m->append_static(msg_crlf);
+    return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
 }
 };
 }

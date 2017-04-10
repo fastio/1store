@@ -32,6 +32,15 @@ database::~database()
 {
 }
 
+bool database::set(redis_key&& rk, sstring&& val, long expire, uint32_t flag)
+{
+    return with_allocator(allocator(), [this, &rk, &val] {
+        auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
+        _cache_store.replace(entry);
+        return true;
+    });
+}
+
 bool database::del(redis_key&& rk)
 {
     return with_allocator(allocator(), [this, &rk] {
@@ -44,20 +53,20 @@ bool database::exists(redis_key&& rk)
     return _cache_store.exists(rk);
 }
 
-future<> database::append(redis_key&& rk, sstring&& val, output_stream<char>& out)
+future<scattered_message_ptr> database::append(redis_key&& rk, sstring&& val)
 {
-    return with_allocator(allocator(), [this, &rk, &val, &out] {
-        return _cache_store.with_entry_run(rk, [this, &rk, &val, &out] (cache_entry* e) {
+    return with_allocator(allocator(), [this, &rk, &val] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &val] (cache_entry* e) {
             if (!e) {
                 // not exists
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
                 _cache_store.replace(entry);
-                return reply_builder::build(out, val.size());
+                return reply_builder::build(val.size());
             }
             if (!e->type_of_bytes()) {
-                return out.write(msg_type_err);
+                return reply_builder::build(msg_type_err);
             }
-            return with_linearized_managed_bytes([this, e, &val, &out] {
+            return with_linearized_managed_bytes([this, e, &val] {
                 size_t new_size = e->value_bytes_size() + val.size();
                 auto data = std::unique_ptr<bytes_view::value_type[]>(new bytes_view::value_type[new_size]);
                 std::copy_n(e->value_bytes_data(), e->value_bytes_size(), data.get());
@@ -66,37 +75,37 @@ future<> database::append(redis_key&& rk, sstring&& val, output_stream<char>& ou
                 auto& old_value = e->value_bytes();
                 current_allocator().destroy<managed_bytes>(&old_value);
                 e->value_bytes() = std::move(*new_value);
-                return reply_builder::build(out, new_size);
+                return reply_builder::build(new_size);
             });
         });
     });
 }
 
-future<> database::get(redis_key&& rk, output_stream<char>& out)
+future<scattered_message_ptr> database::get(redis_key&& rk)
 {
-    return with_linearized_managed_bytes([this, rk = std::move(rk), &out] {
-        return _cache_store.with_entry_run(rk, [&out] (const cache_entry* e) {
+    return with_linearized_managed_bytes([this, rk = std::move(rk)] {
+        return _cache_store.with_entry_run(rk, [] (const cache_entry* e) {
            if (e && e->type_of_bytes() == false) {
-               return out.write(msg_type_err);
+               return reply_builder::build(msg_type_err);
            }
            else {
-               return reply_builder::build<false, true>(out, e);
+               return reply_builder::build<false, true>(e);
            }
         });
     });
 }
 
-future<> database::strlen(redis_key&& rk, output_stream<char>& out)
+future<scattered_message_ptr> database::strlen(redis_key&& rk)
 {
-    return with_linearized_managed_bytes([this, rk = std::move(rk), &out] {
-        return _cache_store.with_entry_run(rk, [&out] (const cache_entry* e) {
+    return with_linearized_managed_bytes([this, rk = std::move(rk)] {
+        return _cache_store.with_entry_run(rk, [] (const cache_entry* e) {
             if (e) {
                 if (e->type_of_bytes()) {
-                    return reply_builder::build(out, e->value_bytes_size());
+                    return reply_builder::build(e->value_bytes_size());
                 }
-                return out.write(msg_type_err);
+                return reply_builder::build(msg_type_err);
             }
-            return out.write(msg_zero);
+            return reply_builder::build(msg_zero);
         });
    });
 }
@@ -135,95 +144,204 @@ int database::persist(redis_key&& rk)
     return REDIS_ERR;
 }
 
-std::pair<item_ptr, int> database::pop(redis_key&& rk, bool left)
+future<scattered_message_ptr> database::push(redis_key&& rk, sstring&& value, bool force, bool left)
 {
-    using result_type = std::pair<item_ptr, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {nullptr, REDIS_ERR};
-    }
-    else if(it->type() != REDIS_LIST) {
-        return result_type {nullptr, REDIS_WRONG_TYPE};
-    }
-    list* _list = it->list_ptr();
-    auto mit = left ? _list->pop_head() : _list->pop_tail();
-    if (_list->size() == 0) {
-        _store->remove(rk);
-    }
-    return result_type {std::move(mit), REDIS_OK};
+    return with_allocator(allocator(), [this, &rk, &value, force, left] () {
+        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), val = std::move(value), force, left] (cache_entry* o) {
+            auto e = o;
+            if (!e) {
+                 if (!force) {
+                     return reply_builder::build(msg_err);
+                 }
+                // create new list object
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::list_initializer());
+                _cache_store.insert(entry);
+                e = entry;
+            }
+            if (e->type_of_list() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& list = e->value_list();
+            left ? list.insert_head(val) : list.insert_tail(val);
+            return reply_builder::build(list.size());
+        });
+    });
 }
 
-std::pair<size_t, int> database::llen(redis_key&& rk)
+future<scattered_message_ptr> database::push_multi(redis_key&& rk, std::vector<sstring>&& values, bool force, bool left)
 {
-    using result_type = std::pair<size_t, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {0, REDIS_ERR};
-    }
-    else if (it->type() != REDIS_LIST) {
-        return result_type {0, REDIS_WRONG_TYPE};
-    }
-    list* _list = it->list_ptr();
-    return result_type {_list->size(), REDIS_OK};
+    return with_allocator(allocator(), [this, &rk, &values, force, left] () {
+        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), vals = std::move(values), force, left] (cache_entry* o) {
+            auto e = o;
+            if (!e) {
+                 if (!force) {
+                     return reply_builder::build(msg_err);
+                 }
+                // create new list object
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::list_initializer());
+                _cache_store.insert(entry);
+                e = entry;
+            }
+            if (e->type_of_list() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& list = e->value_list();
+            for (auto& val : vals) {
+                left ? list.insert_head(val) : list.insert_tail(val);
+            }
+            return reply_builder::build(list.size());
+        });
+    });
 }
 
-std::pair<item_ptr, int> database::lindex(redis_key&& rk, int idx)
+future<scattered_message_ptr> database::pop(redis_key&& rk, bool left)
 {
-    using result_type = std::pair<item_ptr, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {nullptr, REDIS_ERR};
-    }
-    else if (it->type() != REDIS_LIST) {
-        return result_type {nullptr, REDIS_WRONG_TYPE};
-    }
-    list* _list = it->list_ptr();
-    return result_type {std::move(_list->index(idx)), REDIS_OK};
+    return with_allocator(allocator(), [this, &rk, left] () {
+        return _cache_store.with_entry_run(rk, [rk = std::move(rk), left] (cache_entry* e) {
+            if (!e) {
+                return reply_builder::build(msg_err);
+            }
+            if (e->type_of_list() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            return with_linearized_managed_bytes([e, left] () {
+                auto& list = e->value_list();
+                if (left) {
+                   auto& front = list.front();
+                   auto reply = reply_builder::build(front);
+                   list.pop_front();
+                   return reply;
+                }
+                else {
+                   auto& back = list.back();
+                   auto reply = reply_builder::build(back);
+                   list.pop_back();
+                   return reply;
+                }
+            });
+        });
+    });
 }
 
-std::pair<std::vector<item_ptr>, int> database::lrange(redis_key&& rk, int start, int end)
+future<scattered_message_ptr> database::llen(redis_key&& rk)
 {
-    using result_type = std::pair<std::vector<item_ptr>, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {std::move(std::vector<item_ptr>()), REDIS_ERR};
-    }
-    else if (it->type() != REDIS_LIST) {
-        return result_type {std::move(std::vector<item_ptr>()), REDIS_WRONG_TYPE};
-    }
-    list* _list = it->list_ptr();
-    return result_type {std::move(_list->range(start, end)), REDIS_OK};
-}
-
-std::pair<size_t, int> database::lrem(redis_key&& rk, int count, sstring&& value)
-{
-    using result_type = std::pair<size_t, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {0, REDIS_ERR};
-    }
-    else if (it->type() != REDIS_LIST) {
-        return result_type {0, REDIS_WRONG_TYPE};
-    }
-    list* _list = it->list_ptr();
-    auto result = _list->trem(count, value);
-    if (_list->size() == 0) {
-        _store->remove(rk);
-    }
-    return result_type {result, REDIS_OK};
-}
-
-int database::ltrim(redis_key&& rk, int start, int end)
-{
-    auto it = _store->fetch_raw(rk);
-    if (it) {
-        if (it->type() != REDIS_LIST) {
-            return REDIS_WRONG_TYPE;
+    return _cache_store.with_entry_run(rk, [rk = std::move(rk)] (const cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_err);
         }
-        list* _list = it->list_ptr();
-        return _list->trim(start, end);
-    }
-    return REDIS_OK;
+        if (e->type_of_list() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& list = e->value_list();
+        return reply_builder::build(list.size());
+    });
+}
+
+future<scattered_message_ptr> database::lindex(redis_key&& rk, long idx)
+{
+    return _cache_store.with_entry_run(rk, [rk = std::move(rk), idx] (const cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_err);
+        }
+        if (e->type_of_list() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& list = e->value_list();
+        auto& result = list.at(idx);
+        return reply_builder::build(result);
+    });
+}
+
+future<scattered_message_ptr> database::lrange(redis_key&& rk, long start, long end)
+{
+    return _cache_store.with_entry_run(rk, [rk = std::move(rk), &start, &end] (const cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_err);
+        }
+        if (e->type_of_list() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& list = e->value_list();
+        if (start < 0) { start += static_cast<long>(list.size()); }
+        if (end < 0) { end += static_cast<long>(list.size()); }
+        if (start < 0) start = 0;
+        std::vector<const managed_bytes*> data;
+        if (start < end) {
+           for (auto i = start; i < end; ++i) {
+              const auto& b = list.at(static_cast<size_t>(i));
+              data.push_back(&b);
+           }
+        }
+        return reply_builder::build(data);
+    });
+}
+
+future<scattered_message_ptr> database::lrem(redis_key&& rk, int count, sstring&& value)
+{
+    return with_allocator(allocator(), [this, &rk, count, &value] {
+        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), val = std::move(value), &count] (cache_entry* e) {
+            if (!e) {
+                return reply_builder::build(msg_err);
+            }
+            if (e->type_of_list() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& list = e->value_list();
+            size_t removed = list.trem(val, count);
+            if (list.empty()) {
+                _cache_store.erase(rk);
+            }
+            return reply_builder::build(removed);
+        });
+    });
+}
+
+future<scattered_message_ptr> database::linsert(redis_key&& rk, sstring&& pivot, sstring&& value, bool after)
+{
+    return reply_builder::build(msg_ok);
+}
+
+future<scattered_message_ptr> database::lset(redis_key&& rk, long idx, sstring&& value)
+{
+    return with_allocator(allocator(), [this, &rk, idx, &value] {
+        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), idx, val = std::move(value)] (cache_entry* e) {
+            if (!e) {
+                return reply_builder::build(msg_err);
+            }
+            if (e->type_of_list() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& list = e->value_list();
+            if (!list.empty()) {
+                auto& old = list.at(idx);
+                current_allocator().destroy<managed_bytes>(&old);
+                auto entry = current_allocator().construct<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(val.data()), val.size()});
+                list.at(idx) = std::move(*entry);
+                return reply_builder::build(msg_ok);
+            }
+            return reply_builder::build(msg_type_err);
+        });
+    });
+}
+
+future<scattered_message_ptr> database::ltrim(redis_key&& rk, long start, long end)
+{
+    return with_allocator(allocator(), [this, &rk, start, end] {
+        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), start, end] (cache_entry* e) {
+            if (!e) {
+                return reply_builder::build(msg_err);
+            }
+            if (e->type_of_list() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& list = e->value_list();
+            size_t removed = list.trim(start, end);
+            if (list.empty()) {
+                _cache_store.erase(rk);
+            }
+            return reply_builder::build(removed);
+        });
+    });
 }
 
 std::pair<item_ptr, int> database::hget(redis_key&& rk, sstring&& field)

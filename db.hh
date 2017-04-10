@@ -14,7 +14,7 @@
 * KIND, either express or implied.  See the License for the
 * specific language governing permissions and limitations
 * under the License.
-* 
+*
 *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
@@ -39,7 +39,7 @@ namespace redis {
 
 namespace stdx = std::experimental;
 using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
-
+using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
 struct remote_origin_tag {
     template <typename T>
     static inline
@@ -61,14 +61,7 @@ public:
     database();
     ~database();
 
-    int set(redis_key&& rk, sstring&& val, long expire, uint32_t flag)
-    {
-        return with_allocator(allocator(), [this, &rk, &val] {
-            auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
-            _cache_store.replace(entry);
-            return REDIS_OK;
-        });
-    }
+    bool set(redis_key&& rk, sstring&& val, long expire, uint32_t flag);
 
     template  <typename origin = local_origin_tag> inline
     std::pair<int64_t, int> counter_by(redis_key&& rk, int64_t step, bool incr)
@@ -91,86 +84,30 @@ public:
         }
     }
 
-    future<> append(redis_key&& rk, sstring&& val, output_stream<char>& out);
+    future<scattered_message_ptr> append(redis_key&& rk, sstring&& val);
 
     bool del(redis_key&& key);
 
     bool exists(redis_key&& key);
 
-    future<> get(redis_key&& key, output_stream<char>& out);
+    future<scattered_message_ptr> get(redis_key&& key);
 
-    future<> strlen(redis_key&& key, output_stream<char>& out);
+    future<scattered_message_ptr> strlen(redis_key&& key);
 
     int expire(redis_key&& rk, long expired);
     int persist(redis_key&& rk);
 
-    template <typename origin = local_origin_tag> inline
-    std::pair<size_t, int> push(redis_key&& rk, sstring&& value, bool force, bool left)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (it && it->type() != REDIS_LIST) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        list* _list = nullptr;
-        if (!it) {
-            if (!force) {
-                return result_type {0, REDIS_ERR};
-            }
-            _list = new list();
-            auto list_item = item::create(rk, _list);
-            if (_store->set(rk, list_item) != REDIS_OK) {
-                return result_type {0, REDIS_ERR};
-            }
-        }
-        else {
-            _list = it->list_ptr();
-        }
-        auto new_item = item::create(origin::move_if_local(value));
-        if ((left ? _list->add_head(new_item) : _list->add_tail(new_item)) != REDIS_OK) {
-            return result_type {0, REDIS_ERR};
-        }
-        return result_type {_list->size(), REDIS_OK};
-    }
+    future<scattered_message_ptr> push(redis_key&& rk, sstring&& value, bool force, bool left);
+    future<scattered_message_ptr> push_multi(redis_key&& rk, std::vector<sstring>&& value, bool force, bool left);
+    future<scattered_message_ptr> pop(redis_key&& rk, bool left);
+    future<scattered_message_ptr> llen(redis_key&& rk);
+    future<scattered_message_ptr> lindex(redis_key&& rk, long idx);
+    future<scattered_message_ptr> linsert(redis_key&& rk, sstring&& pivot, sstring&& value, bool after);
+    future<scattered_message_ptr> lrange(redis_key&& rk, long start, long end);
+    future<scattered_message_ptr> lset(redis_key&& rk, long idx, sstring&& value);
+    future<scattered_message_ptr> lrem(redis_key&& rk, int count, sstring&& value);
+    future<scattered_message_ptr> ltrim(redis_key&& rk, long start, long end);
 
-    std::pair<item_ptr, int> pop(redis_key&& rk, bool left);
-    std::pair<size_t, int> llen(redis_key&& rk);
-    std::pair<item_ptr, int> lindex(redis_key&& rk, int idx);
-    template <typename origin = local_origin_tag> inline
-    int linsert(redis_key&& rk, sstring&& pivot, sstring&& value, bool after)
-    {
-        auto it = _store->fetch_raw(rk);
-        if (it) {
-            if (it->type() != REDIS_LIST) {
-                return REDIS_WRONG_TYPE;
-            }
-            list* _list = it->list_ptr();
-            auto new_item = item::create(origin::move_if_local(value));
-            return (after ? _list->insert_after(pivot, new_item) : _list->insert_before(pivot, new_item));
-        }
-        return REDIS_ERR;
-    }
-
-    std::pair<std::vector<item_ptr>, int> lrange(redis_key&& rk, int start, int end);
-    template <typename origin = local_origin_tag> inline
-    int lset(redis_key&& rk, int idx, sstring&& value)
-    {
-        auto it = _store->fetch_raw(rk);
-        if (it && it->type() != REDIS_LIST) {
-            return REDIS_WRONG_TYPE;
-        }
-        if (it) {
-            list* _list = it->list_ptr();
-            auto new_item = item::create(origin::move_if_local(value));
-            if (_list->set(idx, new_item) == REDIS_OK) {
-                return REDIS_OK;
-            }
-        }
-        return REDIS_ERR;
-    }
-
-    std::pair<size_t, int> lrem(redis_key&& rk, int count, sstring&& value);
-    int ltrim(redis_key&& rk, int start, int end);
     template <typename origin = local_origin_tag> inline
     int hset(redis_key&& rk, sstring&& field, sstring&& value)
     {

@@ -84,57 +84,31 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                 case redis_protocol_parser::command::strlen:
                     return _redis.strlen(_command_args, std::ref(out));
                 case redis_protocol_parser::command::lpush:
-                    return _redis.lpush(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.lpush(_command_args, std::ref(out));
                 case redis_protocol_parser::command::lpushx:
-                    return _redis.lpushx(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.lpushx(_command_args, std::ref(out));
                 case redis_protocol_parser::command::lpop:
-                    return _redis.lpop(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.lpop(_command_args, std::ref(out));
                 case redis_protocol_parser::command::llen:
-                    return _redis.llen(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.llen(_command_args, std::ref(out));
                 case redis_protocol_parser::command::lindex:
-                    return _redis.lindex(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.lindex(_command_args, std::ref(out));
                 case redis_protocol_parser::command::linsert:
-                    return _redis.linsert(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.linsert(_command_args, std::ref(out));
                 case redis_protocol_parser::command::lrange:
-                    return _redis.lrange(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.lrange(_command_args, std::ref(out));
                 case redis_protocol_parser::command::lset:
-                    return _redis.lset(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.lset(_command_args, std::ref(out));
                 case redis_protocol_parser::command::rpush:
-                    return _redis.rpush(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.rpush(_command_args, std::ref(out));
                 case redis_protocol_parser::command::rpushx:
-                    return _redis.rpushx(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.rpushx(_command_args, std::ref(out));
                 case redis_protocol_parser::command::rpop:
-                    return _redis.rpop(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.rpop(_command_args, std::ref(out));
                 case redis_protocol_parser::command::lrem:
-                    return _redis.lrem(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.lrem(_command_args, std::ref(out));
                 case redis_protocol_parser::command::ltrim:
-                    return _redis.ltrim(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.ltrim(_command_args, std::ref(out));
                 case redis_protocol_parser::command::hset:
                     return _redis.hset(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));

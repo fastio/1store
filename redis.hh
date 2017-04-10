@@ -14,7 +14,7 @@
 * KIND, either express or implied.  See the License for the
 * specific language governing permissions and limitations
 * under the License.
-* 
+*
 *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
@@ -85,19 +85,19 @@ public:
     future<> mget(args_collection& args, output_stream<char>& out);
 
     // [LIST APIs]
-    future<message> lpush(args_collection& arg);
-    future<message> lpushx(args_collection& args);
-    future<message> rpush(args_collection& arg);
-    future<message> rpushx(args_collection& args);
-    future<message> lpop(args_collection& args);
-    future<message> rpop(args_collection& args);
-    future<message> llen(args_collection& args);
-    future<message> lindex(args_collection& args);
-    future<message> linsert(args_collection& args);
-    future<message> lset(args_collection& args);
-    future<message> lrange(args_collection& args);
-    future<message> ltrim(args_collection& args);
-    future<message> lrem(args_collection& args);
+    future<> lpush(args_collection& arg, output_stream<char>& out);
+    future<> lpushx(args_collection& args, output_stream<char>& out);
+    future<> rpush(args_collection& arg, output_stream<char>& out);
+    future<> rpushx(args_collection& args, output_stream<char>& out);
+    future<> lpop(args_collection& args, output_stream<char>& out);
+    future<> rpop(args_collection& args, output_stream<char>& out);
+    future<> llen(args_collection& args, output_stream<char>& out);
+    future<> lindex(args_collection& args, output_stream<char>& out);
+    future<> linsert(args_collection& args, output_stream<char>& out);
+    future<> lset(args_collection& args, output_stream<char>& out);
+    future<> lrange(args_collection& args, output_stream<char>& out);
+    future<> ltrim(args_collection& args, output_stream<char>& out);
+    future<> lrem(args_collection& args, output_stream<char>& out);
 
     // [HASH APIs]
     future<message> hdel(args_collection& args);
@@ -181,10 +181,11 @@ private:
     future<std::vector<item_ptr>> sinter_impl(std::vector<sstring>&& keys);
     future<std::vector<item_ptr>> sunion_impl(std::vector<sstring>&& keys);
     future<std::pair<std::vector<item_ptr>, int>> smembers_impl(sstring& key);
-    future<message> pop_impl(args_collection& args, bool left);
-    future<message> push_impl(args_collection& arg, bool force, bool left);
-    future<std::pair<size_t, int>> push_impl(sstring& key, sstring& value, bool force, bool left);
-    future<int> set_impl(sstring& key, sstring& value, long expir, uint8_t flag);
+    future<> pop_impl(args_collection& args, bool left, output_stream<char>& out);
+    future<> push_impl(args_collection& arg, bool force, bool left, output_stream<char>& out);
+    future<> push_impl(sstring& key, sstring& value, bool force, bool left, output_stream<char>& out);
+    future<> push_impl(sstring& key, std::vector<sstring>& vals, bool force, bool left, output_stream<char>& out);
+    future<bool> set_impl(sstring& key, sstring& value, long expir, uint8_t flag);
     future<item_ptr> get_impl(sstring& key);
     future<bool> remove_impl(sstring& key);
     future<int> hdel_impl(sstring& key, sstring& field);

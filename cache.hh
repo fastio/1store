@@ -194,6 +194,12 @@ public:
     inline managed_bytes& value_bytes() {
         return _storage._bytes;
     }
+    inline list_lsa& value_list() {
+        return *(_storage._list);
+    }
+    inline const list_lsa& value_list() const {
+        return *(_storage._list);
+    }
 };
 
 static constexpr const size_t DEFAULT_INITIAL_SIZE = 1 << 20;
