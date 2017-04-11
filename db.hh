@@ -28,7 +28,6 @@
 #include <iostream>
 #include "common.hh"
 #include "dict.hh"
-#include "list.hh"
 #include "sorted_set.hh"
 #include "redis_timer_set.hh"
 #include "geo.hh"
@@ -105,7 +104,7 @@ public:
     future<scattered_message_ptr> linsert(redis_key&& rk, sstring&& pivot, sstring&& value, bool after);
     future<scattered_message_ptr> lrange(redis_key&& rk, long start, long end);
     future<scattered_message_ptr> lset(redis_key&& rk, long idx, sstring&& value);
-    future<scattered_message_ptr> lrem(redis_key&& rk, int count, sstring&& value);
+    future<scattered_message_ptr> lrem(redis_key&& rk, long count, sstring&& value);
     future<scattered_message_ptr> ltrim(redis_key&& rk, long start, long end);
 
     template <typename origin = local_origin_tag> inline
@@ -404,6 +403,13 @@ public:
 private:
     georadius_result_type georadius(sorted_set* zset, double longtitude, double latitude, double radius, size_t count, int flag);
     void expired_items();
+    static inline long alignment_index_base_on(size_t size, long index)
+    {
+        if (index < 0) {
+            index += size;
+        }
+        return index;
+    }
 private:
     static const int DEFAULT_DB_COUNT = 32;
     dict* _store = nullptr;
