@@ -75,36 +75,29 @@ public:
 
     inline void insert_at(size_t index, const sstring& data)
     {
-        assert(index < _list.size());
         bytes_view v {reinterpret_cast<const signed char*>(data.data()), data.size()};
         auto entry = current_allocator().construct<internal_node>(v);
-        const_iterator p = iterator_to(index);
+        auto p = _list.begin();
+        for (size_t i = 0; i < index && p != _list.end(); ++i, ++p) {}
         _list.insert(p, *entry);
     }
 
-    inline size_t index_of(const std::string& pivot)
+    inline const managed_bytes& at(long index) const
     {
-        size_t result = _list.size();
-        for (auto i = _list.begin(); i != _list.end(); ++i, --result) {
-            if (equal(pivot, *i)) {
-                return _list.size() - result;
-            }
-        }
-        return result;
+        while (index < 0) index += static_cast<long>(_list.size());
+        while (index > static_cast<long>(_list.size())) index -= static_cast<long>(_list.size()); 
+        auto p = _list.begin();
+        for (size_t i = 0; i < static_cast<size_t>(index) && p != _list.end(); ++i, ++p) {}
+        return p->_data;
     }
 
-    inline const managed_bytes& at(size_t index) const
+    inline managed_bytes& at(long index)
     {
-        assert(index < _list.size());
-        auto i = iterator_to(index);
-        return i->_data;
-    }
-
-    inline managed_bytes& at(size_t index)
-    {
-        assert(index < _list.size());
-        iterator i = iterator_to(index);
-        return i->_data;
+        while (index < 0) index += static_cast<long>(_list.size());
+        while (index > static_cast<long>(_list.size())) index -= static_cast<long>(_list.size()); 
+        auto p = _list.begin();
+        for (size_t i = 0; i < static_cast<size_t>(index) && p != _list.end(); ++i, ++p) {}
+        return p->_data;
     }
 
     // Returns a reference to the data of first element of the list.
@@ -147,50 +140,46 @@ public:
     // Erase the elements from the list.
     inline void erase(const sstring& data)
     {
-        trem<false, true>(data, size_t{1});
+        trem(data, 1);
     }
 
-    template<bool RemoveAllEqual, bool FromHeadToTail>
     inline size_t trem(const std::string& data, size_t count)
     {
         size_t erased = 0;
-        if (FromHeadToTail) {
-            for (auto it = _list.begin(); it != _list.end(); ++it) {
-                if (equal(*it, data)) {
-                    ++erased;
-                    const_iterator eit = it;
-                    ++it;
-                    _list.erase_and_dispose(eit, current_deleter<internal_node>());
-                    if (!RemoveAllEqual && erased == count) {
-                        break;
-                    }
-                }
-            }
-        }
-        else {
-            for (auto it = _list.rbegin(); it != _list.rend(); ++it) {
-                if (equal(*it, data)) {
-                    ++erased;
-                    auto& entry = *it;
-                    ++it;
-                    _list.remove_and_dispose(entry, current_deleter<internal_node>());
-                    if (!RemoveAllEqual && erased == count) {
-                        break;
-                    }
+        for (auto it = _list.begin(); it != _list.end(); ++it) {
+            if (equal(*it, data)) {
+                ++erased;
+                const_iterator eit = it;
+                ++it;
+                _list.erase_and_dispose(eit, current_deleter<internal_node>());
+                if (erased == count) {
+                    break;
                 }
             }
         }
         return erased;
     }
-    inline bool trim(size_t start, size_t end)
+    inline bool trim(long start, long end)
     {
-        auto i = iterator_to(start);
-        for (auto it = _list.begin(); it != i; ++it) {
-            _list.erase_and_dispose(it, current_deleter<internal_node>());
+        long lr = 0, rr = 0;
+        if (start < 0) start += static_cast<long>(_list.size());
+        if (end < 0) end += static_cast<long>(_list.size());
+
+        if (end < 0)
+            return false;
+
+        if (start < 0) start = 0;
+        if (start > end || start >= static_cast<int>(_list.size())) {
+            lr = _list.size(); // all nodes were removed
+            rr = 0;
         }
-        for (auto it = iterator_to(end); it != _list.end(); ++it) {
-            _list.erase_and_dispose(it, current_deleter<internal_node>());
+        else {
+            if (end > static_cast<long>(_list.size())) end = _list.size() - 1;
+            lr = start;
+            rr = static_cast<long>(_list.size()) - end - 1;
         }
+        remove_by_range(0, lr);
+        remove_by_range(-rr, rr);
         return true;
     }
     // Erases all the elements of the list. Destructors are called.
@@ -208,12 +197,18 @@ public:
             reduce_fn(start_it);
         }
     }
-
-    bool index_out_of_range(long index) const
-    {
-        return index < 0 || static_cast<size_t>(index) > _list.size();
-    }
 private:
+    void remove_by_range(long start, long count)
+    {
+        if (count > 0) {
+            while (start < 0) start += static_cast<long>(_list.size());
+            size_t eidx = static_cast<size_t>(start + count);
+            if (eidx > _list.size()) eidx = _list.size() - 1;
+            auto s = iterator_to(static_cast<size_t>(start));
+            auto e = iterator_to(eidx);
+            _list.erase_and_dispose(s, e, current_deleter<internal_node>());
+        }
+    }
     const_iterator iterator_to(size_t index) const
     {
         auto i = _list.begin();

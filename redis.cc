@@ -342,32 +342,32 @@ future<> redis_service::push_impl(args_collection& args, bool force, bool left, 
 
 future<> redis_service::lpush(args_collection& args, output_stream<char>& out)
 {
-    return push_impl(args, true, false, out);
+    return push_impl(args, true, true, out);
 }
 
 future<> redis_service::lpushx(args_collection& args, output_stream<char>& out)
 {
-    return push_impl(args, false, false, out);
+    return push_impl(args, false, true, out);
 }
 
 future<> redis_service::rpush(args_collection& args, output_stream<char>& out)
 {
-    return push_impl(args, true, true, out);
+    return push_impl(args, true, false, out);
 }
 
 future<> redis_service::rpushx(args_collection& args, output_stream<char>& out)
 {
-    return push_impl(args, false, true, out);
+    return push_impl(args, false, false, out);
 }
 
 future<> redis_service::lpop(args_collection& args, output_stream<char>& out)
 {
-    return pop_impl(args, false, out);
+    return pop_impl(args, true, out);
 }
 
 future<> redis_service::rpop(args_collection& args, output_stream<char>& out)
 {
-    return pop_impl(args, true, out);
+    return pop_impl(args, false, out);
 }
 
 future<> redis_service::pop_impl(args_collection& args, bool left, output_stream<char>& out)

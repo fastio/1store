@@ -133,7 +133,6 @@ static future<scattered_message_ptr> build(const std::vector<const managed_bytes
 static future<scattered_message_ptr> build(const managed_bytes& data)
 {
     auto m = make_lw_shared<scattered_message<char>>();
-    m->append_static(msg_batch_tag);
     m->append(to_sstring(data.size()));
     m->append_static(msg_crlf);
     m->append(sstring{reinterpret_cast<const char*>(data.data()), data.size()});

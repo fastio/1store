@@ -197,22 +197,27 @@ future<scattered_message_ptr> database::push_multi(redis_key&& rk, std::vector<s
 future<scattered_message_ptr> database::pop(redis_key&& rk, bool left)
 {
     return with_allocator(allocator(), [this, &rk, left] () {
-        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), left] (cache_entry* e) {
+        return _cache_store.with_entry_run(rk, [rk = std::move(rk), left] (cache_entry* e) {
             if (!e) {
-                return reply_builder::build(msg_nil);
+                return reply_builder::build(msg_err);
             }
             if (e->type_of_list() == false) {
                 return reply_builder::build(msg_type_err);
             }
-            return with_linearized_managed_bytes([this, &rk, e, left] () {
+            return with_linearized_managed_bytes([e, left] () {
                 auto& list = e->value_list();
-                assert(!list.empty());
-                auto reply = reply_builder::build(left ? list.front() : list.back());
-                left ? list.pop_front() : list.pop_back();
-                if (list.empty()) {
-                   _cache_store.erase(rk);
+                if (left) {
+                   auto& front = list.front();
+                   auto reply = reply_builder::build(front);
+                   list.pop_front();
+                   return reply;
                 }
-                return reply;
+                else {
+                   auto& back = list.back();
+                   auto reply = reply_builder::build(back);
+                   list.pop_back();
+                   return reply;
+                }
             });
         });
     });
@@ -222,7 +227,7 @@ future<scattered_message_ptr> database::llen(redis_key&& rk)
 {
     return _cache_store.with_entry_run(rk, [rk = std::move(rk)] (const cache_entry* e) {
         if (!e) {
-            return reply_builder::build(msg_zero);
+            return reply_builder::build(msg_err);
         }
         if (e->type_of_list() == false) {
             return reply_builder::build(msg_type_err);
@@ -236,17 +241,13 @@ future<scattered_message_ptr> database::lindex(redis_key&& rk, long idx)
 {
     return _cache_store.with_entry_run(rk, [rk = std::move(rk), idx] (const cache_entry* e) {
         if (!e) {
-            return reply_builder::build(msg_nil);
+            return reply_builder::build(msg_err);
         }
         if (e->type_of_list() == false) {
             return reply_builder::build(msg_type_err);
         }
         auto& list = e->value_list();
-        auto index = alignment_index_base_on(list.size(), idx);
-        if (list.index_out_of_range(index)) {
-            return reply_builder::build(msg_nil);
-        }
-        auto& result = list.at(static_cast<size_t>(index));
+        auto& result = list.at(idx);
         return reply_builder::build(result);
     });
 }
@@ -261,10 +262,9 @@ future<scattered_message_ptr> database::lrange(redis_key&& rk, long start, long 
             return reply_builder::build(msg_type_err);
         }
         auto& list = e->value_list();
-        start = database::alignment_index_base_on(list.size(), start);
-        end = database::alignment_index_base_on(list.size(), end);
+        if (start < 0) { start += static_cast<long>(list.size()); }
+        if (end < 0) { end += static_cast<long>(list.size()); }
         if (start < 0) start = 0;
-        if (end >= static_cast<long>(list.size())) end = static_cast<size_t>(list.size()) - 1;
         std::vector<const managed_bytes*> data;
         if (start < end) {
            for (auto i = start; i < end; ++i) {
@@ -276,7 +276,7 @@ future<scattered_message_ptr> database::lrange(redis_key&& rk, long start, long 
     });
 }
 
-future<scattered_message_ptr> database::lrem(redis_key&& rk, long count, sstring&& value)
+future<scattered_message_ptr> database::lrem(redis_key&& rk, int count, sstring&& value)
 {
     return with_allocator(allocator(), [this, &rk, count, &value] {
         return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), val = std::move(value), &count] (cache_entry* e) {
@@ -287,10 +287,7 @@ future<scattered_message_ptr> database::lrem(redis_key&& rk, long count, sstring
                 return reply_builder::build(msg_type_err);
             }
             auto& list = e->value_list();
-            size_t removed = 0;
-            if (count == 0) removed = list.trem<true, true>(val, count);
-            else if (count > 0) removed = list.trem<false, true>(val, count);
-            else removed = list.trem<false, false>(val, count);
+            size_t removed = list.trem(val, count);
             if (list.empty()) {
                 _cache_store.erase(rk);
             }
@@ -301,30 +298,7 @@ future<scattered_message_ptr> database::lrem(redis_key&& rk, long count, sstring
 
 future<scattered_message_ptr> database::linsert(redis_key&& rk, sstring&& pivot, sstring&& value, bool after)
 {
-    return with_allocator(allocator(), [this, &rk, &pivot, &value, after] {
-        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), val = std::move(value), pivot = std::move(pivot), after] (cache_entry* e) {
-            if (!e) {
-                return reply_builder::build(msg_zero);
-            }
-            if (e->type_of_list() == false) {
-                return reply_builder::build(msg_type_err);
-            }
-            auto& list = e->value_list();
-            auto index = list.index_of(pivot);
-            if (list.index_out_of_range(index)) {
-                return reply_builder::build(msg_zero);
-            }
-            if (after) {
-                if (index == list.size()) list.insert_tail(val);
-                else  list.insert_at(++index, val);
-            }
-            else {
-               if (index == 0) list.insert_head(val);
-               else list.insert_at(--index, val);
-            }
-            return reply_builder::build(msg_one);
-        });
-    });
+    return reply_builder::build(msg_ok);
 }
 
 future<scattered_message_ptr> database::lset(redis_key&& rk, long idx, sstring&& value)
@@ -332,21 +306,20 @@ future<scattered_message_ptr> database::lset(redis_key&& rk, long idx, sstring&&
     return with_allocator(allocator(), [this, &rk, idx, &value] {
         return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), idx, val = std::move(value)] (cache_entry* e) {
             if (!e) {
-                return reply_builder::build(msg_nokey_err);
+                return reply_builder::build(msg_err);
             }
             if (e->type_of_list() == false) {
                 return reply_builder::build(msg_type_err);
             }
             auto& list = e->value_list();
-            auto nidx = database::alignment_index_base_on(list.size(), idx);
-            if (list.index_out_of_range(nidx)) {
-                return reply_builder::build(msg_out_of_range_err);
+            if (!list.empty()) {
+                auto& old = list.at(idx);
+                current_allocator().destroy<managed_bytes>(&old);
+                auto entry = current_allocator().construct<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(val.data()), val.size()});
+                list.at(idx) = std::move(*entry);
+                return reply_builder::build(msg_ok);
             }
-            auto& old = list.at(static_cast<size_t>(nidx));
-            current_allocator().destroy<managed_bytes>(&old);
-            auto entry = current_allocator().construct<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(val.data()), val.size()});
-            list.at(idx) = std::move(*entry);
-            return reply_builder::build(msg_ok);
+            return reply_builder::build(msg_type_err);
         });
     });
 }
@@ -356,23 +329,17 @@ future<scattered_message_ptr> database::ltrim(redis_key&& rk, long start, long e
     return with_allocator(allocator(), [this, &rk, start, end] {
         return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), start, end] (cache_entry* e) {
             if (!e) {
-                return reply_builder::build(msg_ok);
+                return reply_builder::build(msg_err);
             }
             if (e->type_of_list() == false) {
                 return reply_builder::build(msg_type_err);
             }
             auto& list = e->value_list();
-            auto nstart = database::alignment_index_base_on(list.size(), start);
-            if (nstart < 0) nstart = 0;
-            auto nend = database::alignment_index_base_on(list.size(), end);
-            if (nstart > nend || nstart > static_cast<long>(list.size()) || nend < 0) {
-                list.clear();
-            }
-            list.trim(static_cast<size_t>(nstart), static_cast<size_t>(nend));
+            size_t removed = list.trim(start, end);
             if (list.empty()) {
                 _cache_store.erase(rk);
             }
-            return reply_builder::build(msg_ok);
+            return reply_builder::build(removed);
         });
     });
 }
