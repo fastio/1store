@@ -31,6 +31,7 @@
 #include "utils/allocation_strategy.hh"
 #include "utils/logalloc.hh"
 #include "list_lsa.hh"
+#include "dict_lsa.hh"
 #include "core/sstring.hh"
 namespace redis {
 namespace bi = boost::intrusive;
@@ -49,6 +50,8 @@ protected:
         ENTRY_INT64 = 1,
         ENTRY_BYTES = 2,
         ENTRY_LIST  = 3,
+        ENTRY_MAP   = 4,
+        ENTRY_SET   = 5,
     };
     entry_type _type;
     managed_bytes _key;
@@ -58,6 +61,7 @@ protected:
         int64_t _integer_number;
         managed_bytes _bytes;
         managed_ref<list_lsa> _list;
+        managed_ref<dict_lsa> _dict;
         storage() {}
         ~storage() {}
     } _storage;
@@ -95,6 +99,14 @@ public:
     {
         _storage._list = make_managed<list_lsa>();
     }
+
+    struct dict_initializer {};
+    cache_entry(const sstring& key, size_t hash, dict_initializer) noexcept
+        : cache_entry(key, hash, entry_type::ENTRY_MAP)
+    {
+        _storage._dict = make_managed<dict_lsa>();
+    }
+
     cache_entry(cache_entry&& o) noexcept
         : _cache_link(std::move(o._cache_link))
         , _type(o._type)
@@ -113,6 +125,10 @@ public:
                 break;
             case entry_type::ENTRY_LIST:
                 _storage._list = std::move(o._storage._list);
+                break;
+            case entry_type::ENTRY_MAP:
+            case entry_type::ENTRY_SET:
+                _storage._dict = std::move(o._storage._dict);
                 break;
         }
     }
@@ -183,6 +199,9 @@ public:
     {
         return _type == entry_type::ENTRY_LIST;
     }
+    inline bool type_of_map() const {
+        return _type == entry_type::ENTRY_MAP;
+    }
     inline int64_t value_integer() const
     {
         return _storage._integer_number;
@@ -194,11 +213,20 @@ public:
     inline managed_bytes& value_bytes() {
         return _storage._bytes;
     }
+    inline const managed_bytes& value_bytes() const {
+        return _storage._bytes;
+    }
     inline list_lsa& value_list() {
         return *(_storage._list);
     }
     inline const list_lsa& value_list() const {
         return *(_storage._list);
+    }
+    inline dict_lsa& value_map() {
+        return *(_storage._dict);
+    }
+    inline const dict_lsa& value_map() const {
+        return *(_storage._dict);
     }
 };
 

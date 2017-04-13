@@ -19,7 +19,6 @@
 *
 */
 #include "db.hh"
-#include "reply_builder.hh"
 namespace redis {
 database::database()
 {
@@ -147,7 +146,7 @@ int database::persist(redis_key&& rk)
 future<scattered_message_ptr> database::push(redis_key&& rk, sstring&& value, bool force, bool left)
 {
     return with_allocator(allocator(), [this, &rk, &value, force, left] () {
-        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), val = std::move(value), force, left] (cache_entry* o) {
+        return _cache_store.with_entry_run(rk, [this, &rk, val = std::move(value), force, left] (cache_entry* o) {
             auto e = o;
             if (!e) {
                  if (!force) {
@@ -377,111 +376,265 @@ future<scattered_message_ptr> database::ltrim(redis_key&& rk, long start, long e
     });
 }
 
-std::pair<item_ptr, int> database::hget(redis_key&& rk, sstring&& field)
+future<scattered_message_ptr> database::hset(redis_key&& rk, sstring&& field, sstring&& value)
 {
-    using result_type = std::pair<item_ptr, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {nullptr, REDIS_ERR};
-    }
-    else if (it->type() != REDIS_DICT) {
-        return result_type {nullptr, REDIS_WRONG_TYPE};
-    }
-    auto _dict = it->dict_ptr();
-    redis_key field_key {std::move(field)};
-    return result_type {_dict->fetch(field_key), REDIS_OK};
+    return with_allocator(allocator(), [this, &rk, &field, &value] {
+        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), key = std::move(field), val = std::move(value)] (cache_entry* o) {
+            auto e = o;
+            if (!e) {
+                // the rk was not exists, then create it.
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::dict_initializer());
+                _cache_store.insert(entry);
+                e = entry;
+            }
+            if (e->type_of_map() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& map = e->value_map();
+            bool exists = map.exists(key);
+            auto entry = current_allocator().construct<dict_entry>(key, val);
+            map.insert(entry);
+            return reply_builder::build(exists ? msg_zero : msg_one);
+        });
+    });
 }
 
-int database::hdel(redis_key&& rk, sstring&& field)
+future<scattered_message_ptr> database::hincrby(redis_key&& rk, sstring&& key, int64_t delta)
 {
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return REDIS_ERR;
-    }
-    else if (it->type() != REDIS_DICT) {
-        return REDIS_WRONG_TYPE;
-    }
-    auto _dict = it->dict_ptr();
-    redis_key field_key {std::move(field)};
-    auto result = _dict->remove(field_key);
-    if (_dict->size() == 0) {
-        _store->remove(rk);
-    }
-    return result;
+    return with_allocator(allocator(), [this, &rk, &key, delta] {
+        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), key = std::move(key), delta] (cache_entry* o) {
+            auto e = o;
+            if (!e) {
+                // the rk was not exists, then create it.
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::dict_initializer());
+                _cache_store.insert(entry);
+                e = entry;
+            }
+            if (e->type_of_map() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& map = e->value_map();
+            return map.with_entry_run(key, [&map, &key, delta] (dict_entry* d) {
+                if (!d) {
+                    auto entry = current_allocator().construct<dict_entry>(key, delta);
+                    map.insert(entry);
+                    return reply_builder::build<false, true>(entry);
+                }
+                if (!d->type_of_integer()) {
+                    return reply_builder::build(msg_not_integer_err);
+                }
+                d->value_integer_incr(delta);
+                return reply_builder::build<false, true>(d);
+            });
+        });
+    });
 }
 
-int database::hexists(redis_key&& rk, sstring&& field)
+future<scattered_message_ptr> database::hincrbyfloat(redis_key&& rk, sstring&& key, double delta)
 {
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return REDIS_ERR;
-    }
-    else if (it->type() != REDIS_DICT) {
-        return REDIS_WRONG_TYPE;
-    }
-    auto _dict = it->dict_ptr();
-    redis_key field_key {std::move(field)};
-    return _dict->exists(field_key);
+    return with_allocator(allocator(), [this, &rk, &key, delta] {
+        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), key = std::move(key), delta] (cache_entry* o) {
+            auto e = o;
+            if (!e) {
+                // the rk was not exists, then create it.
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::dict_initializer());
+                _cache_store.insert(entry);
+                e = entry;
+            }
+            if (e->type_of_map() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& map = e->value_map();
+            return map.with_entry_run(key, [&map, &key, delta] (dict_entry* d) {
+                if (!d) {
+                    auto entry = current_allocator().construct<dict_entry>(key, delta);
+                    map.insert(entry);
+                    return reply_builder::build<false, true>(entry);
+                }
+                if (!d->type_of_float()) {
+                    return reply_builder::build(msg_not_float_err);
+                }
+                d->value_float_incr(delta);
+                return reply_builder::build<false, true>(d);
+            });
+        });
+    });
 }
 
-std::pair<size_t, int> database::hstrlen(redis_key&& rk, sstring&& field)
+future<scattered_message_ptr> database::hmset(redis_key&& rk, std::unordered_map<sstring, sstring>&& kvs)
 {
-    using result_type = std::pair<size_t, int>;
-    auto it = _store->fetch_raw(rk);
-
-    if (!it) {
-        return result_type {0, REDIS_ERR};
-    }
-    else if (it->type() != REDIS_DICT) {
-        return result_type {0, REDIS_WRONG_TYPE};
-    }
-    auto _dict = it->dict_ptr();
-    redis_key field_key {std::move(field)};
-    auto mit = _dict->fetch(field_key);
-    return result_type {mit->value_size(), REDIS_OK};
+    return with_allocator(allocator(), [this, &rk, &kvs] {
+        return _cache_store.with_entry_run(rk, [this, &rk, kvs = std::move(kvs)] (cache_entry* o) {
+            auto e = o;
+            if (!e) {
+                // the rk was not exists, then create it.
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::dict_initializer());
+                _cache_store.insert(entry);
+                e = entry;
+            }
+            if (e->type_of_map() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& map = e->value_map();
+            bool result = false;
+            for (auto& kv : kvs) {
+               auto entry = current_allocator().construct<dict_entry>(kv.first, kv.second);
+               result = map.insert(entry);
+               if (!result) break;
+            }
+            return reply_builder::build(result ? msg_ok : msg_err);
+        });
+    });
 }
 
-std::pair<size_t, int> database::hlen(redis_key&& rk)
+future<scattered_message_ptr> database::hget(redis_key&& rk, sstring&& field)
 {
-    using result_type = std::pair<size_t, int>;
-    auto it = _store->fetch_raw(rk);
-
-    if (!it) {
-        return result_type {0, REDIS_ERR};
-    }
-    else if (it->type() != REDIS_DICT) {
-        return result_type {0, REDIS_WRONG_TYPE};
-    }
-    auto _dict = it->dict_ptr();
-    return result_type {_dict->size(), REDIS_OK};
+    return _cache_store.with_entry_run(rk, [this, key = std::move(field)] (cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_err);
+        }
+        if (e->type_of_map() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& map = e->value_map();
+        return map.with_entry_run(key, [] (const dict_entry* d) {
+            return with_linearized_managed_bytes([d] {
+                return reply_builder::build<false, true>(d);
+            });
+        });
+    });
 }
 
-std::pair<std::vector<item_ptr>, int> database::hgetall(redis_key&& rk)
+future<scattered_message_ptr> database::hdel_multi(redis_key&& rk, std::vector<sstring>&& keys)
 {
-    using result_type = std::pair<std::vector<item_ptr>, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {std::move(std::vector<item_ptr>()), REDIS_ERR};
-    }
-    else if (it->type() != REDIS_DICT) {
-        return result_type {std::move(std::vector<item_ptr>()), REDIS_WRONG_TYPE};
-    }
-    auto dict = it->dict_ptr();
-    return result_type {std::move(dict->fetch()), REDIS_OK};
+    return with_allocator(allocator(), [this, &rk, &keys] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &keys] (cache_entry* e) {
+            if (!e) {
+                return reply_builder::build(msg_zero);
+            }
+            if (e->type_of_map() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& map = e->value_map();
+            size_t removed = 0;
+            for (auto& key : keys) {
+                if (map.erase(key)) {
+                    ++ removed;
+                }
+            }
+            if (map.empty()) {
+                _cache_store.erase(rk);
+            }
+            return reply_builder::build(removed);
+        });
+    });
 }
 
-std::pair<std::vector<item_ptr>, int> database::hmget(redis_key&& rk, std::vector<sstring>&& keys)
+
+future<scattered_message_ptr> database::hdel(redis_key&& rk, sstring&& key)
 {
-    using result_type = std::pair<std::vector<item_ptr>, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {std::move(std::vector<item_ptr>()), REDIS_ERR};
-    }
-    else if (it->type() != REDIS_DICT) {
-        return result_type {std::move(std::vector<item_ptr>()), REDIS_WRONG_TYPE};
-    }
-    auto dict = it->dict_ptr();
-    return result_type{std::move(dict->fetch(keys)), REDIS_OK};
+    return with_allocator(allocator(), [this, &rk, &key] {
+        return _cache_store.with_entry_run(key, [this, &rk, &key] (cache_entry* e) {
+            if (!e) {
+                return reply_builder::build(msg_zero);
+            }
+            if (e->type_of_map() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& map = e->value_map();
+            bool exists = map.erase(key);
+            if (map.empty()) {
+                _cache_store.erase(rk);
+            }
+            return reply_builder::build(exists ? msg_ok : msg_err);
+        });
+    });
+}
+
+future<scattered_message_ptr> database::hexists(redis_key&& rk, sstring&& key)
+{
+    return with_allocator(allocator(), [this, &rk, &key] {
+        return _cache_store.with_entry_run(rk, [this, &key] (cache_entry* e) {
+            if (!e) {
+                return reply_builder::build(msg_zero);
+            }
+            if (e->type_of_map() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& map = e->value_map();
+            return map.with_entry_run(key, [] (const dict_entry* d) {
+                if (!d) {
+                    return reply_builder::build(msg_zero);
+                }
+                return reply_builder::build(msg_one);
+            });
+        });
+    });
+}
+
+future<scattered_message_ptr> database::hstrlen(redis_key&& rk, sstring&& key)
+{
+    return _cache_store.with_entry_run(rk, [this, &key] (cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_zero);
+        }
+        if (e->type_of_map() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& map = e->value_map();
+        return map.with_entry_run(key, [] (const dict_entry* d) {
+            if (!d) {
+                return reply_builder::build(msg_zero);
+            }
+            return reply_builder::build(d->value_bytes_size());
+        });
+    });
+}
+
+future<scattered_message_ptr> database::hlen(redis_key&& rk)
+{
+    return _cache_store.with_entry_run(rk, [this] (cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_zero);
+        }
+        if (e->type_of_map() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& map = e->value_map();
+        return reply_builder::build(map.size());
+    });
+}
+
+future<scattered_message_ptr> database::hgetall(redis_key&& rk)
+{
+    return hgetall_impl<true, true>(std::move(rk));
+}
+
+future<scattered_message_ptr> database::hgetall_values(redis_key&& rk)
+{
+    return hgetall_impl<false, true>(std::move(rk));
+}
+
+future<scattered_message_ptr> database::hgetall_keys(redis_key&& rk)
+{
+    return hgetall_impl<true, false>(std::move(rk));
+}
+
+
+future<scattered_message_ptr> database::hmget(redis_key&& rk, std::vector<sstring>&& keys)
+{
+    return _cache_store.with_entry_run(rk, [this, &keys] (const cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_err);
+        }
+        if (e->type_of_map() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& map = e->value_map();
+        std::vector<const dict_entry*> entries;
+        map.fetch(keys, entries);
+        return reply_builder::build<false, true>(entries);
+    });
 }
 
 std::pair<size_t, int> database::scard(redis_key&& rk)

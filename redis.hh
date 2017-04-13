@@ -100,17 +100,19 @@ public:
     future<> lrem(args_collection& args, output_stream<char>& out);
 
     // [HASH APIs]
-    future<message> hdel(args_collection& args);
-    future<message> hexists(args_collection& args);
-    future<message> hset(args_collection& args);
-    future<message> hmset(args_collection& args);
-    future<message> hincrby(args_collection& args);
-    future<message> hincrbyfloat(args_collection& args);
-    future<message> hlen(args_collection& args);
-    future<message> hstrlen(args_collection& args);
-    future<message> hget(args_collection& args);
-    future<message> hgetall(args_collection& args);
-    future<message> hmget(args_collection& args);
+    future<> hdel(args_collection& args, output_stream<char>& out);
+    future<> hexists(args_collection& args, output_stream<char>& out);
+    future<> hset(args_collection& args, output_stream<char>& out);
+    future<> hmset(args_collection& args, output_stream<char>& out);
+    future<> hincrby(args_collection& args, output_stream<char>& out);
+    future<> hincrbyfloat(args_collection& args, output_stream<char>& out);
+    future<> hlen(args_collection& args, output_stream<char>& out);
+    future<> hstrlen(args_collection& args, output_stream<char>& out);
+    future<> hget(args_collection& args, output_stream<char>& out);
+    future<> hgetall(args_collection& args, output_stream<char>& out);
+    future<> hgetall_keys(args_collection& args, output_stream<char>& out);
+    future<> hgetall_values(args_collection& args, output_stream<char>& out);
+    future<> hmget(args_collection& args, output_stream<char>& out);
 
     // [SET]
     future<message> sadd(args_collection& args);

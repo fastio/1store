@@ -350,6 +350,7 @@ deps = {
       'common.cc',
       'redis.cc',
       'dict.cc',
+      'dict_lsa.cc',
       'sorted_set.cc',
       'server.cc',
       'main.cc',

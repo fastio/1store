@@ -34,6 +34,7 @@
 #include "bitmap.hh"
 #include <tuple>
 #include "cache.hh"
+#include "reply_builder.hh"
 namespace redis {
 
 namespace stdx = std::experimental;
@@ -107,125 +108,21 @@ public:
     future<scattered_message_ptr> lrem(redis_key&& rk, long count, sstring&& value);
     future<scattered_message_ptr> ltrim(redis_key&& rk, long start, long end);
 
-    template <typename origin = local_origin_tag> inline
-    int hset(redis_key&& rk, sstring&& field, sstring&& value)
-    {
-        auto it = _store->fetch_raw(rk);
-        if (it && it->type() != REDIS_DICT) {
-            return REDIS_WRONG_TYPE;
-        }
-        dict* _dict = nullptr;
-        if (!it) {
-            _dict = new dict();
-            auto dict_item = item::create(rk, _dict);
-            if (_store->set(rk, dict_item) != REDIS_OK) {
-                return REDIS_ERR;
-            }
-        }
-        else {
-            _dict = it->dict_ptr();
-        }
-        redis_key field_key {std::move(field)};
-        auto new_item = item::create(field_key, origin::move_if_local(value));
-        return _dict->replace(field_key, new_item);
-    }
+    future<scattered_message_ptr> hset(redis_key&& rk, sstring&& field, sstring&& value);
+    future<scattered_message_ptr> hmset(redis_key&& rk, std::unordered_map<sstring, sstring>&& kv);
+    future<scattered_message_ptr> hget(redis_key&& rk, sstring&& field);
+    future<scattered_message_ptr> hdel(redis_key&& rk, sstring&& field);
+    future<scattered_message_ptr> hdel_multi(redis_key&& rk, std::vector<sstring>&& fields);
+    future<scattered_message_ptr> hexists(redis_key&& rk, sstring&& field);
+    future<scattered_message_ptr> hstrlen(redis_key&& rk, sstring&& field);
+    future<scattered_message_ptr> hlen(redis_key&& rk);
+    future<scattered_message_ptr> hincrby(redis_key&& rk, sstring&& field, int64_t delta);
+    future<scattered_message_ptr> hincrbyfloat(redis_key&& rk, sstring&& field, double delta);
+    future<scattered_message_ptr> hgetall(redis_key&& rk);
+    future<scattered_message_ptr> hgetall_values(redis_key&& rk);
+    future<scattered_message_ptr> hgetall_keys(redis_key&& rk);
+    future<scattered_message_ptr> hmget(redis_key&& rk, std::vector<sstring>&& keys);
 
-    template <typename origin = local_origin_tag> inline
-    int hmset(redis_key&& rk, std::unordered_map<sstring, sstring>&& kv)
-    {
-        auto it = _store->fetch_raw(rk);
-        if (it && it->type() != REDIS_DICT) {
-            return REDIS_WRONG_TYPE;
-        }
-        dict* _dict = nullptr;
-        if (!it) {
-            _dict = new dict();
-            auto dict_item = item::create(rk, _dict);
-            if (_store->set(rk, dict_item) != REDIS_OK) {
-                return REDIS_ERR;
-            }
-        }
-        else {
-            _dict = it->dict_ptr();
-        }
-        for (auto p = kv.begin(); p != kv.end(); p++) {
-            sstring field = p->first;
-            sstring& value = p->second;
-            redis_key field_key {std::move(field)};
-            auto new_item = item::create(field_key, origin::move_if_local(value));
-            _dict->replace(field_key, new_item);
-        }
-        return REDIS_OK;
-    }
-
-    std::pair<item_ptr, int> hget(redis_key&& rk, sstring&& field);
-    int hdel(redis_key&& rk, sstring&& field);
-    int hexists(redis_key&& rk, sstring&& field);
-    std::pair<size_t, int> hstrlen(redis_key&& rk, sstring&& field);
-    std::pair<size_t, int> hlen(redis_key&& rk);
-    template <typename origin = local_origin_tag> inline
-    std::pair<size_t, int> hincrby(redis_key&& rk, sstring&& field, size_t delta)
-    {
-        using result_type = std::pair<int64_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (it && it->type() != REDIS_DICT) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        dict* _dict = nullptr;
-        if (!it) {
-            _dict = new dict();
-            auto dict_item = item::create(rk, _dict);
-            if (_store->set(rk, dict_item) != REDIS_OK) {
-                return result_type {0, REDIS_ERR};
-            }
-        }
-        else {
-            _dict = it->dict_ptr();
-        }
-        redis_key field_key{std::move(field)};
-        auto mit = _dict->fetch(field_key);
-        auto new_value = delta;
-        if (!mit) {
-            new_value += mit->int64();
-        }
-        auto new_item = item::create(field_key, static_cast<int64_t>(new_value));
-        if (_dict->replace(field_key, new_item) == REDIS_OK) {
-            return result_type {new_value, REDIS_OK};
-        }
-        return result_type {0, REDIS_ERR};
-    }
-
-    template <typename origin = local_origin_tag> inline
-    std::pair<double, int> hincrbyfloat(redis_key&& rk, sstring&& field, double delta)
-    {
-        using result_type = std::pair<double, int>;
-        auto it = _store->fetch_raw(rk);
-        if (it && it->type() != REDIS_DICT) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        dict* _dict = nullptr;
-        if (!it) {
-            _dict = new dict();
-            auto dict_item = item::create(rk, _dict);
-            if (_store->set(rk, dict_item) != REDIS_OK) {
-                return result_type {0, REDIS_ERR};
-            }
-        }
-        redis_key field_key {std::move(field)};
-        auto mit = _dict->fetch(field_key);
-        auto new_value = delta;
-        if (!mit) {
-            new_value += mit->Double();
-        }
-        auto new_item = item::create(field_key, new_value);
-        if (_dict->replace(field_key, new_item) == REDIS_OK) {
-            return result_type {new_value, REDIS_OK};
-        }
-        return result_type {0, REDIS_ERR};
-    }
-
-    std::pair<std::vector<item_ptr>, int> hgetall(redis_key&& rk);
-    std::pair<std::vector<item_ptr>, int> hmget(redis_key&& rk, std::vector<sstring>&& keys);
     template <typename origin = local_origin_tag> inline
     std::pair<size_t, int> sadds(redis_key&& rk, std::vector<sstring>&& members)
     {
@@ -409,6 +306,23 @@ private:
             index += size;
         }
         return index;
+    }
+
+    template<bool Key, bool Value>
+    future<scattered_message_ptr> hgetall_impl(redis_key&& rk)
+    {
+        return _cache_store.with_entry_run(rk, [this] (cache_entry* e) {
+            if (!e) {
+                return reply_builder::build(msg_err);
+            }
+            if (e->type_of_map() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& map = e->value_map();
+            std::vector<const dict_entry*> entries;
+            map.fetch(entries);
+            return reply_builder::build<Key, Value>(entries);
+        });
     }
 private:
     static const int DEFAULT_DB_COUNT = 32;

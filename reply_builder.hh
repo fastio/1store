@@ -34,6 +34,7 @@
 #include "net/api.hh"
 #include "net/packet-data-source.hh"
 #include "cache.hh"
+#include "dict_lsa.hh"
 namespace redis {
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
 
@@ -111,6 +112,107 @@ static future<scattered_message_ptr> build(const cache_entry* e)
     }
     else {
         return reply_builder::build(msg_not_found);
+    }
+}
+
+template<bool Key, bool Value>
+static future<scattered_message_ptr> build(const std::vector<const dict_entry*>& entries)
+{
+    if (entries.empty()) {
+        //build reply
+        auto m = make_lw_shared<scattered_message<char>>();
+        m->append_static(msg_sigle_tag);
+        if (Key && Value) {
+           m->append(std::move(to_sstring(entries.size() * 2)));
+        }
+        else {
+           m->append(std::move(to_sstring(entries.size())));
+        }
+        for (size_t i = 0; i < entries.size(); ++i) {
+            const auto& e = *(entries[i]);
+            if (Key) {
+                m->append(msg_batch_tag);
+                m->append(to_sstring(e.key_size()));
+                m->append_static(msg_crlf);
+                m->append(sstring{e.key_data(), e.key_size()});
+                m->append_static(msg_crlf);
+            }
+            if (Value) {
+                if (e.type_of_integer()) {
+                    auto&& n = to_sstring(e.value_integer());
+                    m->append(to_sstring(n.size()));
+                    m->append_static(msg_crlf);
+                    m->append(n);
+                    m->append_static(msg_crlf);
+                }
+                else if (e.type_of_float()) {
+                    auto&& n = to_sstring(e.value_float());
+                    m->append(to_sstring(n.size()));
+                    m->append_static(msg_crlf);
+                    m->append(n);
+                    m->append_static(msg_crlf);
+                }
+                else if (e.type_of_bytes()) {
+                    m->append_static(msg_batch_tag);
+                    m->append(to_sstring(e.value_bytes_size()));
+                    m->append_static(msg_crlf);
+                    m->append(sstring{e.value_bytes_data(), e.value_bytes_size()});
+                    m->append_static(msg_crlf);
+                    m->append_static(msg_crlf);
+                }
+            }
+        }
+        return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
+    }
+    else {
+        return reply_builder::build(msg_nil);
+    }
+}
+
+template<bool Key, bool Value>
+static future<scattered_message_ptr> build(const dict_entry* e)
+{
+    if (e) {
+        //build reply
+        auto m = make_lw_shared<scattered_message<char>>();
+        if (Key) {
+            m->append(msg_batch_tag);
+            m->append(to_sstring(e->key_size()));
+            m->append_static(msg_crlf);
+            m->append(sstring{e->key_data(), e->key_size()});
+            m->append_static(msg_crlf);
+        }
+        if (Value) {
+            if (e->type_of_integer()) {
+               auto&& n = to_sstring(e->value_integer());
+               m->append(to_sstring(n.size()));
+               m->append_static(msg_crlf);
+               m->append(n);
+               m->append_static(msg_crlf);
+            }
+            else if (e->type_of_float()) {
+               auto&& n = to_sstring(e->value_float());
+               m->append(to_sstring(n.size()));
+               m->append_static(msg_crlf);
+               m->append(n);
+               m->append_static(msg_crlf);
+            }
+            else if (e->type_of_bytes()) {
+                m->append_static(msg_batch_tag);
+                m->append(to_sstring(e->value_bytes_size()));
+                m->append_static(msg_crlf);
+                m->append(sstring{e->value_bytes_data(), e->value_bytes_size()});
+                m->append_static(msg_crlf);
+            }
+            else {
+               m->append_static(msg_type_err);
+            }
+            return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
+        }
+        return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
+    }
+    else {
+        return reply_builder::build(msg_nil);
     }
 }
 

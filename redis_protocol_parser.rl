@@ -177,8 +177,8 @@ bitpos = "bitpos"i ${_command = command::bitpos; };
 
 command = (setbit | set | getbit | get | del | mget | mset | echo | ping | incr | decr | incrby | decrby | command_ | exists | append |
            strlen | lpushx | lpush | lpop | llen | lindex | linsert | lrange | lset | rpushx | rpush | rpop | lrem |
-           ltrim | hset | hget | hdel | hlen | hexists | hstrlen | hincrby | hincrbyfloat | hkeys | hvals | hmget | hmset |
-           hgetall   | sadd | scard | sismember | smembers | srem | sdiff | sdiffstore | sinter | sinterstore | sunion |
+           ltrim | hset | hgetall |hget | hdel | hlen | hexists | hstrlen | hincrby | hincrbyfloat | hkeys | hvals | hmget | hmset |
+           sadd | scard | sismember | smembers | srem | sdiff | sdiffstore | sinter | sinterstore | sunion |
            sunionstore | smove | type | expire | pexpire | persist | ttl | pttl | zadd | zcard | zcount | zincrby |
            zrangebyscore | zrank | zremrangebyrank | zremrangebyscore | zremrangebylex | zrem | zrevrangebyscore | zrevrange| zrevrank |
            zscore | zunionstore  | zinterstore | zdiffstore | zunion | zinter | zdiff | zscan | zrangebylex | zlexcount |
