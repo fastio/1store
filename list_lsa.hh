@@ -182,6 +182,7 @@ public:
         }
         return erased;
     }
+
     inline bool trim(size_t start, size_t end)
     {
         auto i = iterator_to(start);
@@ -193,6 +194,7 @@ public:
         }
         return true;
     }
+
     // Erases all the elements of the list. Destructors are called.
     inline void clear()
     {

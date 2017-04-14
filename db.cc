@@ -534,7 +534,7 @@ future<scattered_message_ptr> database::hdel_multi(redis_key&& rk, std::vector<s
 future<scattered_message_ptr> database::hdel(redis_key&& rk, sstring&& key)
 {
     return with_allocator(allocator(), [this, &rk, &key] {
-        return _cache_store.with_entry_run(key, [this, &rk, &key] (cache_entry* e) {
+        return _cache_store.with_entry_run(rk, [this, &rk, &key] (cache_entry* e) {
             if (!e) {
                 return reply_builder::build(msg_zero);
             }
@@ -562,12 +562,8 @@ future<scattered_message_ptr> database::hexists(redis_key&& rk, sstring&& key)
                 return reply_builder::build(msg_type_err);
             }
             auto& map = e->value_map();
-            return map.with_entry_run(key, [] (const dict_entry* d) {
-                if (!d) {
-                    return reply_builder::build(msg_zero);
-                }
-                return reply_builder::build(msg_one);
-            });
+            auto result = map.exists(key);
+            return reply_builder::build(result ? msg_one : msg_zero);
         });
     });
 }

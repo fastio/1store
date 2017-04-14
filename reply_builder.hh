@@ -118,7 +118,7 @@ static future<scattered_message_ptr> build(const cache_entry* e)
 template<bool Key, bool Value>
 static future<scattered_message_ptr> build(const std::vector<const dict_entry*>& entries)
 {
-    if (entries.empty()) {
+    if (!entries.empty()) {
         //build reply
         auto m = make_lw_shared<scattered_message<char>>();
         m->append_static(msg_sigle_tag);
@@ -128,37 +128,50 @@ static future<scattered_message_ptr> build(const std::vector<const dict_entry*>&
         else {
            m->append(std::move(to_sstring(entries.size())));
         }
+        m->append_static(msg_crlf);
         for (size_t i = 0; i < entries.size(); ++i) {
-            const auto& e = *(entries[i]);
+            const auto e = entries[i];
             if (Key) {
-                m->append(msg_batch_tag);
-                m->append(to_sstring(e.key_size()));
-                m->append_static(msg_crlf);
-                m->append(sstring{e.key_data(), e.key_size()});
-                m->append_static(msg_crlf);
+                if (e) {
+                    m->append_static(msg_batch_tag);
+                    m->append(to_sstring(e->key_size()));
+                    m->append_static(msg_crlf);
+                    m->append(sstring{e->key_data(), e->key_size()});
+                    m->append_static(msg_crlf);
+                }
+                else {
+                    m->append_static(msg_not_found);
+                }
             }
             if (Value) {
-                if (e.type_of_integer()) {
-                    auto&& n = to_sstring(e.value_integer());
-                    m->append(to_sstring(n.size()));
-                    m->append_static(msg_crlf);
-                    m->append(n);
-                    m->append_static(msg_crlf);
-                }
-                else if (e.type_of_float()) {
-                    auto&& n = to_sstring(e.value_float());
-                    m->append(to_sstring(n.size()));
-                    m->append_static(msg_crlf);
-                    m->append(n);
-                    m->append_static(msg_crlf);
-                }
-                else if (e.type_of_bytes()) {
+                if (e) {
                     m->append_static(msg_batch_tag);
-                    m->append(to_sstring(e.value_bytes_size()));
-                    m->append_static(msg_crlf);
-                    m->append(sstring{e.value_bytes_data(), e.value_bytes_size()});
-                    m->append_static(msg_crlf);
-                    m->append_static(msg_crlf);
+                    if (e->type_of_integer()) {
+                        auto&& n = to_sstring(e->value_integer());
+                        m->append(to_sstring(n.size()));
+                        m->append_static(msg_crlf);
+                        m->append(n);
+                        m->append_static(msg_crlf);
+                    }
+                    else if (e->type_of_float()) {
+                        auto&& n = to_sstring(e->value_float());
+                        m->append(to_sstring(n.size()));
+                        m->append_static(msg_crlf);
+                        m->append(n);
+                        m->append_static(msg_crlf);
+                    }
+                    else if (e->type_of_bytes()) {
+                        m->append(to_sstring(e->value_bytes_size()));
+                        m->append_static(msg_crlf);
+                        m->append(sstring{e->value_bytes_data(), e->value_bytes_size()});
+                        m->append_static(msg_crlf);
+                    }
+                    else {
+                        m->append_static(msg_type_err);
+                    }
+                }
+                else {
+                    m->append_static(msg_not_found);
                 }
             }
         }

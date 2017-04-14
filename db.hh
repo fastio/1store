@@ -91,7 +91,6 @@ public:
     bool exists(redis_key&& key);
 
     future<scattered_message_ptr> get(redis_key&& key);
-
     future<scattered_message_ptr> strlen(redis_key&& key);
 
     int expire(redis_key&& rk, long expired);

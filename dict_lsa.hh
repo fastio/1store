@@ -53,7 +53,7 @@ struct dict_entry
     };
     entry_type _type;
 
-    dict_entry(const sstring& key, const sstring& val) noexcept 
+    dict_entry(const sstring& key, const sstring& val) noexcept
         : _link()
         , _key(std::move(*(current_allocator().construct<managed_bytes>(bytes_view {reinterpret_cast<const signed char*>(key.data()), key.size()}))))
         , _key_hash(std::hash<managed_bytes>()(_key))
@@ -62,7 +62,7 @@ struct dict_entry
         _u._data = std::move(*(current_allocator().construct<managed_bytes>(bytes_view {reinterpret_cast<const signed char*>(val.data()), val.size()})));
     }
 
-    dict_entry(const sstring& key, double data) noexcept 
+    dict_entry(const sstring& key, double data) noexcept
         : _link()
         , _key(std::move(*(current_allocator().construct<managed_bytes>(bytes_view {reinterpret_cast<const signed char*>(key.data()), key.size()}))))
         , _key_hash(std::hash<managed_bytes>()(_key))
@@ -71,7 +71,7 @@ struct dict_entry
         _u._float = data;
     }
 
-    dict_entry(const sstring& key, int64_t data) noexcept 
+    dict_entry(const sstring& key, int64_t data) noexcept
         : _link()
         , _key(std::move(*(current_allocator().construct<managed_bytes>(bytes_view {reinterpret_cast<const signed char*>(key.data()), key.size()}))))
         , _key_hash(std::hash<managed_bytes>()(_key))
@@ -100,14 +100,23 @@ struct dict_entry
     }
 
     struct compare {
-        bool operator () (const dict_entry& l, const dict_entry& r) const noexcept {
-            return memcmp(l.key_data(), r.key_data(), std::min(l.key_size(), r.key_size())) < 0;
+        inline bool compare_impl(const char* d1, size_t s1, const char* d2, size_t s2) const noexcept {
+            const int len = std::min(s1, s2);
+            auto r = memcmp(d1, d2, len);
+            if (r == 0) {
+                if (s1 < s2) return true;
+                else if (s1 > s2) return false;
+            }
+            return r < 0;
         }
-        bool operator () (const sstring& k, const dict_entry& e) const noexcept {
-            return memcmp(k.data(), e.key_data(), std::min(k.size(), e.key_size())) < 0;
+        inline bool operator () (const dict_entry& l, const dict_entry& r) const noexcept {
+            return compare_impl(l.key_data(), l.key_size(), r.key_data(), r.key_size());
         }
-        bool operator () (const dict_entry& e, const sstring& k) const noexcept {
-            return memcmp(e.key_data(), k.data(), std::min(k.size(), e.key_size())) < 0;
+        inline bool operator () (const sstring& k, const dict_entry& e) const noexcept {
+            return compare_impl(k.data(), k.size(), e.key_data(), e.key_size());
+        }
+        inline bool operator () (const dict_entry& e, const sstring& k) const noexcept {
+            return compare_impl(e.key_data(), e.key_size(), k.data(), k.size());
         }
     };
 
@@ -182,7 +191,7 @@ public:
     {
         flush_all();
     }
-    
+
     void flush_all()
     {
         _dict.erase_and_dispose(_dict.begin(), _dict.end(), current_deleter<dict_entry>());
@@ -225,7 +234,7 @@ public:
         if (it != _dict.end()) {
             _dict.erase_and_dispose(it, current_deleter<dict_entry>());
             return true;
-        } 
+        }
         return false;
     }
 
@@ -252,6 +261,9 @@ public:
             if (it != _dict.end()) {
                 const auto& e = *it;
                 entries.push_back(&e);
+            }
+            else {
+                entries.push_back(nullptr);
             }
         }
     }
