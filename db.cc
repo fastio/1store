@@ -52,6 +52,25 @@ bool database::exists(redis_key&& rk)
     return _cache_store.exists(rk);
 }
 
+future<scattered_message_ptr> database::counter_by(redis_key&& rk, int64_t step, bool incr)
+{
+    return with_allocator(allocator(), [this, &rk, step, incr] {
+        return _cache_store.with_entry_run(rk, [this, &rk, step, incr] (cache_entry* e) {
+            if (!e) {
+                // not exists
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), int64_t{step});
+                _cache_store.replace(entry);
+                return reply_builder::build<false, true>(entry);
+            }
+            if (!e->type_of_integer()) {
+                return reply_builder::build(msg_type_err);
+            }
+            e->value_integer_incr(incr ? step : -step);
+            return reply_builder::build<false, true>(e);
+        });
+    });
+}
+
 future<scattered_message_ptr> database::append(redis_key&& rk, sstring&& val)
 {
     return with_allocator(allocator(), [this, &rk, &val] {
@@ -633,100 +652,133 @@ future<scattered_message_ptr> database::hmget(redis_key&& rk, std::vector<sstrin
     });
 }
 
-std::pair<size_t, int> database::scard(redis_key&& rk)
+future<scattered_message_ptr> database::sadds(redis_key&& rk, std::vector<sstring>&& members)
 {
-    using result_type = std::pair<size_t, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {0, REDIS_ERR};
-    }
-    else if(it->type() != REDIS_SET) {
-        return result_type {0, REDIS_WRONG_TYPE};
-    }
-    auto set = it->dict_ptr();
-    return result_type {set->size(), REDIS_OK};
-}
-
-int database::sismember(redis_key&& rk, sstring&& member)
-{
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return REDIS_ERR;
-    }
-    else if(it->type() != REDIS_SET) {
-        return REDIS_WRONG_TYPE;
-    }
-    auto _set = it->dict_ptr();
-    redis_key member_data {std::move(member)};
-    return _set->exists(member_data);
-}
-
-std::pair<std::vector<item_ptr>, int> database::smembers(redis_key&& rk)
-{
-    using result_type = std::pair<std::vector<item_ptr>, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {std::move(std::vector<item_ptr>()), REDIS_ERR};
-    }
-    if (it->type() == REDIS_SET) {
-        return result_type {std::move(std::vector<item_ptr>()), REDIS_WRONG_TYPE};
-    }
-    auto _set = it->dict_ptr();
-    return result_type {std::move(_set->fetch()), REDIS_OK};
-}
-
-std::pair<item_ptr, int> database::spop(redis_key&& rk)
-{
-    using result_type = std::pair<item_ptr, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {nullptr, REDIS_ERR};
-    }
-    if (it->type() == REDIS_SET) {
-        return result_type {nullptr, REDIS_WRONG_TYPE};
-    }
-    auto _set = it->dict_ptr();
-    return result_type {std::move(_set->random_fetch_and_remove()), REDIS_OK};
-}
-
-int database::srem(redis_key&& rk, sstring&& member)
-{
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return REDIS_ERR;
-    }
-    if (it->type() == REDIS_SET) {
-        return REDIS_WRONG_TYPE;
-    }
-    auto _set = it->dict_ptr();
-    redis_key member_data {std::move(member)};
-    return _set->remove(member_data);
-}
-
-std::pair<size_t, int> database::srems(redis_key&& rk, std::vector<sstring>&& members)
-{
-    using result_type = std::pair<size_t, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {0, REDIS_ERR};
-    }
-    if (it->type() == REDIS_SET) {
-        return result_type {0, REDIS_WRONG_TYPE};
-    }
-    auto _set = it->dict_ptr();
-    int count = 0;
-    if (_set != nullptr) {
-        for (sstring& member : members) {
-            redis_key member_data {std::move(member)};
-            if (_set->remove(member_data) == REDIS_OK) {
-                count++;
+    return with_allocator(allocator(), [this, &rk, &members] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &members] (cache_entry* e) {
+            auto o = e;
+            if (!o) {
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::set_initializer());
+                _cache_store.insert(entry);
+                o = entry;
             }
+            if (o->type_of_set() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& set = o->value_set();
+            size_t inserted = 0;
+            for (auto& member : members) {
+                if (set.insert(current_allocator().construct<dict_entry>(member))) {
+                    inserted++;
+                }
+            }
+            return reply_builder::build(inserted);
+        });
+    });
+}
+
+future<scattered_message_ptr> database::scard(redis_key&& rk)
+{
+     return _cache_store.with_entry_run(rk, [] (const cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_zero);
         }
-        if (_set->size() == 0) {
-            _store->remove(rk);
+        if (e->type_of_set() == false) {
+            return reply_builder::build(msg_type_err);
         }
-    }
-    return result_type {count, REDIS_OK};
+        auto& set = e->value_set();
+        return reply_builder::build(set.size());
+     });
+}
+
+future<scattered_message_ptr> database::sismember(redis_key&& rk, sstring&& member)
+{
+     return _cache_store.with_entry_run(rk, [&member] (const cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_zero);
+        }
+        if (e->type_of_set() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& set = e->value_set();
+        auto result = set.exists(member);
+        return reply_builder::build(result ? msg_one : msg_zero);
+     });
+}
+
+future<scattered_message_ptr> database::smembers(redis_key&& rk)
+{
+    return _cache_store.with_entry_run(rk, [this] (const cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_nil);
+        }
+        if (e->type_of_set() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& set = e->value_set();
+        std::vector<const dict_entry*> entries;
+        set.fetch(entries);
+        return reply_builder::build<true, false>(entries);
+    });
+}
+
+future<scattered_message_ptr> database::spop(redis_key&& rk)
+{
+    return _cache_store.with_entry_run(rk, [this] (const cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_nil);
+        }
+        if (e->type_of_set() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& set = e->value_set();
+        return reply_builder::build<true, false>(set.begin());
+    });
+}
+
+future<scattered_message_ptr> database::srem(redis_key&& rk, sstring&& member)
+{
+    return with_allocator(allocator(), [this, &rk, &member] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &member] (cache_entry* e) {
+            if (!e) {
+                return reply_builder::build(msg_zero);
+            }
+            if (e->type_of_set() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& set = e->value_set();
+            auto result = set.erase(member);
+            if (set.empty()) {
+                _cache_store.erase(rk);
+            }
+            return reply_builder::build(result ? msg_one : msg_zero);
+        });
+    });
+}
+
+future<scattered_message_ptr> database::srems(redis_key&& rk, std::vector<sstring>&& members)
+{
+    return with_allocator(allocator(), [this, &rk, &members] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &members] (cache_entry* e) {
+            if (!e) {
+                return reply_builder::build(msg_zero);
+            }
+            if (e->type_of_set() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& set = e->value_set();
+            size_t removed = 0;
+            for (auto& member : members) {
+                if (set.erase(member)) {
+                    removed++;
+                }
+            }
+            if (set.empty()) {
+                _cache_store.erase(rk);
+            }
+            return reply_builder::build(removed);
+        });
+    });
 }
 
 long database::pttl(redis_key&& rk)

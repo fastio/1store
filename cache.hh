@@ -14,7 +14,7 @@
 * KIND, either express or implied.  See the License for the
 * specific language governing permissions and limitations
 * under the License.
-* 
+*
 *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
@@ -81,7 +81,7 @@ public:
         _storage._float_number = data;
     }
 
-    cache_entry(const std::string key, size_t hash, int64_t data) noexcept
+    cache_entry(const sstring key, size_t hash, int64_t data) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_INT64)
     {
         _storage._integer_number = data;
@@ -106,6 +106,14 @@ public:
     {
         _storage._dict = make_managed<dict_lsa>();
     }
+
+    struct set_initializer {};
+    cache_entry(const sstring& key, size_t hash, set_initializer) noexcept
+        : cache_entry(key, hash, entry_type::ENTRY_SET)
+    {
+        _storage._dict = make_managed<dict_lsa>();
+    }
+
 
     cache_entry(cache_entry&& o) noexcept
         : _cache_link(std::move(o._cache_link))
@@ -202,13 +210,26 @@ public:
     inline bool type_of_map() const {
         return _type == entry_type::ENTRY_MAP;
     }
+    inline bool type_of_set() const {
+        return _type == entry_type::ENTRY_SET;
+    }
     inline int64_t value_integer() const
     {
         return _storage._integer_number;
     }
+    inline void value_integer_incr(int64_t step)
+    {
+        _storage._integer_number += step;
+    }
+
     inline double value_float() const
     {
         return _storage._float_number;
+    }
+
+    inline void value_float_incr(double step)
+    {
+        _storage._float_number += step;
     }
     inline managed_bytes& value_bytes() {
         return _storage._bytes;
@@ -226,6 +247,12 @@ public:
         return *(_storage._dict);
     }
     inline const dict_lsa& value_map() const {
+        return *(_storage._dict);
+    }
+    inline dict_lsa& value_set() {
+        return *(_storage._dict);
+    }
+    inline const dict_lsa& value_set() const {
         return *(_storage._dict);
     }
 };
@@ -254,11 +281,11 @@ public:
     {
         flush_all();
     }
-    
+
     void flush_all()
     {
         _store.erase_and_dispose(_store.begin(), _store.end(), current_deleter<cache_entry>());
-   }
+    }
 
     inline bool erase(const redis_key& key)
     {
@@ -267,7 +294,7 @@ public:
         if (it != _store.end()) {
             _store.erase_and_dispose(it, current_deleter<cache_entry>());
             return true;
-        } 
+        }
         return false;
     }
 

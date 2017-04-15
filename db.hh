@@ -63,27 +63,7 @@ public:
 
     bool set(redis_key&& rk, sstring&& val, long expire, uint32_t flag);
 
-    template  <typename origin = local_origin_tag> inline
-    std::pair<int64_t, int> counter_by(redis_key&& rk, int64_t step, bool incr)
-    {
-        using result_type = std::pair<int64_t, int>;
-        auto it = _store->fetch_raw(rk);
-        int64_t new_value = incr ? step : -step;
-        if (it) {
-            if (it->type() != REDIS_RAW_UINT64) {
-                return result_type {0, REDIS_WRONG_TYPE};
-            }
-            new_value += it->int64();
-        }
-        auto new_item = item::create(rk, new_value);
-        if (_store->replace(rk, new_item) == REDIS_OK) {
-            return result_type {new_value, REDIS_OK};
-        }
-        else {
-            return result_type {0, REDIS_ERR};
-        }
-    }
-
+    future<scattered_message_ptr> counter_by(redis_key&& rk, int64_t step, bool incr);
     future<scattered_message_ptr> append(redis_key&& rk, sstring&& val);
 
     bool del(redis_key&& key);
@@ -96,6 +76,7 @@ public:
     int expire(redis_key&& rk, long expired);
     int persist(redis_key&& rk);
 
+    // [LIST]
     future<scattered_message_ptr> push(redis_key&& rk, sstring&& value, bool force, bool left);
     future<scattered_message_ptr> push_multi(redis_key&& rk, std::vector<sstring>&& value, bool force, bool left);
     future<scattered_message_ptr> pop(redis_key&& rk, bool left);
@@ -107,6 +88,7 @@ public:
     future<scattered_message_ptr> lrem(redis_key&& rk, long count, sstring&& value);
     future<scattered_message_ptr> ltrim(redis_key&& rk, long start, long end);
 
+    // [HASHMAP]
     future<scattered_message_ptr> hset(redis_key&& rk, sstring&& field, sstring&& value);
     future<scattered_message_ptr> hmset(redis_key&& rk, std::unordered_map<sstring, sstring>&& kv);
     future<scattered_message_ptr> hget(redis_key&& rk, sstring&& field);
@@ -122,69 +104,15 @@ public:
     future<scattered_message_ptr> hgetall_keys(redis_key&& rk);
     future<scattered_message_ptr> hmget(redis_key&& rk, std::vector<sstring>&& keys);
 
-    template <typename origin = local_origin_tag> inline
-    std::pair<size_t, int> sadds(redis_key&& rk, std::vector<sstring>&& members)
-    {
-        using result_type = std::pair<size_t, int>;
-        auto it = _store->fetch_raw(rk);
-        if (it && it->type() != REDIS_SET) {
-            return result_type {0, REDIS_WRONG_TYPE};
-        }
-        dict* _set = nullptr;
-        if (!it) {
-            _set = new dict();
-            auto dict_item = item::create(rk, _set);
-            if (_store->set(rk, dict_item) != REDIS_OK) {
-                return result_type {0, REDIS_ERR};
-            }
-        }
-        else {
-            _set = it->dict_ptr();
-        }
-        int count = 0;
-        for (sstring& member : members) {
-            redis_key member_data {std::move(member)};
-            auto new_item = item::create(member_data);
-            if (_set->replace(member_data, new_item) == REDIS_OK) {
-                count++;
-            }
-        }
-        return result_type {count, REDIS_OK};
-    }
-
-    template<typename origin = local_origin_tag>
-    int sadd(redis_key&& rk, sstring&& member)
-    {
-        auto it = _store->fetch_raw(rk);
-        if(it && it->type() != REDIS_SET) {
-            return REDIS_WRONG_TYPE;
-        }
-
-        dict* _set = nullptr;
-        if (!it) {
-            auto _set = new dict();
-            auto dict_item = item::create(rk, _set);
-            if (_store->set(rk, dict_item) != REDIS_OK) {
-                return REDIS_ERR;
-            }
-        }
-        else {
-            _set = it->dict_ptr();
-        }
-        redis_key member_data {std::move(member)};
-        auto new_item = item::create(member_data);
-        if (_set->replace(member_data, new_item)) {
-            return REDIS_OK;
-        }
-        return REDIS_ERR;
-    }
-
-    std::pair<size_t, int> scard(redis_key&& rk);
-    int sismember(redis_key&& rk, sstring&& member);
-    std::pair<std::vector<item_ptr>, int> smembers(redis_key&& rk);
-    std::pair<item_ptr, int> spop(redis_key&& rk);
-    int srem(redis_key&& rk, sstring&& member);
-    std::pair<size_t, int> srems(redis_key&& rk, std::vector<sstring>&& members);
+    // [SET]
+    future<scattered_message_ptr> sadds(redis_key&& rk, std::vector<sstring>&& members);
+    future<scattered_message_ptr> sadd(redis_key&& rk, sstring&& member);
+    future<scattered_message_ptr> scard(redis_key&& rk);
+    future<scattered_message_ptr> sismember(redis_key&& rk, sstring&& member);
+    future<scattered_message_ptr> smembers(redis_key&& rk);
+    future<scattered_message_ptr> spop(redis_key&& rk);
+    future<scattered_message_ptr> srem(redis_key&& rk, sstring&& member);
+    future<scattered_message_ptr> srems(redis_key&& rk, std::vector<sstring>&& members);
     int type(redis_key&& rk);
     long pttl(redis_key&& rk);
     long ttl(redis_key&& rk);
@@ -310,7 +238,7 @@ private:
     template<bool Key, bool Value>
     future<scattered_message_ptr> hgetall_impl(redis_key&& rk)
     {
-        return _cache_store.with_entry_run(rk, [this] (cache_entry* e) {
+        return _cache_store.with_entry_run(rk, [this] (const cache_entry* e) {
             if (!e) {
                 return reply_builder::build(msg_err);
             }

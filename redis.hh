@@ -69,10 +69,10 @@ public:
     // [TEST APIs]
     future<sstring> echo(args_collection& args);
     // [COUNTER APIs]
-    future<message> incr(args_collection& args);
-    future<message> decr(args_collection& args);
-    future<message> incrby(args_collection& args);
-    future<message> decrby(args_collection& args);
+    future<> incr(args_collection& args, output_stream<char>& out);
+    future<> decr(args_collection& args, output_stream<char>& out);
+    future<> incrby(args_collection& args, output_stream<char>& out);
+    future<> decrby(args_collection& args, output_stream<char>& out);
 
     // [STRING APIs]
     future<> mset(args_collection& args, output_stream<char>& out);
@@ -115,18 +115,18 @@ public:
     future<> hmget(args_collection& args, output_stream<char>& out);
 
     // [SET]
-    future<message> sadd(args_collection& args);
-    future<message> scard(args_collection& args);
-    future<message> srem(args_collection& args);
-    future<message> sismember(args_collection& args);
-    future<message> smembers(args_collection& args);
-    future<message> sdiff(args_collection& args);
-    future<message> sdiff_store(args_collection& args);
-    future<message> sinter(args_collection& args);
-    future<message> sinter_store(args_collection& args);
-    future<message> sunion(args_collection& args);
-    future<message> sunion_store(args_collection& args);
-    future<message> smove(args_collection& args);
+    future<> sadd(args_collection& args, output_stream<char>& out);
+    future<> scard(args_collection& args, output_stream<char>& out);
+    future<> srem(args_collection& args, output_stream<char>& out);
+    future<> sismember(args_collection& args, output_stream<char>& out);
+    future<> smembers(args_collection& args, output_stream<char>& out);
+    future<> sdiff(args_collection& args, output_stream<char>& out);
+    future<> sdiff_store(args_collection& args, output_stream<char>& out);
+    future<> sinter(args_collection& args, output_stream<char>& out);
+    future<> sinter_store(args_collection& args, output_stream<char>& out);
+    future<> sunion(args_collection& args, output_stream<char>& out);
+    future<> sunion_store(args_collection& args, output_stream<char>& out);
+    future<> smove(args_collection& args, output_stream<char>& out);
 
     future<message> type(args_collection& args);
     future<message> expire(args_collection& args);
@@ -176,13 +176,13 @@ private:
     future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
     future<std::pair<std::vector<item_ptr>, int>> range_impl(sstring& key, long begin, long end, bool reverse);
     future<bool> exists_impl(sstring& key);
-    future<int> srem_impl(sstring& key, sstring& member);
-    future<int> sadd_impl(sstring& key, sstring& member);
-    future<std::pair<size_t, int>> sadds_impl(sstring& key, std::vector<sstring>&& members);
-    future<std::vector<item_ptr>> sdiff_impl(std::vector<sstring>&& keys);
-    future<std::vector<item_ptr>> sinter_impl(std::vector<sstring>&& keys);
-    future<std::vector<item_ptr>> sunion_impl(std::vector<sstring>&& keys);
-    future<std::pair<std::vector<item_ptr>, int>> smembers_impl(sstring& key);
+    future<> srem_impl(sstring& key, sstring& member, output_stream<char>& out);
+    future<> sadd_impl(sstring& key, sstring& member, output_stream<char>& out);
+    future<> sadds_impl(sstring& key, std::vector<sstring>&& members, output_stream<char>& out);
+    future<> sdiff_impl(std::vector<sstring>&& keys, output_stream<char>& out);
+    future<> sinter_impl(std::vector<sstring>&& keys, output_stream<char>& out);
+    future<> sunion_impl(std::vector<sstring>&& keys, output_stream<char>& out);
+    future<> smembers_impl(sstring& key, output_stream<char>& out);
     future<> pop_impl(args_collection& args, bool left, output_stream<char>& out);
     future<> push_impl(args_collection& arg, bool force, bool left, output_stream<char>& out);
     future<> push_impl(sstring& key, sstring& value, bool force, bool left, output_stream<char>& out);
@@ -191,7 +191,7 @@ private:
     future<item_ptr> get_impl(sstring& key);
     future<bool> remove_impl(sstring& key);
     future<int> hdel_impl(sstring& key, sstring& field);
-    future<message> counter_by(args_collection& args, bool incr, bool with_step);
+    future<> counter_by(args_collection& args, bool incr, bool with_step, output_stream<char>& out);
     using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
     future<georadius_result_type> fetch_points_by_coord_radius(sstring& key, double log, double lat, double radius, size_t count, int flags);
     future<georadius_result_type> fetch_points_by_coord_radius(sstring& key, sstring& member_key, double radius, size_t count, int flags);

@@ -62,6 +62,14 @@ struct dict_entry
         _u._data = std::move(*(current_allocator().construct<managed_bytes>(bytes_view {reinterpret_cast<const signed char*>(val.data()), val.size()})));
     }
 
+    dict_entry(const sstring& key) noexcept
+        : _link()
+        , _key(std::move(*(current_allocator().construct<managed_bytes>(bytes_view {reinterpret_cast<const signed char*>(key.data()), key.size()}))))
+        , _key_hash(std::hash<managed_bytes>()(_key))
+        , _type(entry_type::BYTES)
+    {
+    }
+
     dict_entry(const sstring& key, double data) noexcept
         : _link()
         , _key(std::move(*(current_allocator().construct<managed_bytes>(bytes_view {reinterpret_cast<const signed char*>(key.data()), key.size()}))))
@@ -250,11 +258,19 @@ public:
         flush_all();
     }
 
-    inline bool exists(const sstring& key)
+    inline bool exists(const sstring& key) const
     {
         return _dict.find(key, dict_entry::compare()) != _dict.end();
     }
 
+    inline const dict_entry* begin() const
+    {
+        if (_dict.begin() != _dict.end()) {
+            const auto& e = *(_dict.begin());
+            return &e;
+        }
+        return nullptr;
+    }
     void fetch(const std::vector<sstring>& keys, std::vector<const dict_entry*>& entries) const {
         for (const auto& key : keys) {
             auto it = _dict.find(key, dict_entry::compare());
