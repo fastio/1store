@@ -27,8 +27,6 @@
 #include <sstream>
 #include <iostream>
 #include "common.hh"
-#include "dict.hh"
-#include "sorted_set.hh"
 #include "redis_timer_set.hh"
 #include "geo.hh"
 #include "bitmap.hh"
@@ -38,7 +36,7 @@
 namespace redis {
 
 namespace stdx = std::experimental;
-using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
+//using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
 struct remote_origin_tag {
     template <typename T>
@@ -61,65 +59,70 @@ public:
     database();
     ~database();
 
-    bool set(redis_key&& rk, sstring&& val, long expire, uint32_t flag);
+    bool set(const redis_key& rk, sstring& val, long expire, uint32_t flag);
 
-    future<scattered_message_ptr> counter_by(redis_key&& rk, int64_t step, bool incr);
-    future<scattered_message_ptr> append(redis_key&& rk, sstring&& val);
+    future<scattered_message_ptr> counter_by(const redis_key& rk, int64_t step, bool incr);
+    future<scattered_message_ptr> append(const redis_key& rk, sstring& val);
 
-    bool del(redis_key&& key);
+    bool del(const redis_key& key);
 
-    bool exists(redis_key&& key);
+    bool exists(const redis_key& key);
 
-    future<scattered_message_ptr> get(redis_key&& key);
-    future<scattered_message_ptr> strlen(redis_key&& key);
+    future<scattered_message_ptr> get(const redis_key& key);
+    future<scattered_message_ptr> strlen(const redis_key& key);
 
-    int expire(redis_key&& rk, long expired);
-    int persist(redis_key&& rk);
+    int expire(const redis_key& rk, long expired);
+    int persist(const redis_key& rk);
 
     // [LIST]
-    future<scattered_message_ptr> push(redis_key&& rk, sstring&& value, bool force, bool left);
-    future<scattered_message_ptr> push_multi(redis_key&& rk, std::vector<sstring>&& value, bool force, bool left);
-    future<scattered_message_ptr> pop(redis_key&& rk, bool left);
-    future<scattered_message_ptr> llen(redis_key&& rk);
-    future<scattered_message_ptr> lindex(redis_key&& rk, long idx);
-    future<scattered_message_ptr> linsert(redis_key&& rk, sstring&& pivot, sstring&& value, bool after);
-    future<scattered_message_ptr> lrange(redis_key&& rk, long start, long end);
-    future<scattered_message_ptr> lset(redis_key&& rk, long idx, sstring&& value);
-    future<scattered_message_ptr> lrem(redis_key&& rk, long count, sstring&& value);
-    future<scattered_message_ptr> ltrim(redis_key&& rk, long start, long end);
+    future<scattered_message_ptr> push(const redis_key& rk, sstring& value, bool force, bool left);
+    future<scattered_message_ptr> push_multi(const redis_key& rk, std::vector<sstring>& value, bool force, bool left);
+    future<scattered_message_ptr> pop(const redis_key& rk, bool left);
+    future<scattered_message_ptr> llen(const redis_key& rk);
+    future<scattered_message_ptr> lindex(const redis_key& rk, long idx);
+    future<scattered_message_ptr> linsert(const redis_key& rk, sstring& pivot, sstring& value, bool after);
+    future<scattered_message_ptr> lrange(const redis_key& rk, long start, long end);
+    future<scattered_message_ptr> lset(const redis_key& rk, long idx, sstring& value);
+    future<scattered_message_ptr> lrem(const redis_key& rk, long count, sstring& value);
+    future<scattered_message_ptr> ltrim(const redis_key& rk, long start, long end);
 
     // [HASHMAP]
-    future<scattered_message_ptr> hset(redis_key&& rk, sstring&& field, sstring&& value);
-    future<scattered_message_ptr> hmset(redis_key&& rk, std::unordered_map<sstring, sstring>&& kv);
-    future<scattered_message_ptr> hget(redis_key&& rk, sstring&& field);
-    future<scattered_message_ptr> hdel(redis_key&& rk, sstring&& field);
-    future<scattered_message_ptr> hdel_multi(redis_key&& rk, std::vector<sstring>&& fields);
-    future<scattered_message_ptr> hexists(redis_key&& rk, sstring&& field);
-    future<scattered_message_ptr> hstrlen(redis_key&& rk, sstring&& field);
-    future<scattered_message_ptr> hlen(redis_key&& rk);
-    future<scattered_message_ptr> hincrby(redis_key&& rk, sstring&& field, int64_t delta);
-    future<scattered_message_ptr> hincrbyfloat(redis_key&& rk, sstring&& field, double delta);
-    future<scattered_message_ptr> hgetall(redis_key&& rk);
-    future<scattered_message_ptr> hgetall_values(redis_key&& rk);
-    future<scattered_message_ptr> hgetall_keys(redis_key&& rk);
-    future<scattered_message_ptr> hmget(redis_key&& rk, std::vector<sstring>&& keys);
+    future<scattered_message_ptr> hset(const redis_key& rk, sstring& field, sstring& value);
+    future<scattered_message_ptr> hmset(const redis_key& rk, std::unordered_map<sstring, sstring>& kv);
+    future<scattered_message_ptr> hget(const redis_key& rk, sstring& field);
+    future<scattered_message_ptr> hdel(const redis_key& rk, sstring& field);
+    future<scattered_message_ptr> hdel_multi(const redis_key& rk, std::vector<sstring>& fields);
+    future<scattered_message_ptr> hexists(const redis_key& rk, sstring& field);
+    future<scattered_message_ptr> hstrlen(const redis_key& rk, sstring& field);
+    future<scattered_message_ptr> hlen(const redis_key& rk);
+    future<scattered_message_ptr> hincrby(const redis_key& rk, sstring& field, int64_t delta);
+    future<scattered_message_ptr> hincrbyfloat(const redis_key& rk, sstring& field, double delta);
+    future<scattered_message_ptr> hgetall(const redis_key& rk);
+    future<scattered_message_ptr> hgetall_values(const redis_key& rk);
+    future<scattered_message_ptr> hgetall_keys(const redis_key& rk);
+    future<scattered_message_ptr> hmget(const redis_key& rk, std::vector<sstring>& keys);
 
     // [SET]
-    future<scattered_message_ptr> sadds(redis_key&& rk, std::vector<sstring>&& members);
-    future<scattered_message_ptr> sadd(redis_key&& rk, sstring&& member);
-    future<scattered_message_ptr> scard(redis_key&& rk);
-    future<scattered_message_ptr> sismember(redis_key&& rk, sstring&& member);
-    future<scattered_message_ptr> smembers(redis_key&& rk);
-    future<scattered_message_ptr> spop(redis_key&& rk);
-    future<scattered_message_ptr> srem(redis_key&& rk, sstring&& member);
-    future<scattered_message_ptr> srems(redis_key&& rk, std::vector<sstring>&& members);
-    int type(redis_key&& rk);
-    long pttl(redis_key&& rk);
-    long ttl(redis_key&& rk);
+    future<scattered_message_ptr> sadds(const redis_key& rk, std::vector<sstring>& members);
+    bool sadds_direct(const redis_key& rk, std::vector<sstring>& members);
+    bool sadd_direct(const redis_key& rk, sstring& member);
+    future<scattered_message_ptr> sadd(const redis_key& rk, sstring& member);
+    future<scattered_message_ptr> scard(const redis_key& rk);
+    future<scattered_message_ptr> sismember(const redis_key& rk, sstring& member);
+    future<scattered_message_ptr> smembers(const redis_key& rk);
+    future<scattered_message_ptr> spop(const redis_key& rk);
+    future<scattered_message_ptr> srem(const redis_key& rk, sstring& member);
+    bool srem_direct(const redis_key& rk, sstring& member);
+    future<scattered_message_ptr> srems(const redis_key& rk, std::vector<sstring>& members);
+    future<foreign_ptr<lw_shared_ptr<std::vector<sstring>>>> smembers_direct(const redis_key& rk);
+    int type(const redis_key& rk);
+    long pttl(const redis_key& rk);
+    long ttl(const redis_key& rk);
     template <typename origin = local_origin_tag> inline
-    std::pair<size_t, int> zadds(redis_key&& rk, std::unordered_map<sstring, double>&& members, int flags)
+    std::pair<size_t, int> zadds(const redis_key& rk, std::unordered_map<sstring, double>& members, int flags)
     {
         using result_type = std::pair<size_t, int>;
+/*
         auto it = _store->fetch_raw(rk);
         sorted_set* zset = nullptr;
         if (!it) {
@@ -160,16 +163,18 @@ public:
                 }
             }
         }
-        return result_type {count, REDIS_OK};
+*/
+        return result_type {0, REDIS_OK};
     }
 
-    std::pair<size_t, int> zcard(redis_key&& rk);
-    std::pair<size_t, int> zrem(redis_key&& rk, std::vector<sstring>&& members);
-    std::pair<size_t, int> zcount(redis_key&& rk, double min, double max);
+    std::pair<size_t, int> zcard(const redis_key& rk);
+    std::pair<size_t, int> zrem(const redis_key& rk, std::vector<sstring>& members);
+    std::pair<size_t, int> zcount(const redis_key& rk, double min, double max);
     template <typename origin = local_origin_tag> inline
-    std::pair<double, int> zincrby(redis_key&& rk, sstring&& member, double delta)
+    std::pair<double, int> zincrby(const redis_key& rk, sstring& member, double delta)
     {
         using result_type = std::pair<double, int>;
+        /*
         auto it = _store->fetch_raw(rk);
         if (it && it->type() != REDIS_ZSET) {
             return result_type{0, REDIS_WRONG_TYPE};
@@ -198,34 +203,39 @@ public:
         else {
             return result_type {0, REDIS_ERR};
         }
+        */
+            return result_type{0, REDIS_WRONG_TYPE};
     }
-    std::pair<std::vector<item_ptr>, int> zrange(redis_key&& rk, long begin, long end, bool reverse);
-    std::pair<std::vector<item_ptr>, int> zrangebyscore(redis_key&& rk, double min, double max, bool reverse);
-    std::pair<size_t, int> zrank(redis_key&& rk, sstring&& member, bool reverse);
-    std::pair<double, int> zscore(redis_key&& rk, sstring&& member);
-    std::pair<size_t, int> zremrangebyscore(redis_key&& rk, double min, double max);
-    std::pair<size_t, int> zremrangebyrank(redis_key&& rk, size_t begin, size_t end);
+    /*
+    //std::pair<std::vector<item_ptr>, int> zrange(const redis_key& rk, long begin, long end, bool reverse);
+    //std::pair<std::vector<item_ptr>, int> zrangebyscore(const redis_key& rk, double min, double max, bool reverse);
+    std::pair<size_t, int> zrank(const redis_key& rk, sstring& member, bool reverse);
+    std::pair<double, int> zscore(const redis_key& rk, sstring& member);
+    std::pair<size_t, int> zremrangebyscore(const redis_key& rk, double min, double max);
+    std::pair<size_t, int> zremrangebyrank(const redis_key& rk, size_t begin, size_t end);
     int select(int index);
 
     // [GEO]
-    std::pair<double, int> geodist(redis_key&& rk, sstring&& lpos, sstring&& rpos, int flag);
-    std::pair<std::vector<sstring>, int> geohash(redis_key&& rk, std::vector<sstring>&& members);
-    std::pair<std::vector<std::tuple<double, double, bool>>, int> geopos(redis_key&& rk, std::vector<sstring>&& members);
+    std::pair<double, int> geodist(const redis_key& rk, sstring& lpos, sstring& rpos, int flag);
+    std::pair<std::vector<sstring>, int> geohash(const redis_key& rk, std::vector<sstring>& members);
+    std::pair<std::vector<std::tuple<double, double, bool>>, int> geopos(const redis_key& rk, std::vector<sstring>& members);
     // [key, dist, score, longitude, latitude]
     using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
-    georadius_result_type georadius_coord(redis_key&& rk, double longtitude, double latitude, double radius, size_t count, int flag);
-    georadius_result_type georadius_member(redis_key&& rk, sstring&& pos, double radius, size_t count, int flag);
+    georadius_result_type georadius_coord(const redis_key& rk, double longtitude, double latitude, double radius, size_t count, int flag);
+    georadius_result_type georadius_member(const redis_key& rk, sstring& pos, double radius, size_t count, int flag);
 
     // [BITMAP]
-    std::pair<bool, int> setbit(redis_key&& rk, size_t offset, bool value);
-    std::pair<bool, int> getbit(redis_key&& rk, size_t offset);
-    std::pair<size_t, int> bitcount(redis_key&& rk, long start, long end);
-    std::pair<size_t, int> bitop(redis_key&& rk, int flags, std::vector<sstring>&& keys);
-    std::pair<size_t, int> bitpos(redis_key&& rk, bool bit, long start, long end);
-
+    std::pair<bool, int> setbit(const redis_key& rk, size_t offset, bool value);
+    std::pair<bool, int> getbit(const redis_key& rk, size_t offset);
+    std::pair<size_t, int> bitcount(const redis_key& rk, long start, long end);
+    std::pair<size_t, int> bitop(const redis_key& rk, int flags, std::vector<sstring>& keys);
+    std::pair<size_t, int> bitpos(const redis_key& rk, bool bit, long start, long end);
+*/
     future<> stop();
 private:
+/*
     georadius_result_type georadius(sorted_set* zset, double longtitude, double latitude, double radius, size_t count, int flag);
+*/
     void expired_items();
     static inline long alignment_index_base_on(size_t size, long index)
     {
@@ -236,7 +246,7 @@ private:
     }
 
     template<bool Key, bool Value>
-    future<scattered_message_ptr> hgetall_impl(redis_key&& rk)
+    future<scattered_message_ptr> hgetall_impl(const redis_key& rk)
     {
         return _cache_store.with_entry_run(rk, [this] (const cache_entry* e) {
             if (!e) {
@@ -253,10 +263,10 @@ private:
     }
 private:
     static const int DEFAULT_DB_COUNT = 32;
-    dict* _store = nullptr;
-    dict  _data_storages[DEFAULT_DB_COUNT];
-    timer_set<item> _alive;
-    timer<clock_type> _timer;
+//    dict* _store = nullptr;
+ //   dict  _data_storages[DEFAULT_DB_COUNT];
+    //timer_set<item> _alive;
+ //   timer<clock_type> _timer;
     cache _cache_store;
 };
 }

@@ -24,6 +24,7 @@
 #include <cstring>
 namespace redis
 {
+    /*
 struct skiplist_node
 {
     lw_shared_ptr<item> _value;
@@ -723,4 +724,5 @@ std::vector<foreign_ptr<lw_shared_ptr<item>>> sorted_set::fetch(const std::vecto
 {
     return _rep->fetch(keys);
 }
+*/
 }

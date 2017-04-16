@@ -290,5 +290,12 @@ public:
             entries.push_back(&e);
         }
     }
+
+    void fetch_keys(std::vector<sstring>& entries) const {
+        for (auto it = _dict.begin(); it != _dict.end(); ++it) {
+            const auto& e = *it;
+            entries.emplace_back(std::move(sstring(e.key_data(), e.key_size())));
+        }
+    }
 };
 }

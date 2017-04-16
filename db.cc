@@ -23,15 +23,15 @@ namespace redis {
 database::database()
 {
     using namespace std::chrono;
-    _timer.set_callback([this] { expired_items(); });
-    _store = &_data_storages[0];
+    //_timer.set_callback([this] { expired_items(); });
+    //_store = &_data_storages[0];
 }
 
 database::~database()
 {
 }
 
-bool database::set(redis_key&& rk, sstring&& val, long expire, uint32_t flag)
+bool database::set(const redis_key& rk, sstring& val, long expire, uint32_t flag)
 {
     return with_allocator(allocator(), [this, &rk, &val] {
         auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
@@ -40,19 +40,19 @@ bool database::set(redis_key&& rk, sstring&& val, long expire, uint32_t flag)
     });
 }
 
-bool database::del(redis_key&& rk)
+bool database::del(const redis_key& rk)
 {
     return with_allocator(allocator(), [this, &rk] {
         return _cache_store.erase(rk);
     });
 }
 
-bool database::exists(redis_key&& rk)
+bool database::exists(const redis_key& rk)
 {
     return _cache_store.exists(rk);
 }
 
-future<scattered_message_ptr> database::counter_by(redis_key&& rk, int64_t step, bool incr)
+future<scattered_message_ptr> database::counter_by(const redis_key& rk, int64_t step, bool incr)
 {
     return with_allocator(allocator(), [this, &rk, step, incr] {
         return _cache_store.with_entry_run(rk, [this, &rk, step, incr] (cache_entry* e) {
@@ -71,7 +71,7 @@ future<scattered_message_ptr> database::counter_by(redis_key&& rk, int64_t step,
     });
 }
 
-future<scattered_message_ptr> database::append(redis_key&& rk, sstring&& val)
+future<scattered_message_ptr> database::append(const redis_key& rk, sstring& val)
 {
     return with_allocator(allocator(), [this, &rk, &val] {
         return _cache_store.with_entry_run(rk, [this, &rk, &val] (cache_entry* e) {
@@ -99,9 +99,9 @@ future<scattered_message_ptr> database::append(redis_key&& rk, sstring&& val)
     });
 }
 
-future<scattered_message_ptr> database::get(redis_key&& rk)
+future<scattered_message_ptr> database::get(const redis_key& rk)
 {
-    return with_linearized_managed_bytes([this, rk = std::move(rk)] {
+    return with_linearized_managed_bytes([this, &rk] {
         return _cache_store.with_entry_run(rk, [] (const cache_entry* e) {
            if (e && e->type_of_bytes() == false) {
                return reply_builder::build(msg_type_err);
@@ -113,9 +113,9 @@ future<scattered_message_ptr> database::get(redis_key&& rk)
     });
 }
 
-future<scattered_message_ptr> database::strlen(redis_key&& rk)
+future<scattered_message_ptr> database::strlen(const redis_key& rk)
 {
-    return with_linearized_managed_bytes([this, rk = std::move(rk)] {
+    return with_linearized_managed_bytes([this, &rk] {
         return _cache_store.with_entry_run(rk, [] (const cache_entry* e) {
             if (e) {
                 if (e->type_of_bytes()) {
@@ -128,17 +128,21 @@ future<scattered_message_ptr> database::strlen(redis_key&& rk)
    });
 }
 
-int database::type(redis_key&& rk)
+int database::type(const redis_key& rk)
 {
+    /*
     auto it = _store->fetch_raw(rk);
     if (!it) {
         return REDIS_ERR;
     }
     return static_cast<int>(it->type());
+    */
+    return REDIS_ERR;
 }
 
-int database::expire(redis_key&& rk, long expired)
+int database::expire(const redis_key& rk, long expired)
 {
+    /*
     auto expiry = expiration(expired);
     auto it = _store->fetch_raw(rk);
     if (it) {
@@ -149,23 +153,26 @@ int database::expire(redis_key&& rk, long expired)
         }
         it->set_never_expired();
     }
+    */
     return REDIS_ERR;
 }
 
-int database::persist(redis_key&& rk)
+int database::persist(const redis_key& rk)
 {
+    /*
     auto it = _store->fetch_raw(rk);
     if (it) {
         it->set_never_expired();
         return REDIS_OK;
     }
+    */
     return REDIS_ERR;
 }
 
-future<scattered_message_ptr> database::push(redis_key&& rk, sstring&& value, bool force, bool left)
+future<scattered_message_ptr> database::push(const redis_key& rk, sstring& val, bool force, bool left)
 {
-    return with_allocator(allocator(), [this, &rk, &value, force, left] () {
-        return _cache_store.with_entry_run(rk, [this, &rk, val = std::move(value), force, left] (cache_entry* o) {
+    return with_allocator(allocator(), [this, &rk, &val, force, left] () {
+        return _cache_store.with_entry_run(rk, [this, &rk, &val, force, left] (cache_entry* o) {
             auto e = o;
             if (!e) {
                  if (!force) {
@@ -186,10 +193,10 @@ future<scattered_message_ptr> database::push(redis_key&& rk, sstring&& value, bo
     });
 }
 
-future<scattered_message_ptr> database::push_multi(redis_key&& rk, std::vector<sstring>&& values, bool force, bool left)
+future<scattered_message_ptr> database::push_multi(const redis_key& rk, std::vector<sstring>& values, bool force, bool left)
 {
     return with_allocator(allocator(), [this, &rk, &values, force, left] () {
-        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), vals = std::move(values), force, left] (cache_entry* o) {
+        return _cache_store.with_entry_run(rk, [this, &rk, &values, force, left] (cache_entry* o) {
             auto e = o;
             if (!e) {
                  if (!force) {
@@ -204,7 +211,7 @@ future<scattered_message_ptr> database::push_multi(redis_key&& rk, std::vector<s
                 return reply_builder::build(msg_type_err);
             }
             auto& list = e->value_list();
-            for (auto& val : vals) {
+            for (auto& val : values) {
                 left ? list.insert_head(val) : list.insert_tail(val);
             }
             return reply_builder::build(list.size());
@@ -212,10 +219,10 @@ future<scattered_message_ptr> database::push_multi(redis_key&& rk, std::vector<s
     });
 }
 
-future<scattered_message_ptr> database::pop(redis_key&& rk, bool left)
+future<scattered_message_ptr> database::pop(const redis_key& rk, bool left)
 {
     return with_allocator(allocator(), [this, &rk, left] () {
-        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), left] (cache_entry* e) {
+        return _cache_store.with_entry_run(rk, [this, &rk, left] (cache_entry* e) {
             if (!e) {
                 return reply_builder::build(msg_nil);
             }
@@ -236,9 +243,9 @@ future<scattered_message_ptr> database::pop(redis_key&& rk, bool left)
     });
 }
 
-future<scattered_message_ptr> database::llen(redis_key&& rk)
+future<scattered_message_ptr> database::llen(const redis_key& rk)
 {
-    return _cache_store.with_entry_run(rk, [rk = std::move(rk)] (const cache_entry* e) {
+    return _cache_store.with_entry_run(rk, [&rk] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_zero);
         }
@@ -250,9 +257,9 @@ future<scattered_message_ptr> database::llen(redis_key&& rk)
     });
 }
 
-future<scattered_message_ptr> database::lindex(redis_key&& rk, long idx)
+future<scattered_message_ptr> database::lindex(const redis_key& rk, long idx)
 {
-    return _cache_store.with_entry_run(rk, [rk = std::move(rk), idx] (const cache_entry* e) {
+    return _cache_store.with_entry_run(rk, [&rk, idx] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_nil);
         }
@@ -269,9 +276,9 @@ future<scattered_message_ptr> database::lindex(redis_key&& rk, long idx)
     });
 }
 
-future<scattered_message_ptr> database::lrange(redis_key&& rk, long start, long end)
+future<scattered_message_ptr> database::lrange(const redis_key& rk, long start, long end)
 {
-    return _cache_store.with_entry_run(rk, [rk = std::move(rk), &start, &end] (const cache_entry* e) {
+    return _cache_store.with_entry_run(rk, [&rk, &start, &end] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_err);
         }
@@ -294,10 +301,10 @@ future<scattered_message_ptr> database::lrange(redis_key&& rk, long start, long 
     });
 }
 
-future<scattered_message_ptr> database::lrem(redis_key&& rk, long count, sstring&& value)
+future<scattered_message_ptr> database::lrem(const redis_key& rk, long count, sstring& val)
 {
-    return with_allocator(allocator(), [this, &rk, count, &value] {
-        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), val = std::move(value), &count] (cache_entry* e) {
+    return with_allocator(allocator(), [this, &rk, count, &val] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &val, &count] (cache_entry* e) {
             if (!e) {
                 return reply_builder::build(msg_err);
             }
@@ -317,10 +324,10 @@ future<scattered_message_ptr> database::lrem(redis_key&& rk, long count, sstring
     });
 }
 
-future<scattered_message_ptr> database::linsert(redis_key&& rk, sstring&& pivot, sstring&& value, bool after)
+future<scattered_message_ptr> database::linsert(const redis_key& rk, sstring& pivot, sstring& val, bool after)
 {
-    return with_allocator(allocator(), [this, &rk, &pivot, &value, after] {
-        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), val = std::move(value), pivot = std::move(pivot), after] (cache_entry* e) {
+    return with_allocator(allocator(), [this, &rk, &pivot, &val, after] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &val, &pivot, after] (cache_entry* e) {
             if (!e) {
                 return reply_builder::build(msg_zero);
             }
@@ -345,10 +352,10 @@ future<scattered_message_ptr> database::linsert(redis_key&& rk, sstring&& pivot,
     });
 }
 
-future<scattered_message_ptr> database::lset(redis_key&& rk, long idx, sstring&& value)
+future<scattered_message_ptr> database::lset(const redis_key& rk, long idx, sstring& val)
 {
-    return with_allocator(allocator(), [this, &rk, idx, &value] {
-        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), idx, val = std::move(value)] (cache_entry* e) {
+    return with_allocator(allocator(), [this, &rk, idx, &val] {
+        return _cache_store.with_entry_run(rk, [this, &rk, idx, &val] (cache_entry* e) {
             if (!e) {
                 return reply_builder::build(msg_nokey_err);
             }
@@ -369,10 +376,10 @@ future<scattered_message_ptr> database::lset(redis_key&& rk, long idx, sstring&&
     });
 }
 
-future<scattered_message_ptr> database::ltrim(redis_key&& rk, long start, long end)
+future<scattered_message_ptr> database::ltrim(const redis_key& rk, long start, long end)
 {
     return with_allocator(allocator(), [this, &rk, start, end] {
-        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), start, end] (cache_entry* e) {
+        return _cache_store.with_entry_run(rk, [this, &rk, start, end] (cache_entry* e) {
             if (!e) {
                 return reply_builder::build(msg_ok);
             }
@@ -395,10 +402,10 @@ future<scattered_message_ptr> database::ltrim(redis_key&& rk, long start, long e
     });
 }
 
-future<scattered_message_ptr> database::hset(redis_key&& rk, sstring&& field, sstring&& value)
+future<scattered_message_ptr> database::hset(const redis_key& rk, sstring& key, sstring& val)
 {
-    return with_allocator(allocator(), [this, &rk, &field, &value] {
-        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), key = std::move(field), val = std::move(value)] (cache_entry* o) {
+    return with_allocator(allocator(), [this, &rk, &key, &val] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &key, &val] (cache_entry* o) {
             auto e = o;
             if (!e) {
                 // the rk was not exists, then create it.
@@ -418,10 +425,10 @@ future<scattered_message_ptr> database::hset(redis_key&& rk, sstring&& field, ss
     });
 }
 
-future<scattered_message_ptr> database::hincrby(redis_key&& rk, sstring&& key, int64_t delta)
+future<scattered_message_ptr> database::hincrby(const redis_key& rk, sstring& key, int64_t delta)
 {
     return with_allocator(allocator(), [this, &rk, &key, delta] {
-        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), key = std::move(key), delta] (cache_entry* o) {
+        return _cache_store.with_entry_run(rk, [this, &rk, &key, delta] (cache_entry* o) {
             auto e = o;
             if (!e) {
                 // the rk was not exists, then create it.
@@ -449,10 +456,10 @@ future<scattered_message_ptr> database::hincrby(redis_key&& rk, sstring&& key, i
     });
 }
 
-future<scattered_message_ptr> database::hincrbyfloat(redis_key&& rk, sstring&& key, double delta)
+future<scattered_message_ptr> database::hincrbyfloat(const redis_key& rk, sstring& key, double delta)
 {
     return with_allocator(allocator(), [this, &rk, &key, delta] {
-        return _cache_store.with_entry_run(rk, [this, rk = std::move(rk), key = std::move(key), delta] (cache_entry* o) {
+        return _cache_store.with_entry_run(rk, [this, &rk, &key, delta] (cache_entry* o) {
             auto e = o;
             if (!e) {
                 // the rk was not exists, then create it.
@@ -480,10 +487,10 @@ future<scattered_message_ptr> database::hincrbyfloat(redis_key&& rk, sstring&& k
     });
 }
 
-future<scattered_message_ptr> database::hmset(redis_key&& rk, std::unordered_map<sstring, sstring>&& kvs)
+future<scattered_message_ptr> database::hmset(const redis_key& rk, std::unordered_map<sstring, sstring>& kvs)
 {
     return with_allocator(allocator(), [this, &rk, &kvs] {
-        return _cache_store.with_entry_run(rk, [this, &rk, kvs = std::move(kvs)] (cache_entry* o) {
+        return _cache_store.with_entry_run(rk, [this, &rk, &kvs] (cache_entry* o) {
             auto e = o;
             if (!e) {
                 // the rk was not exists, then create it.
@@ -506,9 +513,9 @@ future<scattered_message_ptr> database::hmset(redis_key&& rk, std::unordered_map
     });
 }
 
-future<scattered_message_ptr> database::hget(redis_key&& rk, sstring&& field)
+future<scattered_message_ptr> database::hget(const redis_key& rk, sstring& key)
 {
-    return _cache_store.with_entry_run(rk, [this, key = std::move(field)] (cache_entry* e) {
+    return _cache_store.with_entry_run(rk, [this, &key] (cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_err);
         }
@@ -524,7 +531,7 @@ future<scattered_message_ptr> database::hget(redis_key&& rk, sstring&& field)
     });
 }
 
-future<scattered_message_ptr> database::hdel_multi(redis_key&& rk, std::vector<sstring>&& keys)
+future<scattered_message_ptr> database::hdel_multi(const redis_key& rk, std::vector<sstring>& keys)
 {
     return with_allocator(allocator(), [this, &rk, &keys] {
         return _cache_store.with_entry_run(rk, [this, &rk, &keys] (cache_entry* e) {
@@ -550,7 +557,7 @@ future<scattered_message_ptr> database::hdel_multi(redis_key&& rk, std::vector<s
 }
 
 
-future<scattered_message_ptr> database::hdel(redis_key&& rk, sstring&& key)
+future<scattered_message_ptr> database::hdel(const redis_key& rk, sstring& key)
 {
     return with_allocator(allocator(), [this, &rk, &key] {
         return _cache_store.with_entry_run(rk, [this, &rk, &key] (cache_entry* e) {
@@ -570,7 +577,7 @@ future<scattered_message_ptr> database::hdel(redis_key&& rk, sstring&& key)
     });
 }
 
-future<scattered_message_ptr> database::hexists(redis_key&& rk, sstring&& key)
+future<scattered_message_ptr> database::hexists(const redis_key& rk, sstring& key)
 {
     return with_allocator(allocator(), [this, &rk, &key] {
         return _cache_store.with_entry_run(rk, [this, &key] (cache_entry* e) {
@@ -587,7 +594,7 @@ future<scattered_message_ptr> database::hexists(redis_key&& rk, sstring&& key)
     });
 }
 
-future<scattered_message_ptr> database::hstrlen(redis_key&& rk, sstring&& key)
+future<scattered_message_ptr> database::hstrlen(const redis_key& rk, sstring& key)
 {
     return _cache_store.with_entry_run(rk, [this, &key] (cache_entry* e) {
         if (!e) {
@@ -606,7 +613,7 @@ future<scattered_message_ptr> database::hstrlen(redis_key&& rk, sstring&& key)
     });
 }
 
-future<scattered_message_ptr> database::hlen(redis_key&& rk)
+future<scattered_message_ptr> database::hlen(const redis_key& rk)
 {
     return _cache_store.with_entry_run(rk, [this] (cache_entry* e) {
         if (!e) {
@@ -620,23 +627,23 @@ future<scattered_message_ptr> database::hlen(redis_key&& rk)
     });
 }
 
-future<scattered_message_ptr> database::hgetall(redis_key&& rk)
+future<scattered_message_ptr> database::hgetall(const redis_key& rk)
 {
-    return hgetall_impl<true, true>(std::move(rk));
+    return hgetall_impl<true, true>(rk);
 }
 
-future<scattered_message_ptr> database::hgetall_values(redis_key&& rk)
+future<scattered_message_ptr> database::hgetall_values(const redis_key& rk)
 {
-    return hgetall_impl<false, true>(std::move(rk));
+    return hgetall_impl<false, true>(rk);
 }
 
-future<scattered_message_ptr> database::hgetall_keys(redis_key&& rk)
+future<scattered_message_ptr> database::hgetall_keys(const redis_key& rk)
 {
-    return hgetall_impl<true, false>(std::move(rk));
+    return hgetall_impl<true, false>(rk);
 }
 
 
-future<scattered_message_ptr> database::hmget(redis_key&& rk, std::vector<sstring>&& keys)
+future<scattered_message_ptr> database::hmget(const redis_key& rk, std::vector<sstring>& keys)
 {
     return _cache_store.with_entry_run(rk, [this, &keys] (const cache_entry* e) {
         if (!e) {
@@ -652,7 +659,7 @@ future<scattered_message_ptr> database::hmget(redis_key&& rk, std::vector<sstrin
     });
 }
 
-future<scattered_message_ptr> database::sadds(redis_key&& rk, std::vector<sstring>&& members)
+future<scattered_message_ptr> database::sadds(const redis_key& rk, std::vector<sstring>& members)
 {
     return with_allocator(allocator(), [this, &rk, &members] {
         return _cache_store.with_entry_run(rk, [this, &rk, &members] (cache_entry* e) {
@@ -677,7 +684,52 @@ future<scattered_message_ptr> database::sadds(redis_key&& rk, std::vector<sstrin
     });
 }
 
-future<scattered_message_ptr> database::scard(redis_key&& rk)
+bool database::sadd_direct(const redis_key& rk, sstring& member)
+{
+    return with_allocator(allocator(), [this, &rk, &member] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &member] (cache_entry* e) {
+            auto o = e;
+            if (!o) {
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::set_initializer());
+                _cache_store.insert(entry);
+                o = entry;
+            }
+            if (o->type_of_set() == false) {
+                return false;
+            }
+            auto& set = o->value_set();
+            set.insert(current_allocator().construct<dict_entry>(member));
+            return true;
+        });
+    });
+}
+
+bool database::sadds_direct(const redis_key& rk, std::vector<sstring>& members)
+{
+    return with_allocator(allocator(), [this, &rk, &members] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &members] (cache_entry* e) {
+            auto o = e;
+            if (!o) {
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::set_initializer());
+                _cache_store.insert(entry);
+                o = entry;
+            }
+            if (o->type_of_set() == false) {
+                return false;
+            }
+            auto& set = o->value_set();
+            size_t inserted = 0;
+            for (auto& member : members) {
+                if (set.insert(current_allocator().construct<dict_entry>(member))) {
+                    inserted++;
+                }
+            }
+            return true;
+        });
+    });
+}
+
+future<scattered_message_ptr> database::scard(const redis_key& rk)
 {
      return _cache_store.with_entry_run(rk, [] (const cache_entry* e) {
         if (!e) {
@@ -691,7 +743,7 @@ future<scattered_message_ptr> database::scard(redis_key&& rk)
      });
 }
 
-future<scattered_message_ptr> database::sismember(redis_key&& rk, sstring&& member)
+future<scattered_message_ptr> database::sismember(const redis_key& rk, sstring& member)
 {
      return _cache_store.with_entry_run(rk, [&member] (const cache_entry* e) {
         if (!e) {
@@ -706,9 +758,9 @@ future<scattered_message_ptr> database::sismember(redis_key&& rk, sstring&& memb
      });
 }
 
-future<scattered_message_ptr> database::smembers(redis_key&& rk)
+future<scattered_message_ptr> database::smembers(const redis_key& rk)
 {
-    return _cache_store.with_entry_run(rk, [this] (const cache_entry* e) {
+    return _cache_store.with_entry_run(rk, [] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_nil);
         }
@@ -722,7 +774,22 @@ future<scattered_message_ptr> database::smembers(redis_key&& rk)
     });
 }
 
-future<scattered_message_ptr> database::spop(redis_key&& rk)
+future<foreign_ptr<lw_shared_ptr<std::vector<sstring>>>> database::smembers_direct(const redis_key& rk)
+{
+    using result_type = std::vector<sstring>;
+    using return_type =foreign_ptr<lw_shared_ptr<result_type>>;
+    return _cache_store.with_entry_run(rk, [] (const cache_entry* e) {
+        if (!e || e->type_of_set() == false) {
+            return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<result_type>>(make_lw_shared<result_type>(result_type {})));
+        }
+        auto& set = e->value_set();
+        result_type keys;
+        set.fetch_keys(keys);
+        return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<result_type>>(make_lw_shared<result_type>(std::move(keys))));
+    });
+}
+
+future<scattered_message_ptr> database::spop(const redis_key& rk)
 {
     return _cache_store.with_entry_run(rk, [this] (const cache_entry* e) {
         if (!e) {
@@ -736,7 +803,7 @@ future<scattered_message_ptr> database::spop(redis_key&& rk)
     });
 }
 
-future<scattered_message_ptr> database::srem(redis_key&& rk, sstring&& member)
+future<scattered_message_ptr> database::srem(const redis_key& rk, sstring& member)
 {
     return with_allocator(allocator(), [this, &rk, &member] {
         return _cache_store.with_entry_run(rk, [this, &rk, &member] (cache_entry* e) {
@@ -755,8 +822,27 @@ future<scattered_message_ptr> database::srem(redis_key&& rk, sstring&& member)
         });
     });
 }
+bool database::srem_direct(const redis_key& rk, sstring& member)
+{
+    return with_allocator(allocator(), [this, &rk, &member] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &member] (cache_entry* e) {
+            if (!e) {
+                return true;
+            }
+            if (e->type_of_set() == false) {
+                return false;
+            }
+            auto& set = e->value_set();
+            auto result = set.erase(member);
+            if (set.empty()) {
+                _cache_store.erase(rk);
+            }
+            return result;
+        });
+    });
+}
 
-future<scattered_message_ptr> database::srems(redis_key&& rk, std::vector<sstring>&& members)
+future<scattered_message_ptr> database::srems(const redis_key& rk, std::vector<sstring>& members)
 {
     return with_allocator(allocator(), [this, &rk, &members] {
         return _cache_store.with_entry_run(rk, [this, &rk, &members] (cache_entry* e) {
@@ -780,10 +866,9 @@ future<scattered_message_ptr> database::srems(redis_key&& rk, std::vector<sstrin
         });
     });
 }
-
-long database::pttl(redis_key&& rk)
+/*
+long database::pttl(const redis_key& rk)
 {
-    /*
     auto item = get(std::move(rk));
     if (item) {
         if (item->ever_expires() == false) {
@@ -795,20 +880,19 @@ long database::pttl(redis_key&& rk)
     else {
         return -2;
     }
-    */
     return -2;
 }
 
-long database::ttl(redis_key&& rk)
+long database::ttl(const redis_key& rk)
 {
-    auto ret = pttl(std::move(rk));
+    auto ret = pttl(rk);
     if (ret > 0) {
         return ret / 1000;
     }
     return ret;
 }
 
-std::pair<size_t, int> database::zcard(redis_key&& rk)
+std::pair<size_t, int> database::zcard(const redis_key& rk)
 {
     using result_type = std::pair<size_t, int>;
     auto it = _store->fetch_raw(rk);
@@ -820,8 +904,9 @@ std::pair<size_t, int> database::zcard(redis_key&& rk)
     }
     auto zset = it->zset_ptr();
     return result_type {zset->size(), REDIS_OK};
+    return result_type {0, REDIS_ERR};
 }
-std::pair<size_t, int> database::zrem(redis_key&& rk, std::vector<sstring>&& members)
+std::pair<size_t, int> database::zrem(const redis_key& rk, std::vector<sstring>& members)
 {
     using result_type = std::pair<size_t, int>;
     auto it = _store->fetch_raw(rk);
@@ -843,8 +928,9 @@ std::pair<size_t, int> database::zrem(redis_key&& rk, std::vector<sstring>&& mem
         _store->remove(rk);
     }
     return result_type {count, REDIS_OK};
+    return result_type {0, REDIS_ERR};
 }
-std::pair<size_t, int> database::zcount(redis_key&& rk, double min, double max)
+std::pair<size_t, int> database::zcount(const redis_key& rk, double min, double max)
 {
     using result_type = std::pair<size_t, int>;
     auto it = _store->fetch_raw(rk);
@@ -856,9 +942,10 @@ std::pair<size_t, int> database::zcount(redis_key&& rk, double min, double max)
     }
     auto zset = it->zset_ptr();
     return result_type {zset->count(min, max), REDIS_OK};
+    return result_type {0, REDIS_ERR};
 }
 
-std::pair<std::vector<item_ptr>, int> database::zrange(redis_key&& rk, long begin, long end, bool reverse)
+std::pair<std::vector<item_ptr>, int> database::zrange(const redis_key& rk, long begin, long end, bool reverse)
 {
     using result_type = std::pair<std::vector<item_ptr>, int>;
     auto it = _store->fetch_raw(rk);
@@ -871,8 +958,7 @@ std::pair<std::vector<item_ptr>, int> database::zrange(redis_key&& rk, long begi
     auto zset = it->zset_ptr();
     return result_type {std::move(zset->range_by_rank(begin, end, reverse)), REDIS_OK};
 }
-
-std::pair<std::vector<item_ptr>, int> database::zrangebyscore(redis_key&& rk, double min, double max, bool reverse)
+std::pair<std::vector<item_ptr>, int> database::zrangebyscore(const redis_key& rk, double min, double max, bool reverse)
 {
     using result_type = std::pair<std::vector<item_ptr>, int>;
     auto it = _store->fetch_raw(rk);
@@ -886,7 +972,7 @@ std::pair<std::vector<item_ptr>, int> database::zrangebyscore(redis_key&& rk, do
     return result_type {std::move(zset->range_by_score(min, max, reverse)), REDIS_OK};
 }
 
-std::pair<size_t, int> database::zrank(redis_key&& rk, sstring&& member, bool reverse)
+std::pair<size_t, int> database::zrank(const redis_key& rk, sstring& member, bool reverse)
 {
     using result_type = std::pair<size_t, int>;
     auto it = _store->fetch_raw(rk);
@@ -901,7 +987,7 @@ std::pair<size_t, int> database::zrank(redis_key&& rk, sstring&& member, bool re
     return result_type {zset->rank(m, reverse), REDIS_OK};
 }
 
-std::pair<double, int> database::zscore(redis_key&& rk, sstring&& member)
+std::pair<double, int> database::zscore(const redis_key& rk, sstring& member)
 {
     using result_type = std::pair<double, int>;
     auto it = _store->fetch_raw(rk);
@@ -912,7 +998,7 @@ std::pair<double, int> database::zscore(redis_key&& rk, sstring&& member)
         return result_type{0, REDIS_WRONG_TYPE};
     }
     auto zset = it->zset_ptr();
-    redis_key mk {std::move(member)};
+    redis_key mk {std::ref(member)};
     auto value = zset->fetch(mk);
     if (!value) {
         return result_type{0, REDIS_ERR};
@@ -920,7 +1006,7 @@ std::pair<double, int> database::zscore(redis_key&& rk, sstring&& member)
     return result_type{value->Double(), REDIS_OK};
 }
 
-std::pair<size_t, int> database::zremrangebyscore(redis_key&& rk, double min, double max)
+std::pair<size_t, int> database::zremrangebyscore(const redis_key& rk, double min, double max)
 {
     using result_type = std::pair<size_t, int>;
     auto it = _store->fetch_raw(rk);
@@ -933,7 +1019,7 @@ std::pair<size_t, int> database::zremrangebyscore(redis_key&& rk, double min, do
     auto zset = it->zset_ptr();
     return result_type {zset->remove_range_by_score(min, max), REDIS_OK};
 }
-std::pair<size_t, int> database::zremrangebyrank(redis_key&& rk, size_t begin, size_t end)
+std::pair<size_t, int> database::zremrangebyrank(const redis_key& rk, size_t begin, size_t end)
 {
     using result_type = std::pair<size_t, int>;
     auto it = _store->fetch_raw(rk);
@@ -949,11 +1035,11 @@ std::pair<size_t, int> database::zremrangebyrank(redis_key&& rk, size_t begin, s
 
 int database::select(int index)
 {
-    _store = &_data_storages[index];
+    //_store = &_data_storages[index];
     return REDIS_OK;
 }
 
-std::pair<double, int> database::geodist(redis_key&& rk, sstring&& lpos, sstring&& rpos, int flag)
+std::pair<double, int> database::geodist(const redis_key& rk, sstring& lpos, sstring& rpos, int flag)
 {
     using result_type = std::pair<double, int>;
     auto it = _store->fetch_raw(rk);
@@ -986,10 +1072,9 @@ std::pair<double, int> database::geodist(redis_key&& rk, sstring&& lpos, sstring
     if (geo::dist(lscore, rscore, dist)) {
         return result_type {dist / factor, REDIS_OK};
     }
-    return result_type {0, REDIS_ERR};
 }
 
-std::pair<std::vector<sstring>, int> database::geohash(redis_key&& rk, std::vector<sstring>&& members)
+std::pair<std::vector<sstring>, int> database::geohash(const redis_key& rk, std::vector<sstring>& members)
 {
     using result_type = std::pair<std::vector<sstring>, int>;
     auto it = _store->fetch_raw(rk);
@@ -1013,7 +1098,7 @@ std::pair<std::vector<sstring>, int> database::geohash(redis_key&& rk, std::vect
     return result_type {std::move(geohash_set), REDIS_OK};
 }
 
-std::pair<std::vector<std::tuple<double, double, bool>>, int> database::geopos(redis_key&& rk, std::vector<sstring>&& members)
+std::pair<std::vector<std::tuple<double, double, bool>>, int> database::geopos(const redis_key& rk, std::vector<sstring>& members)
 {
     using result_type = std::pair<std::vector<std::tuple<double, double, bool>>, int>;
     using result_data_type = std::vector<std::tuple<double, double, bool>>;
@@ -1042,7 +1127,7 @@ std::pair<std::vector<std::tuple<double, double, bool>>, int> database::geopos(r
     return result_type {std::move(result), REDIS_OK};
 }
 
-database::georadius_result_type database::georadius_coord(redis_key&& rk, double longitude, double latitude, double radius, size_t count, int flag)
+database::georadius_result_type database::georadius_coord(const redis_key& rk, double longitude, double latitude, double radius, size_t count, int flag)
 {
     auto it = _store->fetch_raw(rk);
     if (!it) {
@@ -1055,7 +1140,7 @@ database::georadius_result_type database::georadius_coord(redis_key&& rk, double
     return georadius(_zset, longitude, latitude, radius, count, flag);
 }
 
-database::georadius_result_type database::georadius_member(redis_key&& rk, sstring&& pos, double radius, size_t count, int flag)
+database::georadius_result_type database::georadius_member(const redis_key& rk, sstring& pos, double radius, size_t count, int flag)
 {
     auto it = _store->fetch_raw(rk);
     if (!it) {
@@ -1110,7 +1195,7 @@ database::georadius_result_type database::georadius(sorted_set* zset, double lon
     return georadius_result_type {std::move(points), REDIS_OK};
 }
 
-std::pair<bool, int> database::setbit(redis_key&& rk, size_t offset, bool value)
+std::pair<bool, int> database::setbit(const redis_key& rk, size_t offset, bool value)
 {
     using result_type = std::pair<bool, int>;
     if (offset >= BITMAP_MAX_OFFSET) {
@@ -1132,7 +1217,7 @@ std::pair<bool, int> database::setbit(redis_key&& rk, size_t offset, bool value)
     return result_type {bm->set_bit(offset, value), REDIS_OK};
 }
 
-std::pair<bool, int> database::getbit(redis_key&& rk, size_t offset)
+std::pair<bool, int> database::getbit(const redis_key& rk, size_t offset)
 {
     using result_type = std::pair<bool, int>;
     auto it = _store->fetch_raw(rk);
@@ -1146,7 +1231,7 @@ std::pair<bool, int> database::getbit(redis_key&& rk, size_t offset)
     return result_type {bm->get_bit(offset), REDIS_OK};
 }
 
-std::pair<size_t, int> database::bitcount(redis_key&& rk, long start, long end)
+std::pair<size_t, int> database::bitcount(const redis_key& rk, long start, long end)
 {
     using result_type = std::pair<size_t, int>;
     auto it = _store->fetch_raw(rk);
@@ -1160,12 +1245,12 @@ std::pair<size_t, int> database::bitcount(redis_key&& rk, long start, long end)
     return result_type {bm->bit_count(start, end), REDIS_OK};
 }
 
-std::pair<size_t, int> database::bitpos(redis_key&& rk, bool bit, long start, long end)
+std::pair<size_t, int> database::bitpos(const redis_key& rk, bool bit, long start, long end)
 {
     using result_type = std::pair<size_t, int>;
     return result_type {0, REDIS_OK};
 }
-
+*/
 future<> database::stop()
 {
     return make_ready_future<>();
@@ -1173,6 +1258,7 @@ future<> database::stop()
 
 void database::expired_items()
 {
+    /*
     using namespace std::chrono;
     auto exp = _alive.expire(clock_type::now());
     while (!exp.empty()) {
@@ -1184,6 +1270,7 @@ void database::expired_items()
         }
     }
     _timer.arm(_alive.get_next_timeout());
+    */
 }
 
 }

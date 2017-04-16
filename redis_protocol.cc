@@ -32,11 +32,15 @@ void redis_protocol::prepare_request()
 {
     _command_args._command_args_count = _parser._args_count - 1;
     _command_args._command_args = std::move(_parser._args_list);
+    _command_args._tmp_keys.clear();
+    _command_args._tmp_key_values.clear();
 }
 
 future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out)
 {
     _parser.init();
+    // NOTE: The command is handled sequentially. The parser will control the lifetime
+    // of every parameters for command.
     return in.consume(_parser).then([this, &in, &out] () -> future<> {
         switch (_parser._state) {
             case redis_protocol_parser::state::eof:
@@ -151,6 +155,7 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.sunion_store(_command_args, std::ref(out));
                 case redis_protocol_parser::command::smove:
                     return _redis.smove(_command_args, std::ref(out));
+/*
                 case redis_protocol_parser::command::type:
                     return _redis.type(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
@@ -283,6 +288,7 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.bitop(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
+*/
                 default:
                     return out.write("+Not Implemented");
                 };

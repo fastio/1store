@@ -22,6 +22,7 @@
 #include <functional>
 #include "iterator.hh"
 namespace redis {
+/*
 bool item_equal(lw_shared_ptr<item>& l,  lw_shared_ptr<item>& r)
 {
     if (!l || !r)
@@ -641,5 +642,5 @@ int dict::remove(lw_shared_ptr<item> item)
 {
     return _rep->remove(item);
 }
-
+*/
 } /* namespace redis*/

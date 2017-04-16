@@ -23,7 +23,6 @@
  *  Copyright (C) 2014 Cloudius Systems, Ltd.
  *
  */
-
 #pragma once
 #include <iomanip>
 #include <sstream>
@@ -72,12 +71,13 @@ enum {
 
 struct args_collection {
     uint32_t _command_args_count;
-    sstring _command;
     std::vector<sstring> _command_args;
+    std::vector<sstring> _tmp_keys;
+    std::unordered_map<sstring, sstring> _tmp_key_values;
+    std::vector<std::pair<sstring, sstring>> _tmp_key_value_pairs;
     args_collection () : _command_args_count(0) {}
 };
 
-class item;
 using clock_type = lowres_clock;
 static constexpr clock_type::time_point never_expire_timepoint = clock_type::time_point(clock_type::duration::min());
 
@@ -115,16 +115,13 @@ struct expiration {
 
 class db;
 struct redis_key {
-    sstring _key;
+    sstring& _key;
     size_t  _hash;
-    redis_key(sstring&& key) : _key(std::move(key)), _hash(std::hash<sstring>()(_key)) {}
-    redis_key(redis_key&& other) : _key(other._key), _hash(other._hash) {}
-    redis_key(const sstring& key) : _key(key), _hash(std::hash<sstring>()(_key)) {}
-    redis_key& operator = (redis_key&& o) {
+    redis_key(sstring& key) : _key(key), _hash(std::hash<sstring>()(_key)) {}
+    redis_key& operator = (const redis_key& o) {
         if (this != &o) {
-            _key = std::move(o._key);
+            _key = o._key;
             _hash = o._hash;
-            o._hash = 0;
         }
         return *this;
     }
@@ -134,223 +131,7 @@ struct redis_key {
     inline const size_t size() const { return _key.size(); }
     inline const char* data() const { return _key.c_str(); }
 };
-/*
-class redis_entry
-{
-private:
-    sstring _key;
-    size_t  _key_hash;
-    union {
-      uintptr_t  _ptr;
-      uint64_t   _uint64;
-      int64_t    _int64;
-      double   _double;
-    } _u { 0 };
-};
-*/
 // The defination of `item was copied from apps/memcached
-class list;
-class dict;
-class sorted_set;
-class bitmap;
-class item {
-public:
-    using time_point = expiration::time_point;
-    using duration = expiration::duration;
-private:
-    friend class db;
-    uint32_t _value_size;
-    uint32_t _key_size;
-    size_t   _key_hash;
-    uint8_t  _type;
-    uint8_t _volatile = false;
-    expiration _expired;
-    union {
-      uintptr_t  _ptr;
-      uint64_t _uint64;
-      int64_t  _int64;
-      double   _double;
-    } _u { 0 };
-    char* _appends = nullptr;
-    friend class dict;
-    static constexpr uint32_t field_alignment = alignof(void*);
-public:
-    template<typename... Args>
-    static lw_shared_ptr<item> create(Args&&... args) {
-        return make_lw_shared<item>(std::forward<Args>(args)...);
-    }
-    ~item();
-    item(const redis_key& key, sstring&& value)
-        : _value_size(value.size())
-        , _key_size(key.size())
-        , _key_hash(key.hash())
-        , _type(REDIS_RAW_STRING)
-    {
-        size_t size = align_up(_value_size, field_alignment) + _key_size;
-        _appends = new char[size];
-        memcpy(_appends, value.c_str(), _value_size);
-        if (_key_size > 0) {
-            memcpy(_appends + align_up(_value_size, field_alignment), key.data(), _key_size);
-        }
-    }
-
-    item(const redis_key& key, const std::experimental::string_view& value, sstring&& append)
-        : _value_size(value.size() + append.size())
-        , _key_size(key.size())
-        , _key_hash(key.hash())
-        , _type(REDIS_RAW_STRING)
-    {
-        size_t size = align_up(_value_size, field_alignment) + _key_size;
-        _appends = new char[size];
-        memcpy(_appends, value.data(), value.size());
-        memcpy(_appends + value.size(), append.c_str(), append.size());
-        if (_key_size > 0) {
-            memcpy(_appends + align_up(_value_size, field_alignment), key.data(), _key_size);
-        }
-    }
-    item(redis_key&& key)
-        : _value_size(0)
-        , _key_size(key.size())
-        , _key_hash(key.hash())
-        , _type(REDIS_RAW_ITEM)
-    {
-        size_t size = _key_size;
-        _appends = new char[size];
-        if (_key_size > 0) {
-            memcpy(_appends, key.data(), _key_size);
-        }
-    }
-    item(const redis_key& key)
-        : _value_size(0)
-        , _key_size(key.size())
-        , _key_hash(key.hash())
-        , _type(REDIS_RAW_ITEM)
-    {
-        size_t size = _key_size;
-        _appends = new char[size];
-        if (_key_size > 0) {
-            memcpy(_appends, key.data(), _key_size);
-        }
-    }
-    item(sstring&& value)
-        : _value_size(value.size())
-        , _key_size(0)
-        , _key_hash(0)
-        , _type(REDIS_RAW_ITEM)
-    {
-        size_t size = _value_size;
-        _appends = new char[size];
-        memcpy(_appends, value.c_str(), _value_size);
-    }
-
-    item(const redis_key& key, uint64_t value)
-        : _value_size(0)
-        , _key_size(key.size())
-        , _key_hash(key.hash())
-        , _type(REDIS_RAW_UINT64)
-    {
-        _u._uint64 = value;
-        size_t size = _key_size;
-        _appends = new char[size];
-        if (_key_size > 0) {
-            memcpy(_appends, key.data(), _key_size);
-        }
-    }
-
-    item(const redis_key& key, double value)
-        : _value_size(0)
-        , _key_size(key.size())
-        , _key_hash(key.hash())
-        , _type(REDIS_RAW_DOUBLE)
-    {
-        _u._double = value;
-        size_t size = _key_size;
-        _appends = new char[size];
-        if (_key_size > 0) {
-            memcpy(_appends, key.data(), _key_size);
-        }
-    }
-
-    item(const redis_key& key, int64_t value)
-        : _value_size(0)
-        , _key_size(key.size())
-        , _key_hash(key.hash())
-        , _type(REDIS_RAW_INT64)
-    {
-        _u._int64 = value;
-        size_t size = _key_size;
-        _appends = new char[size];
-        if (_key_size > 0) {
-            memcpy(_appends, key.data(), _key_size);
-        }
-    }
-
-    item(const redis_key& key, list* ptr) : item(key, reinterpret_cast<uintptr_t>(ptr), REDIS_LIST) {}
-    item(const redis_key& key, dict* ptr) : item(key, reinterpret_cast<uintptr_t>(ptr), REDIS_DICT) {}
-    item(const redis_key& key, sorted_set* ptr) : item(key, reinterpret_cast<uintptr_t>(ptr), REDIS_ZSET) {}
-    item(const redis_key& key, bitmap* ptr) : item(key, reinterpret_cast<uintptr_t>(ptr), REDIS_BITMAP) {}
-
-    item(const redis_key& key, uintptr_t ptr, uint8_t type)
-        : _value_size(0)
-        , _key_size(key.size())
-        , _key_hash(key.hash())
-        , _type(type)
-    {
-        _u._ptr = ptr; //reinterpret_cast<uintptr_t>(ptr);
-        size_t size = _key_size;
-        _appends = new char[size];
-        if (_key_size > 0) {
-            memcpy(_appends, key.data(), _key_size);
-        }
-    }
-
-public:
-    inline const bool ever_expires() const {
-        return _expired.ever_expires();
-    }
-
-    inline void set_never_expired() {
-        return _expired.set_never_expired();
-    }
-
-    inline void set_expiry(const expiration& expiry) {
-        _expired = expiry;
-    }
-
-    inline const clock_type::time_point get_timeout() const {
-        return _expired.to_time_point();
-    }
-
-    inline bool cancel() const { return false; }
-
-    const std::experimental::string_view key() const {
-        return std::experimental::string_view(_appends + align_up(_value_size, field_alignment), _key_size);
-    }
-
-    const size_t key_hash() const { return _key_hash; }
-
-    const std::experimental::string_view value() const {
-        return std::experimental::string_view(_appends, _value_size);
-    }
-
-    item(const item&) = delete;
-    item(item&&) = delete;
-
-
-    inline list* list_ptr() const { return reinterpret_cast<list*>(_u._ptr); }
-    inline dict* dict_ptr() const { return reinterpret_cast<dict*>(_u._ptr); }
-    inline sorted_set* zset_ptr() const { return reinterpret_cast<sorted_set*>(_u._ptr); }
-    inline bitmap* bitmap_ptr() const { return reinterpret_cast<bitmap*>(_u._ptr); }
-
-    inline const uint64_t uint64() const { return _u._uint64; }
-    inline const int64_t int64() const { return _u._int64; }
-    inline const double Double() const { return _u._double; }
-
-    inline const uint32_t value_size() const { return _value_size; }
-    inline const uint32_t key_size() const { return _key_size; }
-
-    inline const uint8_t type() const { return _type; }
-};
 static const sstring msg_crlf {"\r\n"};
 static const sstring msg_ok {"+OK\r\n"};
 static const sstring msg_pong {"+PONG\r\n"};

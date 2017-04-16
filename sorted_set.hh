@@ -28,6 +28,7 @@ namespace redis {
 using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 class item;
 class sorted_set_iterator;
+/*
 class sorted_set {
 private:
     friend class sorted_set_iterator;
@@ -52,4 +53,5 @@ public:
     using pred = std::function<bool (lw_shared_ptr<item> m)>;
     size_t range_by_score_if(double min, double max, size_t count, pred&& p);
 };
+*/
 }

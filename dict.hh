@@ -28,6 +28,7 @@
 #include "core/sharded.hh"
 #include "common.hh"
 namespace redis {
+/*
 class item;
 class dict_iterator;
 class dict {
@@ -51,5 +52,5 @@ public:
     std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch();
     std::vector<foreign_ptr<lw_shared_ptr<item>>> fetch(const std::vector<sstring>& keys);
 };
-
+*/
 } // namespace redis

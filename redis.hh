@@ -49,8 +49,6 @@ namespace stdx = std::experimental;
 
 struct args_collection;
 class database;
-class item;
-using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 using message = scattered_message<char>;
 class redis_service {
 private:
@@ -127,7 +125,7 @@ public:
     future<> sunion(args_collection& args, output_stream<char>& out);
     future<> sunion_store(args_collection& args, output_stream<char>& out);
     future<> smove(args_collection& args, output_stream<char>& out);
-
+/*
     future<message> type(args_collection& args);
     future<message> expire(args_collection& args);
     future<message> persist(args_collection& args);
@@ -172,23 +170,27 @@ public:
     future<message> bitop(args_collection&);
     future<message> bitpos(args_collection&);
     future<message> bitfield(args_collection&);
+*/
 private:
+    /*
     future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
     future<std::pair<std::vector<item_ptr>, int>> range_impl(sstring& key, long begin, long end, bool reverse);
+    */
     future<bool> exists_impl(sstring& key);
     future<> srem_impl(sstring& key, sstring& member, output_stream<char>& out);
     future<> sadd_impl(sstring& key, sstring& member, output_stream<char>& out);
-    future<> sadds_impl(sstring& key, std::vector<sstring>&& members, output_stream<char>& out);
-    future<> sdiff_impl(std::vector<sstring>&& keys, output_stream<char>& out);
-    future<> sinter_impl(std::vector<sstring>&& keys, output_stream<char>& out);
-    future<> sunion_impl(std::vector<sstring>&& keys, output_stream<char>& out);
+    future<> sadds_impl(sstring& key, std::vector<sstring>& members, output_stream<char>& out);
+    future<> sadds_impl_return_keys(sstring& key, std::vector<sstring>& members, output_stream<char>& out);
+    future<> sdiff_impl(std::vector<sstring>& keys, sstring* dest, output_stream<char>& out);
+    future<> sinter_impl(std::vector<sstring>& keys, sstring* dest, output_stream<char>& out);
+    future<> sunion_impl(std::vector<sstring>& keys, sstring* dest, output_stream<char>& out);
     future<> smembers_impl(sstring& key, output_stream<char>& out);
     future<> pop_impl(args_collection& args, bool left, output_stream<char>& out);
     future<> push_impl(args_collection& arg, bool force, bool left, output_stream<char>& out);
     future<> push_impl(sstring& key, sstring& value, bool force, bool left, output_stream<char>& out);
     future<> push_impl(sstring& key, std::vector<sstring>& vals, bool force, bool left, output_stream<char>& out);
     future<bool> set_impl(sstring& key, sstring& value, long expir, uint8_t flag);
-    future<item_ptr> get_impl(sstring& key);
+    //future<item_ptr> get_impl(sstring& key);
     future<bool> remove_impl(sstring& key);
     future<int> hdel_impl(sstring& key, sstring& field);
     future<> counter_by(args_collection& args, bool incr, bool with_step, output_stream<char>& out);
@@ -206,6 +208,7 @@ private:
     bool parse_zset_args(args_collection& args, zset_args& uargs);
 
     using this_type = redis_service;
+    /*
     static future<message> syntax_err_message() {
         message msg;
         msg.append_static(msg_syntax_err);
@@ -587,6 +590,7 @@ private:
         }
         return make_ready_future<message>(std::move(msg));
     }
+    */
 };
 
 } /* namespace redis */
