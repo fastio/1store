@@ -17,7 +17,6 @@
 # under the License.
 #
 import os, os.path, textwrap, argparse, sys, shlex, subprocess, tempfile, re
-
 configure_args = str.join(' ', [shlex.quote(x) for x in sys.argv[1:]])
 
 def get_flags():
@@ -728,6 +727,7 @@ with open(buildfile, 'w') as f:
             src = protobufs[pb]
             c_pb = pb.replace('.h','.cc')
             outd = os.path.dirname(os.path.dirname(pb))
+            outd = outd.replace('/seastar', '/')
             f.write('build {} {}: protobuf {}\n  outdir = {}\n'.format(c_pb, pb, src, outd))
 
     f.write(textwrap.dedent('''\
