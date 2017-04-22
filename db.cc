@@ -981,9 +981,8 @@ future<scattered_message_ptr> database::zadds(const redis_key& rk, std::unordere
                 inserted = sset.insert_or_update(members);
             }
             else {
-                assert(true);
+                assert(false);
             }
-            db_log.info("zadds success, size: {}", sset.size());
             return reply_builder::build(inserted);
         });
     });

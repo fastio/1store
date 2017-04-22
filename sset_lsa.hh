@@ -150,10 +150,8 @@ public:
         assert(e != nullptr);
         if (insert_ordered(e)) {
             auto r = _dict.insert(*e);
-            sset_log.info("insert success, list size {}, dict size {}", _list.size(), _dict.size());
             return r.second;
         }
-        sset_log.info("insert failed, list size {}, dict size {}", _list.size(), _dict.size());
         return false;
     }
 
@@ -239,7 +237,13 @@ public:
             return;
         }
         for (auto it = _list.begin(); it != _list.end(); ++it, ++rank) {
-            if (begin <= rank && rank <= end) {
+            if (rank < begin) {
+                continue;
+            }
+            else if (rank > end) {
+                return;
+            }
+            else {
                 const auto& e = *it;
                 entries.push_back(&e);
             }
@@ -260,7 +264,7 @@ public:
                 continue;
             }
             else if (score > max) {
-                break;
+                return;
             }
             else {
                 const auto& e = *it;
@@ -379,7 +383,7 @@ public:
 private:
     inline bool score_out_of_range(double min, double max) const
     {
-        return !((min > _list.rbegin()->score()) || (max < _list.begin()->score()));
+        return (min > _list.rbegin()->score()) || (max < _list.begin()->score());
     }
 
     inline bool rank_out_of_range(long begin, long end) const
@@ -389,6 +393,32 @@ private:
 
     inline bool insert_ordered(sset_entry* e)
     {
+        assert(e != nullptr);
+        auto it = _list.begin();
+        const auto& score = e->score();
+        if (it == _list.end() || score < it->score()) {
+            _list.push_front(*e);
+            return true;
+        }
+        else {
+            auto trace = it;
+            for (; it != _list.end(); ++it) {
+                if (it->score() > score) {
+                    _list.insert(it, *e);
+                    return true;
+                }
+                trace = it;
+            }
+            if (it == _list.end()) {
+                if (trace->score() > score) {
+                    _list.push_front(*e);
+                }
+                else {
+                    _list.push_back(*e);
+                }
+                return true;
+            }
+        }
         return false;
     }
 
