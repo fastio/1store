@@ -122,6 +122,7 @@ sadd = "sadd"i ${_command = command::sadd;};
 scard = "scard"i ${_command = command::scard;};
 sismember = "sismember"i ${_command = command::sismember;};
 smembers = "smembers"i ${_command = command::smembers;};
+srandmember = "srandmember"i ${_command = command::srandmember;};
 srem = "srem"i ${_command = command::srem;};
 sdiff = "sdiff"i ${_command = command::sdiff;};
 sdiffstore = "sdiffstore"i ${_command = command::sdiffstore;};
@@ -130,6 +131,7 @@ sinterstore = "sinterstore"i ${_command = command::sinterstore;};
 sunion = "sunion"i ${_command = command::sunion;};
 sunionstore = "sunionstore"i ${_command = command::sunionstore;};
 smove = "smove"i ${_command = command::smove;};
+spop = "spop"i ${_command = command::spop;};
 type = "type"i ${_command = command::type; };
 expire = "expire"i ${_command = command::expire; };
 pexpire = "pexpire"i ${_command = command::pexpire; };
@@ -178,8 +180,8 @@ bitpos = "bitpos"i ${_command = command::bitpos; };
 command = (setbit | set | getbit | get | del | mget | mset | echo | ping | incr | decr | incrby | decrby | command_ | exists | append |
            strlen | lpushx | lpush | lpop | llen | lindex | linsert | lrange | lset | rpushx | rpush | rpop | lrem |
            ltrim | hset | hgetall |hget | hdel | hlen | hexists | hstrlen | hincrby | hincrbyfloat | hkeys | hvals | hmget | hmset |
-           sadd | scard | sismember | smembers | srem | sdiff | sdiffstore | sinter | sinterstore | sunion |
-           sunionstore | smove | type | expire | pexpire | persist | ttl | pttl | zadd | zcard | zcount | zincrby |
+           sadd | scard | sismember | smembers | srem | sdiffstore | sdiff | sinterstore | sinter| sunionstore | sunion | smove | srandmember | spop |
+           type | expire | pexpire | persist | ttl | pttl | zadd | zcard | zcount | zincrby |
            zrangebyscore | zrank | zremrangebyrank | zremrangebyscore | zremrangebylex | zrem | zrevrangebyscore | zrevrange| zrevrank |
            zscore | zunionstore  | zinterstore | zdiffstore | zunion | zinter | zdiff | zscan | zrangebylex | zlexcount |
            zrange | select | geoadd | geodist | geohash | geopos | georadius | georadiusbymember | bitcount |
@@ -260,6 +262,8 @@ public:
         sunion,
         sunionstore,
         smove,
+        srandmember,
+        spop,
         type,
         expire,
         pexpire,

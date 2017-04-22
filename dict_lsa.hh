@@ -28,6 +28,8 @@
 #include "utils/logalloc.hh"
 #include "common.hh"
 #include "core/sstring.hh"
+#include  <experimental/vector>
+namespace stdx = std::experimental;
 namespace redis {
 
 class dict_lsa;
@@ -179,12 +181,14 @@ struct dict_entry
     }
 };
 
+class database;
 class dict_lsa final {
+    friend class database;
     using dict_type = boost::intrusive::set<dict_entry,
         boost::intrusive::member_hook<dict_entry, dict_entry::hook_type, &dict_entry::_link>,
         boost::intrusive::compare<dict_entry::compare>>;
-    using dict_iterator = typename dict_type::iterator;
-    using const_dict_iterator = typename dict_type::const_iterator;
+    using iterator = typename dict_type::iterator;
+    using const_iterator = typename dict_type::const_iterator;
     dict_type _dict;
 public:
     dict_lsa () noexcept : _dict()
@@ -236,6 +240,15 @@ public:
         }
     }
 
+    inline bool erase(const_iterator i)
+    {
+        if (i != _dict.cend()) {
+            _dict.erase_and_dispose(i, current_deleter<dict_entry>());
+            return true;
+        }
+        return false;
+    }
+
     inline bool erase(const sstring& key)
     {
         auto it = _dict.find(key, dict_entry::compare());
@@ -271,6 +284,18 @@ public:
         }
         return nullptr;
     }
+
+    inline const_iterator at(size_t index) const
+    {
+        assert(index >= 0 && index < size());
+        for (auto i = _dict.cbegin(); i != _dict.cend(); ++i, index--) {
+            if (index == 0) {
+                return i;
+            }
+        }
+        return _dict.cend();
+    }
+
     void fetch(const std::vector<sstring>& keys, std::vector<const dict_entry*>& entries) const {
         for (const auto& key : keys) {
             auto it = _dict.find(key, dict_entry::compare());

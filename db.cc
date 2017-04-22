@@ -19,7 +19,39 @@
 *
 */
 #include "db.hh"
+#include <random>
+#include <chrono>
 namespace redis {
+
+
+class rand_generater final
+{
+    friend class database;
+public:
+    inline static size_t rand_less_than(const size_t size) {
+        static thread_local rand_generater _rand;
+        return _rand.rand() % size;
+    }
+private:
+    rand_generater()
+        : _re(std::chrono::system_clock::now().time_since_epoch().count())
+        , _dist(0, std::numeric_limits<size_t>::max())
+    {
+    }
+
+    ~rand_generater()
+    {
+    }
+
+    inline size_t rand()
+    {
+        return _dist(_re);
+    }
+
+    std::default_random_engine _re;
+    std::uniform_int_distribution<size_t> _dist;
+};
+
 database::database()
 {
     using namespace std::chrono;
@@ -659,6 +691,27 @@ future<scattered_message_ptr> database::hmget(const redis_key& rk, std::vector<s
     });
 }
 
+future<scattered_message_ptr> database::srandmember(const redis_key& rk, size_t count)
+{
+     return _cache_store.with_entry_run(rk, [&count] (const cache_entry* e) {
+        std::vector<const dict_entry*> result;
+        if (!e) {
+            return reply_builder::build<true, false>(result);
+        }
+        if (e->type_of_set() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& set = e->value_set();
+        count = std::min(count, set.size());
+        for (size_t i = 0; i < count; ++i) {
+            auto index = rand_generater::rand_less_than(set.size());
+            auto entry = set.at(index);
+            result.push_back(&(*entry));
+        }
+        return reply_builder::build<true, false>(result);
+     });
+}
+
 future<scattered_message_ptr> database::sadds(const redis_key& rk, std::vector<sstring>& members)
 {
     return with_allocator(allocator(), [this, &rk, &members] {
@@ -789,17 +842,37 @@ future<foreign_ptr<lw_shared_ptr<std::vector<sstring>>>> database::smembers_dire
     });
 }
 
-future<scattered_message_ptr> database::spop(const redis_key& rk)
+future<scattered_message_ptr> database::spop(const redis_key& rk, size_t count)
 {
-    return _cache_store.with_entry_run(rk, [this] (const cache_entry* e) {
-        if (!e) {
-            return reply_builder::build(msg_nil);
-        }
-        if (e->type_of_set() == false) {
-            return reply_builder::build(msg_type_err);
-        }
-        auto& set = e->value_set();
-        return reply_builder::build<true, false>(set.begin());
+    return with_allocator(allocator(), [this, &rk, &count] {
+        return _cache_store.with_entry_run(rk, [this, &rk, &count] (cache_entry* e) {
+            if (!e) {
+                return reply_builder::build(msg_nil);
+            }
+            if (e->type_of_set() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& set = e->value_set();
+            std::vector<dict_lsa::const_iterator> removed;
+            std::vector<const dict_entry*> entries;
+            count = std::min(count, set.size());
+            for (size_t i = 0; i < count; ++i) {
+                auto index = rand_generater::rand_less_than(set.size());
+                auto entry = set.at(index);
+                entries.push_back(&(*entry));
+                removed.push_back(entry);
+            }
+            auto reply = reply_builder::build<true, false>(entries); 
+            if (!removed.empty()) {
+                for (auto it : removed) {
+                    set.erase(it);
+                }
+                if (set.empty()) {
+                    _cache_store.erase(rk);
+                }
+            }
+            return reply;
+        });
     });
 }
 

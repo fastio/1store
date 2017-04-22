@@ -33,9 +33,9 @@
 #include <tuple>
 #include "cache.hh"
 #include "reply_builder.hh"
-namespace redis {
-
+#include  <experimental/vector>
 namespace stdx = std::experimental;
+namespace redis {
 //using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
 struct remote_origin_tag {
@@ -53,6 +53,7 @@ struct local_origin_tag {
         return std::move(ref);
     }
 };
+
 
 class database final : private logalloc::region {
 public:
@@ -110,11 +111,12 @@ public:
     future<scattered_message_ptr> scard(const redis_key& rk);
     future<scattered_message_ptr> sismember(const redis_key& rk, sstring& member);
     future<scattered_message_ptr> smembers(const redis_key& rk);
-    future<scattered_message_ptr> spop(const redis_key& rk);
+    future<scattered_message_ptr> spop(const redis_key& rk, size_t count);
     future<scattered_message_ptr> srem(const redis_key& rk, sstring& member);
     bool srem_direct(const redis_key& rk, sstring& member);
     future<scattered_message_ptr> srems(const redis_key& rk, std::vector<sstring>& members);
     future<foreign_ptr<lw_shared_ptr<std::vector<sstring>>>> smembers_direct(const redis_key& rk);
+    future<scattered_message_ptr> srandmember(const redis_key& rk, size_t count);
     int type(const redis_key& rk);
     long pttl(const redis_key& rk);
     long ttl(const redis_key& rk);
@@ -263,10 +265,6 @@ private:
     }
 private:
     static const int DEFAULT_DB_COUNT = 32;
-//    dict* _store = nullptr;
- //   dict  _data_storages[DEFAULT_DB_COUNT];
-    //timer_set<item> _alive;
- //   timer<clock_type> _timer;
     cache _cache_store;
 };
 }

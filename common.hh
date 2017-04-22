@@ -43,10 +43,10 @@
 #include "net/api.hh"
 #include "net/packet-data-source.hh"
 #include <unistd.h>
+#include  <experimental/vector>
+namespace stdx = std::experimental;
 
 namespace redis {
-
-namespace stdx = std::experimental;
 
 enum {
     FLAG_SET_EX = 1 << 0,

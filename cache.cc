@@ -1,2 +1,3 @@
 #include "cache.hh"
-namespace redis {}
+#include <limits>
+namespace redis { }

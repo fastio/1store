@@ -34,6 +34,7 @@ void redis_protocol::prepare_request()
     _command_args._command_args = std::move(_parser._args_list);
     _command_args._tmp_keys.clear();
     _command_args._tmp_key_values.clear();
+    _command_args._tmp_key_value_pairs.clear();
 }
 
 future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out)
@@ -139,6 +140,8 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.sismember(_command_args, std::ref(out));
                 case redis_protocol_parser::command::smembers:
                     return _redis.smembers(_command_args, std::ref(out));
+                case redis_protocol_parser::command::srandmember:
+                    return _redis.srandmember(_command_args, std::ref(out));
                 case redis_protocol_parser::command::srem:
                     return _redis.srem(_command_args, std::ref(out));
                 case redis_protocol_parser::command::sdiff:
@@ -155,6 +158,8 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.sunion_store(_command_args, std::ref(out));
                 case redis_protocol_parser::command::smove:
                     return _redis.smove(_command_args, std::ref(out));
+                case redis_protocol_parser::command::spop:
+                    return _redis.spop(_command_args, std::ref(out));
 /*
                 case redis_protocol_parser::command::type:
                     return _redis.type(_command_args).then([&out] (auto&& m) {

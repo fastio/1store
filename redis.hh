@@ -125,6 +125,9 @@ public:
     future<> sunion(args_collection& args, output_stream<char>& out);
     future<> sunion_store(args_collection& args, output_stream<char>& out);
     future<> smove(args_collection& args, output_stream<char>& out);
+    future<> srandmember(args_collection& args, output_stream<char>& out);
+    future<> spop(args_collection& args, output_stream<char>& out);
+
 /*
     future<message> type(args_collection& args);
     future<message> expire(args_collection& args);
@@ -189,6 +192,8 @@ private:
     future<> push_impl(args_collection& arg, bool force, bool left, output_stream<char>& out);
     future<> push_impl(sstring& key, sstring& value, bool force, bool left, output_stream<char>& out);
     future<> push_impl(sstring& key, std::vector<sstring>& vals, bool force, bool left, output_stream<char>& out);
+    future<bool> srem_direct(sstring& key, sstring& member);
+    future<bool> sadd_direct(sstring& key, sstring& member);
     future<bool> set_impl(sstring& key, sstring& value, long expir, uint8_t flag);
     //future<item_ptr> get_impl(sstring& key);
     future<bool> remove_impl(sstring& key);
