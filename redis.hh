@@ -128,37 +128,37 @@ public:
     future<> srandmember(args_collection& args, output_stream<char>& out);
     future<> spop(args_collection& args, output_stream<char>& out);
 
-/*
-    future<message> type(args_collection& args);
-    future<message> expire(args_collection& args);
-    future<message> persist(args_collection& args);
-    future<message> pexpire(args_collection& args);
-    future<message> ttl(args_collection& args);
-    future<message> pttl(args_collection& args);
+    future<> type(args_collection& args, output_stream<char>& out);
+    future<> expire(args_collection& args, output_stream<char>& out);
+    future<> persist(args_collection& args, output_stream<char>& out);
+    future<> pexpire(args_collection& args, output_stream<char>& out);
+    future<> ttl(args_collection& args, output_stream<char>& out);
+    future<> pttl(args_collection& args, output_stream<char>& out);
 
     // [ZSET]
-    future<message> zadd(args_collection& args);
-    future<message> zcard(args_collection& args);
-    future<message> zrange(args_collection&, bool);
-    future<message> zrangebyscore(args_collection&, bool);
-    future<message> zcount(args_collection& args);
-    future<message> zincrby(args_collection& args);
-    future<message> zrank(args_collection&, bool);
-    future<message> zrem(args_collection&);
-    future<message> zscore(args_collection&);
-    future<message> zunionstore(args_collection&);
-    future<message> zinterstore(args_collection&);
-    future<message> zdiffstore(args_collection&);
-    future<message> zunion(args_collection&);
-    future<message> zinter(args_collection&);
-    future<message> zdiff(args_collection&);
-    future<message> zrangebylex(args_collection&);
-    future<message> zlexcount(args_collection&);
-    future<message> zrevrangebylex(args_collection&);
-    future<message> zremrangebyscore(args_collection&);
-    future<message> zremrangebyrank(args_collection&);
-    future<message> select(args_collection&);
+    future<> zadd(args_collection& args, output_stream<char>& out);
+    future<> zcard(args_collection& args, output_stream<char>& out);
+    future<> zrange(args_collection&, bool, output_stream<char>& out);
+    future<> zrangebyscore(args_collection&, bool, output_stream<char>& out);
+    future<> zcount(args_collection& args, output_stream<char>& out);
+    future<> zincrby(args_collection& args, output_stream<char>& out);
+    future<> zrank(args_collection&, bool, output_stream<char>& out);
+    future<> zrem(args_collection&, output_stream<char>& out);
+    future<> zscore(args_collection&, output_stream<char>& out);
+    future<> zunionstore(args_collection&, output_stream<char>& out);
+    future<> zinterstore(args_collection&, output_stream<char>& out);
+    future<> zdiffstore(args_collection&, output_stream<char>& out);
+    future<> zunion(args_collection&, output_stream<char>& out);
+    future<> zinter(args_collection&, output_stream<char>& out);
+    future<> zdiff(args_collection&, output_stream<char>& out);
+    future<> zrangebylex(args_collection&, output_stream<char>& out);
+    future<> zlexcount(args_collection&, output_stream<char>& out);
+    future<> zrevrangebylex(args_collection&, output_stream<char>& out);
+    future<> zremrangebyscore(args_collection&, output_stream<char>& out);
+    future<> zremrangebyrank(args_collection&, output_stream<char>& out);
+    future<> select(args_collection&, output_stream<char>& out);
 
+/*
     // [GEO]
     future<message> geoadd(args_collection&);
     future<message> geopos(args_collection&);
@@ -175,10 +175,8 @@ public:
     future<message> bitfield(args_collection&);
 */
 private:
-    /*
     future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
-    future<std::pair<std::vector<item_ptr>, int>> range_impl(sstring& key, long begin, long end, bool reverse);
-    */
+    future<std::vector<std::pair<sstring, double>>> range_impl(sstring& key, long begin, long end, bool reverse);
     future<bool> exists_impl(sstring& key);
     future<> srem_impl(sstring& key, sstring& member, output_stream<char>& out);
     future<> sadd_impl(sstring& key, sstring& member, output_stream<char>& out);
@@ -211,391 +209,6 @@ private:
         int aggregate_flag;
     };
     bool parse_zset_args(args_collection& args, zset_args& uargs);
-
-    using this_type = redis_service;
-    /*
-    static future<message> syntax_err_message() {
-        message msg;
-        msg.append_static(msg_syntax_err);
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> nil_message() {
-        message msg;
-        msg.append_static(msg_nil);
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> wrong_type_err_message() {
-        message msg;
-        msg.append_static(msg_type_err);
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> ok_message() {
-        message msg;
-        msg.append_static(msg_ok);
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> err_message() {
-        message msg;
-        msg.append_static(msg_err);
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> one_message() {
-        message msg;
-        msg.append_static(msg_one);
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> zero_message() {
-        message msg;
-        msg.append_static(msg_zero);
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> size_message(long u)
-    {
-        scattered_message<char> msg;
-        msg.append_static(msg_num_tag);
-        msg.append(to_sstring(u));
-        msg.append_static(msg_crlf);
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> size_message(size_t u)
-    {
-        scattered_message<char> msg;
-        msg.append_static(msg_num_tag);
-        msg.append(to_sstring(u));
-        msg.append_static(msg_crlf);
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> size_message(int u)
-    {
-        scattered_message<char> msg;
-        msg.append_static(msg_num_tag);
-        msg.append(to_sstring(u));
-        msg.append_static(msg_crlf);
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> uint64_message(uint64_t u)
-    {
-        scattered_message<char> msg;
-        msg.append_static(msg_num_tag);
-        msg.append(to_sstring(u));
-        msg.append_static(msg_crlf);
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> int64_message(int64_t u)
-    {
-        scattered_message<char> msg;
-        msg.append_static(msg_num_tag);
-        msg.append(to_sstring(u));
-        msg.append_static(msg_crlf);
-        return make_ready_future<message>(std::move(msg));
-    }
-    template<bool string = false>
-    static future<message> double_message(double u)
-    {
-        scattered_message<char> msg;
-        if (!string) {
-            msg.append_static(msg_num_tag);
-            msg.append(to_sstring(u));
-            msg.append_static(msg_crlf);
-        }
-        else {
-            auto&& n = to_sstring(u);
-            msg.append_static(msg_batch_tag);
-            msg.append(to_sstring(n.size()));
-            msg.append_static(msg_crlf);
-            msg.append(std::move(n));
-            msg.append_static(msg_crlf);
-        }
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> strings_message(std::vector<sstring>& u)
-    {
-        scattered_message<char> msg;
-        msg.append(msg_sigle_tag);
-        msg.append(std::move(to_sstring(u.size())));
-        msg.append_static(msg_crlf);
-        for (size_t i = 0; i < u.size(); ++i) {
-            auto& uu = u[i];
-            msg.append_static(msg_batch_tag);
-            msg.append(to_sstring(uu.size()));
-            msg.append_static(msg_crlf);
-            msg.append(std::move(uu));
-            msg.append_static(msg_crlf);
-        }
-        return make_ready_future<message>(std::move(msg));
-    }
-
-    template<bool Key, bool Value>
-    static future<message> item_message(sstring& u)
-    {
-        scattered_message<char> msg;
-        msg.append_static(msg_batch_tag);
-        msg.append(to_sstring(u.size()));
-        msg.append_static(msg_crlf);
-        msg.append(std::move(u));
-        msg.append_static(msg_crlf);
-        return make_ready_future<message>(std::move(msg));
-    }
-
-    template<bool Key, bool Value>
-    static future<message>  item_message(item_ptr& u)
-    {
-        scattered_message<char> msg;
-        this_type::append_item<Key, Value>(msg, std::move(u));
-        return make_ready_future<message>(std::move(msg));
-    }
-
-    template<bool Key, bool Value>
-    static void  append_item(message& msg, item_ptr&& u)
-    {
-        if (!u) {
-            msg.append_static(msg_not_found);
-        }
-        else {
-            if (Key) {
-                msg.append(msg_batch_tag);
-                msg.append(to_sstring(u->key_size()));
-                msg.append_static(msg_crlf);
-                sstring v{u->key().data(), u->key().size()};
-                msg.append(std::move(v));
-                msg.append_static(msg_crlf);
-            }
-            if (Value) {
-                msg.append_static(msg_batch_tag);
-                if (u->type() == REDIS_RAW_UINT64 || u->type() == REDIS_RAW_INT64) {
-                    auto&& n = to_sstring(u->int64());
-                    msg.append(to_sstring(n.size()));
-                    msg.append_static(msg_crlf);
-                    msg.append(std::move(n));
-                    msg.append_static(msg_crlf);
-                } else if (u->type() == REDIS_RAW_ITEM || u->type() == REDIS_RAW_STRING) {
-                    msg.append(to_sstring(u->value_size()));
-                    msg.append_static(msg_crlf);
-                    msg.append_static(u->value());
-                    msg.append_static(msg_crlf);
-                } else if (u->type() == REDIS_RAW_DOUBLE) {
-                    auto&& n = to_sstring(u->Double());
-                    msg.append(to_sstring(n.size()));
-                    msg.append_static(msg_crlf);
-                    msg.append(std::move(n));
-                    msg.append_static(msg_crlf);
-                } else {
-                    msg.append_static(msg_type_err);
-                }
-            }
-            msg.on_delete([u = std::move(u)] {});
-        }
-    }
-
-    template<bool Key, bool Value>
-    static future<message> items_message(std::vector<item_ptr>& items)
-    {
-        message msg;
-        msg.append(msg_sigle_tag);
-        if (Key && Value)
-            msg.append(std::move(to_sstring(items.size() * 2)));
-        else
-            msg.append(std::move(to_sstring(items.size())));
-        msg.append_static(msg_crlf);
-        for (size_t i = 0; i < items.size(); ++i) {
-            if (Key) {
-                msg.append(msg_batch_tag);
-                msg.append(std::move(to_sstring(items[i]->key_size())));
-                msg.append_static(msg_crlf);
-                sstring v{items[i]->key().data(), items[i]->key().size()};
-                msg.append(std::move(v));
-                msg.append_static(msg_crlf);
-            }
-            if (Value) {
-                if (!items[i]) {
-                    msg.append_static(msg_not_found);
-                }
-                else {
-                    msg.append(msg_batch_tag);
-                    if (items[i]->type() == REDIS_RAW_UINT64 || items[i]->type() == REDIS_RAW_INT64) {
-                        auto&& n = to_sstring(items[i]->int64());
-                        msg.append(to_sstring(n.size()));
-                        msg.append_static(msg_crlf);
-                        msg.append(std::move(n));
-                        msg.append_static(msg_crlf);
-                    } else if (items[i]->type() == REDIS_RAW_ITEM || items[i]->type() == REDIS_RAW_STRING) {
-                        msg.append(std::move(to_sstring(items[i]->value_size())));
-                        msg.append_static(msg_crlf);
-                        sstring v{items[i]->value().data(), items[i]->value().size()};
-                        msg.append(std::move(v));
-                        msg.append_static(msg_crlf);
-                    } else if (items[i]->type() == REDIS_RAW_DOUBLE) {
-                        auto&& n = to_sstring(items[i]->Double());
-                        msg.append(to_sstring(n.size()));
-                        msg.append_static(msg_crlf);
-                        msg.append(std::move(n));
-                        msg.append_static(msg_crlf);
-                    } else {
-                        msg.append_static(msg_type_err);
-                    }
-                }
-            }
-        }
-        msg.on_delete([item = std::move(items)] {});
-        return make_ready_future<message>(std::move(msg));
-    }
-
-    static future<message> type_message(int u)
-    {
-        message msg;
-        if (u == static_cast<int>(REDIS_RAW_STRING)) {
-            msg.append_static(msg_type_string);
-        }
-        else if (u == static_cast<int>(REDIS_LIST)) {
-            msg.append_static(msg_type_list);
-        }
-        else if (u == static_cast<int>(REDIS_DICT)) {
-            msg.append_static(msg_type_hash);
-        }
-        else if (u == static_cast<int>(REDIS_SET)) {
-            msg.append_static(msg_type_set);
-        }
-        else if (u == static_cast<int>(REDIS_ZSET)) {
-            msg.append_static(msg_type_zset);
-        }
-        else {
-            msg.append_static(msg_type_none);
-        }
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> size_message(std::pair<size_t, int>& u) {
-        if (u.second == REDIS_OK) {
-            return size_message(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        return err_message();
-    }
-    static future<message> size_message(std::pair<long, int>& u) {
-        if (u.second == REDIS_OK) {
-            return size_message(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        return err_message();
-    }
-    static future<message> size_message(std::pair<double, int>& u) {
-        if (u.second == REDIS_OK) {
-            return double_message(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        return err_message();
-    }
-    template<bool Key, bool Value>
-    static future<message> item_message(std::pair<item_ptr, int>& u) {
-        if (u.second == REDIS_OK) {
-            return item_message<Key, Value>(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        return err_message();
-    }
-    template<bool Key, bool Value>
-    static future<message> items_message(std::pair<std::vector<item_ptr>, int>& u) {
-        if (u.second == REDIS_OK) {
-            return items_message<Key, Value>(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        return err_message();
-    }
-    static void double_message(message& msg, double& u)
-    {
-        auto&& n = to_sstring(u);
-        msg.append_static(msg_batch_tag);
-        msg.append(to_sstring(n.size()));
-        msg.append_static(msg_crlf);
-        msg.append(std::move(n));
-        msg.append_static(msg_crlf);
-    }
-
-    static future<message> double_array_message(std::vector<std::tuple<double, double, bool>>& u) {
-        message msg;
-        msg.append(msg_sigle_tag);
-        msg.append(std::move(to_sstring(u.size())));
-        msg.append_static(msg_crlf);
-        int temp = 2;
-        for (size_t i = 0; i < u.size(); ++i) {
-            auto& ui = u[i];
-            if (std::get<2>(ui)) {
-                msg.append_static(msg_sigle_tag);
-                msg.append(std::move(to_sstring(temp)));
-                msg.append_static(msg_crlf);
-                auto& first = std::get<0>(ui);
-                auto& second = std::get<1>(ui);
-                double_message(msg, first);
-                double_message(msg, second);
-            }
-            else {
-                msg.append_static(msg_nil);
-            }
-        }
-        return make_ready_future<message>(std::move(msg));
-    }
-    static future<message> geo_radius_message(std::vector<std::tuple<sstring, double, double, double, double>>& u, int flags) {
-        message msg;
-        msg.append(msg_sigle_tag);
-        msg.append(std::move(to_sstring(u.size())));
-        msg.append_static(msg_crlf);
-        int temp = 1, temp2 = 2;
-        bool wd = flags & GEORADIUS_WITHDIST;
-        bool wh = flags & GEORADIUS_WITHHASH;
-        bool wc = flags & GEORADIUS_WITHCOORD;
-        if (wd) temp++;
-        if (wh) temp++;
-        if (wc) temp++;
-        for (size_t i = 0; i < u.size(); ++i) {
-            msg.append_static(msg_sigle_tag);
-            msg.append(std::move(to_sstring(temp)));
-            msg.append_static(msg_crlf);
-
-            //key
-            sstring& key = std::get<0>(u[i]);
-            msg.append_static(msg_batch_tag);
-            msg.append(to_sstring(key.size()));
-            msg.append_static(msg_crlf);
-            msg.append(std::move(key));
-            msg.append_static(msg_crlf);
-            //dist
-            if (wd) {
-                double dist = std::get<2>(u[i]);
-                geo::from_meters(dist, flags);
-                double_message(msg, dist);
-            }
-            //coord
-            if (wc) {
-                msg.append_static(msg_sigle_tag);
-                msg.append(std::move(to_sstring(temp2)));
-                msg.append_static(msg_crlf);
-                double_message(msg, std::get<3>(u[i]));
-                double_message(msg, std::get<4>(u[i]));
-            }
-            //hash
-            if (wh) {
-                double& score = std::get<1>(u[i]);
-                sstring hashstr;
-                geo::encode_to_geohash_string(score, hashstr);
-                msg.append_static(msg_batch_tag);
-                msg.append(to_sstring(hashstr.size()));
-                msg.append_static(msg_crlf);
-                msg.append(std::move(hashstr));
-                msg.append_static(msg_crlf);
-            }
-        }
-        return make_ready_future<message>(std::move(msg));
-    }
-    */
 };
 
 } /* namespace redis */

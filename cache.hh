@@ -32,6 +32,7 @@
 #include "utils/logalloc.hh"
 #include "list_lsa.hh"
 #include "dict_lsa.hh"
+#include "sset_lsa.hh"
 #include "core/sstring.hh"
 
 namespace redis {
@@ -53,6 +54,7 @@ protected:
         ENTRY_LIST  = 3,
         ENTRY_MAP   = 4,
         ENTRY_SET   = 5,
+        ENTRY_SSET  = 6,
     };
     entry_type _type;
     managed_bytes _key;
@@ -63,6 +65,7 @@ protected:
         managed_bytes _bytes;
         managed_ref<list_lsa> _list;
         managed_ref<dict_lsa> _dict;
+        managed_ref<sset_lsa> _sset;
         storage() {}
         ~storage() {}
     } _storage;
@@ -115,6 +118,12 @@ public:
         _storage._dict = make_managed<dict_lsa>();
     }
 
+    struct sset_initializer {};
+    cache_entry(const sstring& key, size_t hash, sset_initializer) noexcept
+        : cache_entry(key, hash, entry_type::ENTRY_SSET)
+    {
+        _storage._sset = make_managed<sset_lsa>();
+    }
 
     cache_entry(cache_entry&& o) noexcept
         : _cache_link(std::move(o._cache_link))
@@ -139,8 +148,12 @@ public:
             case entry_type::ENTRY_SET:
                 _storage._dict = std::move(o._storage._dict);
                 break;
+            case entry_type::ENTRY_SSET:
+                _storage._sset = std::move(o._storage._sset);
+                break;
         }
     }
+
     virtual ~cache_entry()
     {
     }
@@ -214,6 +227,9 @@ public:
     inline bool type_of_set() const {
         return _type == entry_type::ENTRY_SET;
     }
+    inline bool type_of_sset() const {
+        return _type == entry_type::ENTRY_SSET;
+    }
     inline int64_t value_integer() const
     {
         return _storage._integer_number;
@@ -255,6 +271,12 @@ public:
     }
     inline const dict_lsa& value_set() const {
         return *(_storage._dict);
+    }
+    inline sset_lsa& value_sset() {
+        return *(_storage._sset);
+    }
+    inline const sset_lsa& value_sset() const {
+        return *(_storage._sset);
     }
 };
 

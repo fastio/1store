@@ -24,10 +24,13 @@
 #include "system_stats.hh"
 #include "redis_protocol.hh"
 #include "server.hh"
-
+#include "util/log.hh"
 #define PLATFORM "seastar"
 #define VERSION "v1.0"
 #define VERSION_STRING PLATFORM " " VERSION
+
+using logger =  seastar::logger;
+static logger main_log ("main");
 
 int main(int ac, char** av) {
     distributed<redis::database> db;
@@ -61,7 +64,7 @@ int main(int ac, char** av) {
         }).then([&, metric_port] {
             return metric.start(metric_port);
         }).then([&] {
-            std::cout << "Parallel Redis ... \n";
+            main_log.info("Parallel Redis ... [{}]", port); 
             return make_ready_future<>();
         });
     });

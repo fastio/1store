@@ -35,6 +35,7 @@
 #include "net/packet-data-source.hh"
 #include "cache.hh"
 #include "dict_lsa.hh"
+#include "sset_lsa.hh"
 namespace redis {
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
 
@@ -277,5 +278,42 @@ static future<scattered_message_ptr> build(const managed_bytes& data)
     m->append_static(msg_crlf);
     return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
 }
-};
+
+static future<scattered_message_ptr> build(const std::vector<const sset_entry*>& entries, bool with_score)
+{
+    if (!entries.empty()) {
+        //build reply
+        auto m = make_lw_shared<scattered_message<char>>();
+        m->append_static(msg_sigle_tag);
+        if (with_score) {
+            m->append(std::move(to_sstring(entries.size() * 2)));
+        }
+        else {
+            m->append(std::move(to_sstring(entries.size())));
+        }
+        m->append_static(msg_crlf);
+        for (size_t i = 0; i < entries.size(); ++i) {
+            const auto& e = entries[i];
+            assert(e != nullptr);
+            m->append_static(msg_batch_tag);
+            m->append(to_sstring(e->key_size()));
+            m->append_static(msg_crlf);
+            m->append(sstring{e->key_data(), e->key_size()});
+            m->append_static(msg_crlf);
+            if (with_score) {
+                m->append_static(msg_batch_tag);
+                auto&& n = to_sstring(e->score());
+                m->append(to_sstring(n.size()));
+                m->append_static(msg_crlf);
+                m->append(n);
+                m->append_static(msg_crlf);
+            }
+        }
+        return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
+    }
+    else {
+        return reply_builder::build(msg_nil);
+    }
+}
+}; // end of class
 }

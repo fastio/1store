@@ -60,20 +60,27 @@ public:
     database();
     ~database();
 
-    bool set(const redis_key& rk, sstring& val, long expire, uint32_t flag);
+    future<scattered_message_ptr> set(const redis_key& rk, sstring& val, long expire, uint32_t flag);
+    bool set_direct(const redis_key& rk, sstring& val, long expire, uint32_t flag);
 
     future<scattered_message_ptr> counter_by(const redis_key& rk, int64_t step, bool incr);
     future<scattered_message_ptr> append(const redis_key& rk, sstring& val);
 
-    bool del(const redis_key& key);
+    future<scattered_message_ptr> del(const redis_key& key);
+    bool del_direct(const redis_key& key);
 
-    bool exists(const redis_key& key);
+    future<scattered_message_ptr> exists(const redis_key& key);
+    bool exists_direct(const redis_key& key);
 
     future<scattered_message_ptr> get(const redis_key& key);
     future<scattered_message_ptr> strlen(const redis_key& key);
 
-    int expire(const redis_key& rk, long expired);
-    int persist(const redis_key& rk);
+    future<scattered_message_ptr> expire(const redis_key& rk, long expired);
+    future<scattered_message_ptr> persist(const redis_key& rk);
+    future<scattered_message_ptr> type(const redis_key& rk);
+    future<scattered_message_ptr> pttl(const redis_key& rk);
+    future<scattered_message_ptr> ttl(const redis_key& rk);
+    bool select(size_t index);
 
     // [LIST]
     future<scattered_message_ptr> push(const redis_key& rk, sstring& value, bool force, bool left);
@@ -117,106 +124,23 @@ public:
     future<scattered_message_ptr> srems(const redis_key& rk, std::vector<sstring>& members);
     future<foreign_ptr<lw_shared_ptr<std::vector<sstring>>>> smembers_direct(const redis_key& rk);
     future<scattered_message_ptr> srandmember(const redis_key& rk, size_t count);
-    int type(const redis_key& rk);
-    long pttl(const redis_key& rk);
-    long ttl(const redis_key& rk);
-    template <typename origin = local_origin_tag> inline
-    std::pair<size_t, int> zadds(const redis_key& rk, std::unordered_map<sstring, double>& members, int flags)
-    {
-        using result_type = std::pair<size_t, int>;
+
+
+    // [SORTED SET]
+    future<scattered_message_ptr> zadds(const redis_key& rk, std::unordered_map<sstring, double>& members, int flags);
+    future<scattered_message_ptr> zcard(const redis_key& rk);
+    future<scattered_message_ptr> zrem(const redis_key& rk, std::vector<sstring>& members);
+    future<scattered_message_ptr> zcount(const redis_key& rk, double min, double max);
+    future<scattered_message_ptr> zincrby(const redis_key& rk, sstring& member, double delta);
+    future<scattered_message_ptr> zrange(const redis_key& rk, long begin, long end, bool reverse, bool with_score);
+    std::vector<std::pair<sstring, double>> zrange_direct(const redis_key& rk, long begin, long end, bool reverse);
+    future<scattered_message_ptr> zrangebyscore(const redis_key& rk, double min, double max, bool reverse, bool with_score);
+    future<scattered_message_ptr> zrank(const redis_key& rk, sstring& member, bool reverse);
+    future<scattered_message_ptr> zscore(const redis_key& rk, sstring& member);
+    future<scattered_message_ptr> zremrangebyscore(const redis_key& rk, double min, double max);
+    future<scattered_message_ptr> zremrangebyrank(const redis_key& rk, size_t begin, size_t end);
+
 /*
-        auto it = _store->fetch_raw(rk);
-        sorted_set* zset = nullptr;
-        if (!it) {
-            zset = new sorted_set();
-            auto zset_item = item::create(rk, zset);
-            if (_store->set(rk, zset_item) != 0) {
-                return result_type {0, REDIS_ERR};
-            }
-        }
-        else {
-            if (it->type() == REDIS_ZSET) {
-                zset = it->zset_ptr();
-            }
-            else {
-                return result_type {0, REDIS_WRONG_TYPE};
-            }
-        }
-        size_t count = 0;
-        for (auto& entry : members) {
-            sstring key = entry.first;
-            double  score = entry.second;
-            redis_key member_data {std::move(key)};
-            auto de = zset->fetch(member_data);
-            if (de) {
-                if (flags & ZADD_NX || score == 0) {
-                    continue;
-                }
-                score += de->Double();
-                auto new_item = item::create(member_data, score);
-                if (zset->replace(member_data, new_item) == REDIS_OK) {
-                    count++;
-                }
-            }
-            else if (!(flags & ZADD_XX)) {
-                auto new_item = item::create(member_data, score);
-                if (zset->insert(member_data, new_item) == REDIS_OK) {
-                    count++;
-                }
-            }
-        }
-*/
-        return result_type {0, REDIS_OK};
-    }
-
-    std::pair<size_t, int> zcard(const redis_key& rk);
-    std::pair<size_t, int> zrem(const redis_key& rk, std::vector<sstring>& members);
-    std::pair<size_t, int> zcount(const redis_key& rk, double min, double max);
-    template <typename origin = local_origin_tag> inline
-    std::pair<double, int> zincrby(const redis_key& rk, sstring& member, double delta)
-    {
-        using result_type = std::pair<double, int>;
-        /*
-        auto it = _store->fetch_raw(rk);
-        if (it && it->type() != REDIS_ZSET) {
-            return result_type{0, REDIS_WRONG_TYPE};
-        }
-        sorted_set* zset = nullptr;
-        if (!it) {
-            zset = new sorted_set();
-            auto zset_item = item::create(rk, zset);
-            if (_store->set(rk, zset_item) != REDIS_OK) {
-                return result_type{0, REDIS_ERR};
-            }
-        }
-        else {
-            zset = it->zset_ptr();
-        }
-        redis_key mk {std::move(member)};
-        double new_value = delta;
-        auto exists_member = zset->fetch(mk);
-        if (exists_member) {
-            new_value += exists_member->Double();
-        }
-        auto new_member = item::create(mk, new_value);
-        if (zset->replace(mk, new_member) == REDIS_OK) {
-            return result_type {new_value, REDIS_OK};
-        }
-        else {
-            return result_type {0, REDIS_ERR};
-        }
-        */
-            return result_type{0, REDIS_WRONG_TYPE};
-    }
-    /*
-    //std::pair<std::vector<item_ptr>, int> zrange(const redis_key& rk, long begin, long end, bool reverse);
-    //std::pair<std::vector<item_ptr>, int> zrangebyscore(const redis_key& rk, double min, double max, bool reverse);
-    std::pair<size_t, int> zrank(const redis_key& rk, sstring& member, bool reverse);
-    std::pair<double, int> zscore(const redis_key& rk, sstring& member);
-    std::pair<size_t, int> zremrangebyscore(const redis_key& rk, double min, double max);
-    std::pair<size_t, int> zremrangebyrank(const redis_key& rk, size_t begin, size_t end);
-    int select(int index);
-
     // [GEO]
     std::pair<double, int> geodist(const redis_key& rk, sstring& lpos, sstring& rpos, int flag);
     std::pair<std::vector<sstring>, int> geohash(const redis_key& rk, std::vector<sstring>& members);
@@ -250,7 +174,7 @@ private:
     template<bool Key, bool Value>
     future<scattered_message_ptr> hgetall_impl(const redis_key& rk)
     {
-        return _cache_store.with_entry_run(rk, [this] (const cache_entry* e) {
+        return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
             if (!e) {
                 return reply_builder::build(msg_err);
             }
@@ -265,6 +189,8 @@ private:
     }
 private:
     static const int DEFAULT_DB_COUNT = 32;
-    cache _cache_store;
+    cache _cache_stores[DEFAULT_DB_COUNT];
+    size_t current_store_index = 0;
+    inline cache& current_store() { return _cache_stores[current_store_index]; }
 };
 }

@@ -74,6 +74,7 @@ struct args_collection {
     std::vector<sstring> _command_args;
     std::vector<sstring> _tmp_keys;
     std::unordered_map<sstring, sstring> _tmp_key_values;
+    std::unordered_map<sstring, double> _tmp_key_scores;
     std::vector<std::pair<sstring, sstring>> _tmp_key_value_pairs;
     args_collection () : _command_args_count(0) {}
 };
