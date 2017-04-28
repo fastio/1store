@@ -24,7 +24,7 @@ namespace redis {
 struct bits_operation
 {
     static bool set(managed_bytes& o, size_t offset, bool value);
-    static bool get(managed_bytes& o, size_t offset);
-    static size_t count(managed_bytes& o, long start, long end);
+    static bool get(const managed_bytes& o, size_t offset);
+    static size_t count(const managed_bytes& o, long start, long end);
 };
 }

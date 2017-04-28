@@ -1747,7 +1747,7 @@ future<> redis_service::geopos(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::georadius(args_collection& args, bool member, output_stream<char>& out)
 {
-    return out.write(msg_err);
+    return out.write(msg_nil);
     /*
     size_t option_index = member ? 4 : 5;
     if (args._command_args_count < option_index || args._command_args.empty()) {
@@ -1798,13 +1798,13 @@ future<> redis_service::georadius(args_collection& args, bool member, output_str
             else if (cc == "COUNT") {
                 flags |= GEORADIUS_COUNT;
                 if (i + 1 == args._command_args_count) {
-            return out.write(msg_syntax_err);
+                    return out.write(msg_syntax_err);
                 }
                 sstring& c = args._command_args[++i];
                 try {
                     count = std::stol(c.c_str());
                 } catch (const std::invalid_argument&) {
-            return out.write(msg_syntax_err);
+                    return out.write(msg_syntax_err);
                 }
             }
             else if (cc == "ASC") {
@@ -1816,7 +1816,7 @@ future<> redis_service::georadius(args_collection& args, bool member, output_str
             else if (cc == "STORE") {
                 flags |= GEORADIUS_STORE_SCORE;
                 if (i + 1 == args._command_args_count) {
-            return out.write(msg_syntax_err);
+                    return out.write(msg_syntax_err);
                 }
                 ++i;
                 stored_key_index = i;
@@ -1824,18 +1824,18 @@ future<> redis_service::georadius(args_collection& args, bool member, output_str
             else if (cc == "STOREDIST") {
                 flags |= GEORADIUS_STORE_DIST;
                 if (i + 1 == args._command_args_count) {
-            return out.write(msg_syntax_err);
+                    return out.write(msg_syntax_err);
                 }
                 ++i;
                 stored_key_index = i;
             }
             else {
-            return out.write(msg_syntax_err);
+                return out.write(msg_syntax_err);
             }
         }
     }
     if (((flags & GEORADIUS_STORE_SCORE) || (flags & GEORADIUS_STORE_DIST)) && (stored_key_index == 0 || stored_key_index >= args._command_args_count)) {
-            return out.write(msg_syntax_err);
+        return out.write(msg_syntax_err);
     }
     std::transform(unit.begin(), unit.end(), unit.begin(), ::tolower);
     if (unit == "m") {
@@ -1851,7 +1851,7 @@ future<> redis_service::georadius(args_collection& args, bool member, output_str
         flags |= GEO_UNIT_FT;
     }
     else {
-            return out.write(msg_syntax_err);
+        return out.write(msg_syntax_err);
     }
     geo::to_meters(radius, flags);
 
@@ -1919,10 +1919,8 @@ future<georadius_result_type> redis_service::fetch_points_by_coord_radius(sstrin
 */
 future<> redis_service::setbit(args_collection& args, output_stream<char>& out)
 {
-    return out.write(msg_nil);
-    /*
     if (args._command_args_count < 3 || args._command_args.empty()) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
     size_t offset = 0;
@@ -1931,83 +1929,38 @@ future<> redis_service::setbit(args_collection& args, output_stream<char>& out)
         offset = std::stol(args._command_args[1]);
         value = std::stoi(args._command_args[2]);
     } catch (const std::invalid_argument&) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    if (engine().cpu_id() == cpu) {
-        auto&& u = _db.local().setbit(std::move(rk), offset, value == 1);
-        if (u.second == REDIS_OK) {
-            return u.first ? one_message() : zero_message();
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
-    }
-    return _db.invoke_on(cpu, &database::setbit, std::move(rk), offset, value == 1).then([] (auto&& u) {
-        if (u.second == REDIS_OK) {
-            return u.first ? one_message() : zero_message();
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
+    return _db.invoke_on(cpu, &database::setbit, std::move(rk), offset, value == 1).then([&out] (auto&& m) {
+        return out.write(std::move(*m));
     });
-    */
 }
 
 future<> redis_service::getbit(args_collection& args, output_stream<char>& out)
 {
-    return out.write(msg_nil);
-    /*
     if (args._command_args_count < 2 || args._command_args.empty()) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
     size_t offset = 0;
     try {
         offset = std::stol(args._command_args[1]);
     } catch (const std::invalid_argument&) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    if (engine().cpu_id() == cpu) {
-        auto&& u = _db.local().getbit(std::move(rk), offset);
-        if (u.second == REDIS_OK) {
-            return u.first ? one_message() : zero_message();
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
-    }
-    return _db.invoke_on(cpu, &database::getbit, std::move(rk), offset).then([] (auto&& u) {
-        if (u.second == REDIS_OK) {
-            return u.first ? one_message() : zero_message();
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
+    return _db.invoke_on(cpu, &database::getbit, std::move(rk), offset).then([&out] (auto&& m) {
+        return out.write(std::move(*m));
     });
-    */
 }
+
 future<> redis_service::bitcount(args_collection& args, output_stream<char>& out)
 {
-    return out.write(msg_nil);
-    /*
     if (args._command_args_count < 3 || args._command_args.empty()) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
     long start = 0, end = 0;
@@ -2015,35 +1968,15 @@ future<> redis_service::bitcount(args_collection& args, output_stream<char>& out
         start = std::stol(args._command_args[1]);
         end = std::stol(args._command_args[2]);
     } catch (const std::invalid_argument&) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    if (engine().cpu_id() == cpu) {
-        auto&& u = _db.local().bitcount(std::move(rk), start, end);
-        if (u.second == REDIS_OK) {
-            return size_message(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
-    }
-    return _db.invoke_on(cpu, &database::bitcount, std::move(rk), start, end).then([] (auto&& u) {
-        if (u.second == REDIS_OK) {
-            return size_message(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
+    return _db.invoke_on(cpu, &database::bitcount, std::move(rk), start, end).then([&out] (auto&& m) {
+        return out.write(std::move(*m));
     });
-    */
 }
+
 future<> redis_service::bitop(args_collection& args, output_stream<char>& out)
 {
     return out.write(msg_nil);

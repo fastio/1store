@@ -91,6 +91,11 @@ public:
         _storage._integer_number = data;
     }
 
+    cache_entry(const sstring key, size_t hash, size_t origin_size) noexcept
+        : cache_entry(key, hash, entry_type::ENTRY_BYTES)
+    {
+    }
+
     cache_entry(const sstring& key, size_t hash, const sstring& data) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_BYTES)
     {

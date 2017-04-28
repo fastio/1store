@@ -356,7 +356,7 @@ deps = {
       'redis_protocol_parser.rl',
       'redis_protocol.cc',
       'geo.cc',
-      'bitmap.cc',
+      'bits_operation.cc',
       'list_lsa.cc',
       'cache.cc',
       'reply_builder.cc',

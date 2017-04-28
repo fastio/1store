@@ -48,7 +48,7 @@ bool bits_operation::set(managed_bytes& o, size_t offset, bool value)
     return bit_val > 0;
 }
 
-bool bits_operation::get(managed_bytes& o, size_t offset)
+bool bits_operation::get(const managed_bytes& o, size_t offset)
 {
     if (offset > BITMAP_MAX_OFFSET || offset >= o.size()) {
         return false;
@@ -60,7 +60,7 @@ bool bits_operation::get(managed_bytes& o, size_t offset)
     return bit_val > 0;
 }
 
-size_t bits_operation::count(managed_bytes& o, long start, long end)
+size_t bits_operation::count(const managed_bytes& o, long start, long end)
 {
     if (start < 0) start = static_cast<size_t>(start) + o.size();
     if (end < 0) end = static_cast<size_t>(end) + o.size();

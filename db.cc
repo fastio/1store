@@ -23,7 +23,7 @@
 #include <chrono>
 #include <algorithm>
 #include "util/log.hh"
-
+#include "bits_operation.hh"
 using logger =  seastar::logger;
 static logger db_log ("db");
 
@@ -1239,7 +1239,7 @@ future<scattered_message_ptr> database::geodist(const redis_key& rk, sstring& lp
         }
         else {
            return reply_builder::build(msg_err);
-        } 
+        }
     });
 }
 
@@ -1400,17 +1400,57 @@ future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius(ss
 
 future<scattered_message_ptr> database::setbit(const redis_key& rk, size_t offset, bool value)
 {
-    return reply_builder::build(msg_nil);
+    return with_allocator(allocator(), [this, &rk, offset, value] {
+        return current_store().with_entry_run(rk, [this, &rk, offset, value] (cache_entry* e) {
+            auto o = e;
+            if (o == nullptr) {
+               size_t origin_size = offset + offset / 4;
+               auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), origin_size);
+               current_store().insert(entry);
+               o = entry;
+            }
+            if (o->type_of_bytes() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& mbytes = o->value_bytes();
+            if (mbytes.size() < offset) {
+                auto extend_size = offset + offset / 4;
+                mbytes.resize(extend_size);
+            }
+            auto result = bits_operation::set(mbytes, offset, value);
+            return reply_builder::build(result ? msg_one : msg_zero);
+        });
+    });
 }
 
 future<scattered_message_ptr> database::getbit(const redis_key& rk, size_t offset)
 {
-    return reply_builder::build(msg_nil);
+    return current_store().with_entry_run(rk, [offset] (const cache_entry* e) {
+        if (e == nullptr) {
+            return reply_builder::build(msg_zero);
+        }
+        if (e->type_of_bytes() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& mbytes = e->value_bytes();
+        auto result = bits_operation::get(mbytes, offset);
+        return reply_builder::build(result ? msg_one : msg_zero);
+    });
 }
 
 future<scattered_message_ptr> database::bitcount(const redis_key& rk, long start, long end)
 {
-    return reply_builder::build(msg_nil);
+    return current_store().with_entry_run(rk, [start, end] (const cache_entry* e) {
+        if (e == nullptr) {
+            return reply_builder::build(msg_zero);
+        }
+        if (e->type_of_bytes() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& mbytes = e->value_bytes();
+        auto result = bits_operation::count(mbytes, start, end);
+        return reply_builder::build(result);
+    });
 }
 
 future<scattered_message_ptr> database::bitpos(const redis_key& rk, bool bit, long start, long end)

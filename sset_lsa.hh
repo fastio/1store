@@ -199,7 +199,7 @@ public:
 
     double insert_or_update(sstring& key, double delta)
     {
-        double result = delta; 
+        double result = delta;
         auto it = _dict.find(key, sset_entry::compare());
         if (it != _dict.end()) {
             result += it->score();
@@ -210,7 +210,7 @@ public:
             auto entry = current_allocator().construct<sset_entry>(key, result);
             insert(entry);
         }
-        return result; 
+        return result;
     }
 
     size_t insert_or_update(std::unordered_map<sstring, double>& members)
