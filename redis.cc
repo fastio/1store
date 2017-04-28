@@ -960,7 +960,6 @@ future<> redis_service::sunion_impl(std::vector<sstring>& keys, sstring* dest, o
         }).then([this, &state, &out] {
             auto& result = state.result;
             if (state.dest) {
-            std::cout << "result size: " << result.size();
                 return this->sadds_impl_return_keys(*state.dest, result, out);
             }
             return reply_builder::build_local(out, result);
@@ -1230,13 +1229,6 @@ future<> redis_service::zcard(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<std::vector<std::pair<sstring, double>>> redis_service::range_impl(sstring& key, long begin, long end, bool reverse)
-{
-    redis_key rk{std::ref(key)};
-    auto cpu = get_cpu(rk);
-    return _db.invoke_on(cpu, &database::zrange_direct, std::move(rk), size_t(begin), size_t(end), reverse);
-}
-
 future<> redis_service::zrange(args_collection& args, bool reverse, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
@@ -1398,28 +1390,27 @@ bool redis_service::parse_zset_args(args_collection& args, zset_args& uargs)
     }
     bool has_weights = false, has_aggregate = false;
     if (index < args._command_args_count) {
-        sstring& weight_syntax = args._command_args[index];
-        if (weight_syntax == "WEIGHTS") {
-            index ++;
-            if (index + uargs.numkeys < args._command_args_count) {
-                return false;
-            }
-            has_weights = true;
-            size_t i = index;
-            index += uargs.numkeys;
-            for (; i < index; ++i) {
-                try {
-                    uargs.weights.push_back(std::stod(args._command_args[i].c_str()));
-                } catch (const std::invalid_argument&) {
+        for (; index < args._command_args_count; ++index) {
+            sstring& syntax = args._command_args[index];
+            if (syntax == "WEIGHTS") {
+                index ++;
+                if (index + uargs.numkeys > args._command_args_count) {
                     return false;
                 }
+                has_weights = true;
+                size_t i = index;
+                index += uargs.numkeys;
+                for (; i < index; ++i) {
+                    try {
+                        uargs.weights.push_back(std::stod(args._command_args[i].c_str()));
+                    } catch (const std::invalid_argument&) {
+                        return false;
+                    }
+                }
             }
-        }
-        if (index < args._command_args_count) {
-            if (index + 2 < args._command_args_count) {
-                sstring& aggregate = args._command_args[index];
-                if (aggregate == "ARGGREGATE") {
-                    has_aggregate = true;
+            if (syntax == "AGGREGATE") {
+                if (index + 1 > args._command_args_count) {
+                    return false;
                 }
                 index++;
                 sstring& aggre = args._command_args[index];
@@ -1437,9 +1428,6 @@ bool redis_service::parse_zset_args(args_collection& args, zset_args& uargs)
                 }
                 has_aggregate = true;
             }
-            else {
-                return false;
-            }
         }
     }
     if (has_weights == false) {
@@ -1455,8 +1443,6 @@ bool redis_service::parse_zset_args(args_collection& args, zset_args& uargs)
 
 future<> redis_service::zunionstore(args_collection& args, output_stream<char>& out)
 {
-        return out.write(msg_syntax_err);
-/*
     zset_args uargs;
     if (parse_zset_args(args, uargs) == false) {
         return out.write(msg_syntax_err);
@@ -1464,136 +1450,102 @@ future<> redis_service::zunionstore(args_collection& args, output_stream<char>& 
     struct zunion_store_state {
         std::vector<std::pair<sstring, double>> wkeys;
         sstring dest;
-        std::vector<std::unordered_map<sstring, double>> result;
+        std::unordered_map<sstring, double> result;
         int aggregate_flag;
     };
     std::vector<std::pair<sstring, double>> wkeys;
     for (size_t i = 0; i < uargs.numkeys; ++i) {
         wkeys.emplace_back(std::pair<sstring, double>(std::move(uargs.keys[i]), uargs.weights[i]));
     }
-    return do_with(zunion_store_state{std::move(wkeys), std::move(uargs.dest), {}, uargs.aggregate_flag}, [this] (auto& state) {
+    return do_with(zunion_store_state{std::move(wkeys), std::move(uargs.dest), {}, uargs.aggregate_flag}, [this, &out] (auto& state) {
         return parallel_for_each(std::begin(state.wkeys), std::end(state.wkeys), [this, &state] (auto& entry) {
-            sstring& key = entry.first;
-            double weight = entry.second;
-            return this->range_impl(key, 0, -1, false).then([this, &state, &key, weight] (auto&& u) {
-                    std::unordered_map<sstring, double> result;
-                    for (size_t i = 0; i < u.size(); ++i) {
-                        auto& entry  = u[i]->key();
-                        result.emplace(entry.first, entry.second);
+            redis_key rk{std::ref(entry.first)};
+            auto cpu = rk.get_cpu();
+            return _db.invoke_on(cpu, &database::zrange_direct, std::move(rk), 0, -1).then([this, weight = entry.second, &state] (auto&& m) {
+                auto& range_result = *m;
+                auto& result = state.result;
+                for (size_t i = 0; i < range_result.size(); ++i) {
+                    auto& key = range_result[i].first;
+                    auto& score = range_result[i].second;
+                    if (result.find(key) != result.end()) {
+                       result[key] = redis_service::score_aggregation(result[key], score * weight, state.aggregate_flag);
                     }
-                    state.result.emplace_back(std::move(result));
+                    else {
+                        result[key] = score;
+                    }
                 }
             });
-        }).then([this, &state] () {
-            std::unordered_map<sstring, double> result;
-            for (size_t i = 0; i < state.result.size(); ++i) {
-               auto& member_scores = state.result[i];
-               for (auto& e : member_scores) {
-                   auto& member = e.first;
-                   auto  score = e.second;
-                   auto exists = result.find(member);
-                   if (exists != result.end()) {
-                       result[member] = score;
-                   }
-                   else {
-                       if (state.aggregate_flag == ZAGGREGATE_MIN) {
-                           result[member] = std::min(result[member], score);
-                       }
-                       else if(state.aggregate_flag == ZAGGREGATE_SUM) {
-                           result[member] += score;
-                       }
-                       else {
-                           result[member] = std::max(result[member], score);
-                       }
-                   }
-               }
-            }
-            return this->zadds_impl(state.dest, std::move(result), 0).then([] (auto&& u) {
-                if (u.second == REDIS_OK) {
-                    return size_message(u.first);
-                }
-                else if (u.second == REDIS_WRONG_TYPE) {
-                    return wrong_type_err_message();
-                }
-                else {
-                    return err_message();
-                }
-           });
+        }).then([this, &state, &out] () {
+            redis_key rk{std::ref(state.dest)};
+            auto cpu = rk.get_cpu();
+            return _db.invoke_on(cpu, &database::zadds, std::move(rk), std::ref(state.result), ZADD_CH).then([&out] (auto&& m) {
+                return out.write(std::move(*m));
+            });
         });
     });
-*/
 }
 
 future<> redis_service::zinterstore(args_collection& args, output_stream<char>& out)
 {
-        return out.write(msg_syntax_err);
-/*
     zset_args uargs;
     if (parse_zset_args(args, uargs) == false) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     struct zinter_store_state {
-        std::vector<sstring> keys;
-        std::vector<double> weights;
+        std::vector<std::pair<sstring, double>> wkeys;
         sstring dest;
-        std::unordered_map<size_t, std::unordered_map<sstring, double>> result;
+        std::unordered_map<sstring, double> result;
         int aggregate_flag;
     };
-    size_t count = uargs.keys.size();
-    return do_with(zinter_store_state{std::move(uargs.keys), std::move(uargs.weights), std::move(uargs.dest), {}, uargs.aggregate_flag}, [this, count] (auto& state) {
-        return parallel_for_each(boost::irange<size_t>(0, count), [this, &state] (size_t k) {
-            sstring& key = state.keys[k];
-            double weight = state.weights[k];
-            return this->range_impl(key, static_cast<size_t>(0), static_cast<size_t>(-1), false).then([this, &state, &key, weight, index = k] (auto&& u) {
-                if (u.second == REDIS_OK) {
-                    auto& items = u.first;
-                    std::unordered_map<sstring, double> result;
-                    for (size_t i = 0; i < items.size(); ++i) {
-                        const auto& member = items[i]->key();
-                        result.emplace(sstring(member.data(), member.size()), items[i]->Double() * weight);
-                    }
-                    state.result[index] = std::move(result);
-                }
-            });
-        }).then([this, &state, count] {
-            auto&& result = std::move(state.result[0]);
-            for (uint32_t i = 1; i < count; ++i) {
-                std::unordered_map<sstring, double> temp;
-                auto&& next_items = std::move(state.result[i]);
-                if (result.empty() || next_items.empty()) {
-                    result.clear();
-                    break;
-                }
-                for (auto& e : next_items) {
-                    auto exists_member = std::find_if(result.begin(), result.end(), [&e] (auto& o) { return e.first == o.first; });
-                    if (exists_member != result.end()) {
-                       if (state.aggregate_flag == ZAGGREGATE_MIN) {
-                           temp[exists_member->first] = std::min(exists_member->second, e.second);
-                       }
-                       else if(state.aggregate_flag == ZAGGREGATE_SUM) {
-                           temp[exists_member->first] += e.second;
-                       }
-                       else {
-                           temp[exists_member->first] = std::max(exists_member->second, e.second);
-                       }
-                    }
-                }
-                result = std::move(temp);
+    std::vector<std::pair<sstring, double>> wkeys;
+    for (size_t i = 0; i < uargs.numkeys; ++i) {
+        wkeys.emplace_back(std::pair<sstring, double>(std::move(uargs.keys[i]), uargs.weights[i]));
+    }
+    return do_with(zinter_store_state{std::move(wkeys), std::move(uargs.dest), {}, uargs.aggregate_flag}, [this, &out] (auto& state) {
+        redis_key rk{std::ref(state.wkeys[0].first)};
+        return _db.invoke_on(rk.get_cpu(), &database::zrange_direct, std::move(rk), 0, -1).then([this, &state, weight = state.wkeys[0].second] (auto&& m) {
+            auto& range_result = *m;
+            auto& result = state.result;
+            for (size_t i = 0; i < range_result.size(); ++i) {
+                result[range_result[i].first] = range_result[i].second * weight;
             }
-            return this->zadds_impl(state.dest, std::move(result), 0).then([] (auto&& u) {
-                if (u.second == REDIS_OK) {
-                    return size_message(u.first);
-                }
-                else if (u.second == REDIS_WRONG_TYPE) {
-                    return wrong_type_err_message();
-                }
-                else {
-                    return err_message();
-                }
-           });
+            return make_ready_future<bool>(!result.empty() && state.wkeys.size() > 1);
+        }).then([this, &state, &out] (bool continue_next) {
+            if (!continue_next) {
+                return make_ready_future<>();
+            }
+            else {
+                return parallel_for_each(boost::irange<size_t>(1, state.wkeys.size()), [this, &state, &out] (size_t k) {
+                    auto& entry = state.wkeys[k];
+                    redis_key rk{std::ref(entry.first)};
+                    auto cpu = rk.get_cpu();
+                    return _db.invoke_on(cpu, &database::zrange_direct, std::move(rk), 0, -1).then([this, &state, weight = entry.second] (auto&& m) {
+                        auto& range_result = *m;
+                        auto& result = state.result;
+                        std::unordered_map<sstring, double> new_result;
+                        for (size_t i = 0; i < range_result.size(); ++i) {
+                            auto& key = range_result[i].first;
+                            auto& score = range_result[i].second;
+                            auto it = result.find(key);
+                            if (it != result.end()) {
+                                auto& old_score = it->second;
+                                new_result[key] = redis_service::score_aggregation(old_score, score * weight, state.aggregate_flag);
+                            }
+                        }
+                        state.result = std::move(new_result);
+                    });
+                }).then([this] () {
+                    return make_ready_future<>();
+                });
+            }
+        }).then([this, &state, &out] {
+            redis_key rk{std::ref(state.dest)};
+            auto cpu = rk.get_cpu();
+            return _db.invoke_on(cpu, &database::zadds, std::move(rk), std::ref(state.result), ZADD_CH).then([&out] (auto&& m) {
+                return out.write(std::move(*m));
+            });
         });
     });
-*/
 }
 
 future<> redis_service::zremrangebyscore(args_collection& args, output_stream<char>& out)
@@ -1699,14 +1651,13 @@ future<> redis_service::select(args_collection& args, output_stream<char>& out)
     });
 }
 
-/*
-future<message> redis_service::geoadd(args_collection& args)
+
+future<> redis_service::geoadd(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 4 || (args._command_args_count - 1) % 3 != 0 || args._command_args.empty()) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
-    std::unordered_map<sstring, double> members;
     for (size_t i = 1; i < args._command_args_count; i += 3) {
         sstring& longitude = args._command_args[i];
         sstring& latitude = args._command_args[i + 1];
@@ -1716,30 +1667,24 @@ future<message> redis_service::geoadd(args_collection& args)
             longitude_ = std::stod(longitude.c_str());
             latitude_ = std::stod(latitude.c_str());
         } catch (const std::invalid_argument&) {
-            return syntax_err_message();
+            return out.write(msg_syntax_err);
         }
         if (geo::encode_to_geohash(longitude_, latitude_, score) == false) {
-            return err_message();
+            return out.write(msg_err);
         }
-        members.emplace(std::pair<sstring, double>(member, score));
+        args._tmp_key_scores.emplace(std::pair<sstring, double>(member, score));
     }
-    return zadds_impl(key, std::move(members), 0).then([] (auto&& u) {
-        if (u.second == REDIS_OK) {
-            return size_message(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
+    redis_key rk{std::ref(key)};
+    auto cpu = get_cpu(rk);
+    return _db.invoke_on(cpu, &database::zadds, std::move(rk), std::ref(args._tmp_key_scores), ZADD_CH).then([&out] (auto&& m) {
+        return out.write(std::move(*m));
     });
 }
 
-future<message> redis_service::geodist(args_collection& args)
+future<> redis_service::geodist(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
     sstring& lpos = args._command_args[1];
@@ -1757,115 +1702,56 @@ future<message> redis_service::geodist(args_collection& args)
             geodist_flag = GEODIST_UNIT_FT;
         }
         else {
-            return syntax_err_message();
+            return out.write(msg_syntax_err);
         }
     }
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    if (engine().cpu_id() == cpu) {
-        auto&& u = _db.local().geodist(std::move(rk), std::move(lpos), std::move(rpos), geodist_flag);
-        if (u.second == REDIS_OK) {
-            return double_message<true>(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return nil_message();
-        }
-    }
-    return _db.invoke_on(cpu, &database::geodist, std::move(rk), std::move(lpos), std::move(rpos), geodist_flag).then([] (auto&& u) {
-        if (u.second == REDIS_OK) {
-            return double_message<true>(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return nil_message();
-        }
+    return _db.invoke_on(cpu, &database::geodist, std::move(rk), std::ref(lpos), std::ref(rpos), geodist_flag).then([&out] (auto&& m) {
+        return out.write(std::move(*m));
     });
 }
 
-future<message> redis_service::geohash(args_collection& args)
+future<> redis_service::geohash(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
+    }
+    sstring& key = args._command_args[0];
+    for (size_t i = 1; i < args._command_args_count; ++i) {
+        args._tmp_keys.emplace_back(std::move(args._command_args[i]));
+    }
+    redis_key rk {std::ref(key)};
+    auto cpu = get_cpu(rk);
+    return _db.invoke_on(cpu, &database::geohash, std::move(rk), std::ref(args._tmp_keys)).then([&out] (auto&& m) {
+        return out.write(std::move(*m));
+    });
+}
+
+future<> redis_service::geopos(args_collection& args, output_stream<char>& out)
+{
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
     std::vector<sstring> members;
     for (size_t i = 1; i < args._command_args_count; ++i) {
-        members.emplace_back(std::move(args._command_args[i]));
+        args._tmp_keys.emplace_back(std::move(args._command_args[i]));
     }
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    if (engine().cpu_id() == cpu) {
-        auto&& u = _db.local().geohash(std::move(rk), std::move(members));
-        if (u.second == REDIS_OK) {
-            return strings_message(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
-    }
-    return _db.invoke_on(cpu, &database::geohash, std::move(rk), std::move(members)).then([] (auto&& u) {
-        if (u.second == REDIS_OK) {
-            return strings_message(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
+    return _db.invoke_on(cpu, &database::geopos, std::move(rk), std::ref(members)).then([&out] (auto&& m) {
+        return out.write(std::move(*m));
     });
 }
 
-future<message> redis_service::geopos(args_collection& args)
+future<> redis_service::georadius(args_collection& args, bool member, output_stream<char>& out)
 {
-    if (args._command_args_count < 2 || args._command_args.empty()) {
-        return syntax_err_message();
-    }
-    sstring& key = args._command_args[0];
-    std::vector<sstring> members;
-    for (size_t i = 1; i < args._command_args_count; ++i) {
-        members.emplace_back(std::move(args._command_args[i]));
-    }
-    redis_key rk {std::ref(key)};
-    auto cpu = get_cpu(rk);
-    if (engine().cpu_id() == cpu) {
-        auto&& u = _db.local().geopos(std::move(rk), std::move(members));
-        if (u.second == REDIS_OK) {
-            return double_array_message(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
-    }
-    return _db.invoke_on(cpu, &database::geopos, std::move(rk), std::move(members)).then([] (auto&& u) {
-        if (u.second == REDIS_OK) {
-            return double_array_message(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
-    });
-}
-
-future<message> redis_service::georadius(args_collection& args, bool member)
-{
+    return out.write(msg_err);
+    /*
     size_t option_index = member ? 4 : 5;
     if (args._command_args_count < option_index || args._command_args.empty()) {
-        return syntax_err_message();
+        return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
     sstring unit{}, member_key{};
@@ -1880,7 +1766,7 @@ future<message> redis_service::georadius(args_collection& args, bool member)
             lat = std::stod(latitude.c_str());
             radius = std::stod(rad.c_str());
         } catch (const std::invalid_argument&) {
-            return syntax_err_message();
+            return out.write(msg_syntax_err);
         }
     }
     else {
@@ -1890,7 +1776,7 @@ future<message> redis_service::georadius(args_collection& args, bool member)
         try {
             radius = std::stod(rad.c_str());
         } catch (const std::invalid_argument&) {
-            return syntax_err_message();
+            return out.write(msg_syntax_err);
         }
     }
 
@@ -1912,13 +1798,13 @@ future<message> redis_service::georadius(args_collection& args, bool member)
             else if (cc == "COUNT") {
                 flags |= GEORADIUS_COUNT;
                 if (i + 1 == args._command_args_count) {
-                    return syntax_err_message();
+            return out.write(msg_syntax_err);
                 }
                 sstring& c = args._command_args[++i];
                 try {
                     count = std::stol(c.c_str());
                 } catch (const std::invalid_argument&) {
-                    return syntax_err_message();
+            return out.write(msg_syntax_err);
                 }
             }
             else if (cc == "ASC") {
@@ -1930,7 +1816,7 @@ future<message> redis_service::georadius(args_collection& args, bool member)
             else if (cc == "STORE") {
                 flags |= GEORADIUS_STORE_SCORE;
                 if (i + 1 == args._command_args_count) {
-                    return syntax_err_message();
+            return out.write(msg_syntax_err);
                 }
                 ++i;
                 stored_key_index = i;
@@ -1938,18 +1824,18 @@ future<message> redis_service::georadius(args_collection& args, bool member)
             else if (cc == "STOREDIST") {
                 flags |= GEORADIUS_STORE_DIST;
                 if (i + 1 == args._command_args_count) {
-                    return syntax_err_message();
+            return out.write(msg_syntax_err);
                 }
                 ++i;
                 stored_key_index = i;
             }
             else {
-                return syntax_err_message();
+            return out.write(msg_syntax_err);
             }
         }
     }
     if (((flags & GEORADIUS_STORE_SCORE) || (flags & GEORADIUS_STORE_DIST)) && (stored_key_index == 0 || stored_key_index >= args._command_args_count)) {
-        return syntax_err_message();
+            return out.write(msg_syntax_err);
     }
     std::transform(unit.begin(), unit.end(), unit.begin(), ::tolower);
     if (unit == "m") {
@@ -1965,11 +1851,13 @@ future<message> redis_service::georadius(args_collection& args, bool member)
         flags |= GEO_UNIT_FT;
     }
     else {
-        return syntax_err_message();
+            return out.write(msg_syntax_err);
     }
     geo::to_meters(radius, flags);
 
-    auto points_ready =  !member ? fetch_points_by_coord_radius(key, log, lat, radius, count, flags) : fetch_points_by_coord_radius(key, member_key, radius, count, flags);
+    redis_key rk {std::ref(key)};
+    auto cpu = get_cpu(rk);
+    auto points_ready = !member ? _db.invoke_on(cpu, &database::georadius_coord, std::move(rk), log, lat, radius, count, flags) : _db.invoke_on(cpu, &database::georadius_coord, std::move(rk), log, lat, radius, count, flags);
     return  points_ready.then([this, flags, &args, stored_key_index] (georadius_result_type&& u) {
         using data_type = std::vector<std::tuple<sstring, double, double, double, double>>;
         if (u.second == REDIS_OK) {
@@ -2010,33 +1898,29 @@ future<message> redis_service::georadius(args_collection& args, bool member)
             return nil_message();
         }
     });
+*/
 }
 
 using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
+/*
 future<georadius_result_type> redis_service::fetch_points_by_coord_radius(sstring& key, double log, double lat, double radius, size_t count, int flags)
 {
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    if (engine().cpu_id() == cpu) {
-        auto&& u = _db.local().georadius_coord(std::move(rk), log, lat, radius, count, flags);
-        return make_ready_future<georadius_result_type>(std::move(u));
-    }
-    return _db.invoke_on(cpu, &database::georadius_coord, std::move(rk), log, lat, radius, count, flags);
+    return _db.invoke_on(cpu, &database::georadius_coord_direct, std::move(rk), log, lat, radius, count, flags);
 }
 
 future<georadius_result_type> redis_service::fetch_points_by_coord_radius(sstring& key, sstring& member_key, double radius, size_t count, int flags)
 {
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    if (engine().cpu_id() == cpu) {
-        auto&& u = _db.local().georadius_member(std::move(rk), std::move(member_key), radius, count, flags);
-        return make_ready_future<georadius_result_type>(std::move(u));
-    }
-    return _db.invoke_on(cpu, &database::georadius_member, std::move(rk), std::move(member_key), radius, count, flags);
+    return _db.invoke_on(cpu, &database::georadius_member_direct, std::move(rk), std::ref(member_key), radius, count, flags);
 }
-
-future<message> redis_service::setbit(args_collection& args)
+*/
+future<> redis_service::setbit(args_collection& args, output_stream<char>& out)
 {
+    return out.write(msg_nil);
+    /*
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return syntax_err_message();
     }
@@ -2074,10 +1958,13 @@ future<message> redis_service::setbit(args_collection& args)
             return err_message();
         }
     });
+    */
 }
 
-future<message> redis_service::getbit(args_collection& args)
+future<> redis_service::getbit(args_collection& args, output_stream<char>& out)
 {
+    return out.write(msg_nil);
+    /*
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return syntax_err_message();
     }
@@ -2113,9 +2000,12 @@ future<message> redis_service::getbit(args_collection& args)
             return err_message();
         }
     });
+    */
 }
-future<message> redis_service::bitcount(args_collection& args)
+future<> redis_service::bitcount(args_collection& args, output_stream<char>& out)
 {
+    return out.write(msg_nil);
+    /*
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return syntax_err_message();
     }
@@ -2152,13 +2042,17 @@ future<message> redis_service::bitcount(args_collection& args)
             return err_message();
         }
     });
+    */
 }
-future<message> redis_service::bitop(args_collection& args)
+future<> redis_service::bitop(args_collection& args, output_stream<char>& out)
 {
-    return err_message();
+    return out.write(msg_nil);
 }
-future<message> redis_service::bitpos(args_collection& args)
+
+future<> redis_service::bitpos(args_collection& args, output_stream<char>& out)
 {
+    return out.write(msg_nil);
+    /*
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return syntax_err_message();
     }
@@ -2204,11 +2098,11 @@ future<message> redis_service::bitpos(args_collection& args)
             return err_message();
         }
     });
+    */
 }
 
-future<message> redis_service::bitfield(args_collection& args)
+future<> redis_service::bitfield(args_collection& args, output_stream<char>& out)
 {
-    return err_message();
+    return out.write(msg_nil);
 }
-*/
 } /* namespace redis */

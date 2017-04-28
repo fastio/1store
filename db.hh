@@ -29,32 +29,14 @@
 #include "common.hh"
 #include "redis_timer_set.hh"
 #include "geo.hh"
-#include "bitmap.hh"
+#include "bits_operation.hh"
 #include <tuple>
 #include "cache.hh"
 #include "reply_builder.hh"
 #include  <experimental/vector>
 namespace stdx = std::experimental;
 namespace redis {
-//using item_ptr = foreign_ptr<lw_shared_ptr<item>>;
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
-struct remote_origin_tag {
-    template <typename T>
-    static inline
-    T move_if_local(T& ref) {
-        return ref;
-    }
-};
-
-struct local_origin_tag {
-    template <typename T>
-    static inline
-    T move_if_local(T& ref) {
-        return std::move(ref);
-    }
-};
-
-
 class database final : private logalloc::region {
 public:
     database();
@@ -133,35 +115,32 @@ public:
     future<scattered_message_ptr> zcount(const redis_key& rk, double min, double max);
     future<scattered_message_ptr> zincrby(const redis_key& rk, sstring& member, double delta);
     future<scattered_message_ptr> zrange(const redis_key& rk, long begin, long end, bool reverse, bool with_score);
-    std::vector<std::pair<sstring, double>> zrange_direct(const redis_key& rk, long begin, long end, bool reverse);
+    future<foreign_ptr<lw_shared_ptr<std::vector<std::pair<sstring, double>>>>> zrange_direct(const redis_key& rk, long begin, long end);
     future<scattered_message_ptr> zrangebyscore(const redis_key& rk, double min, double max, bool reverse, bool with_score);
     future<scattered_message_ptr> zrank(const redis_key& rk, sstring& member, bool reverse);
     future<scattered_message_ptr> zscore(const redis_key& rk, sstring& member);
     future<scattered_message_ptr> zremrangebyscore(const redis_key& rk, double min, double max);
     future<scattered_message_ptr> zremrangebyrank(const redis_key& rk, size_t begin, size_t end);
 
-/*
     // [GEO]
-    std::pair<double, int> geodist(const redis_key& rk, sstring& lpos, sstring& rpos, int flag);
-    std::pair<std::vector<sstring>, int> geohash(const redis_key& rk, std::vector<sstring>& members);
-    std::pair<std::vector<std::tuple<double, double, bool>>, int> geopos(const redis_key& rk, std::vector<sstring>& members);
-    // [key, dist, score, longitude, latitude]
+    future<scattered_message_ptr> geodist(const redis_key& rk, sstring& lpos, sstring& rpos, int flag);
+    future<scattered_message_ptr> geohash(const redis_key& rk, std::vector<sstring>& members);
+    future<scattered_message_ptr> geopos(const redis_key& rk, std::vector<sstring>& members);
     using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
-    georadius_result_type georadius_coord(const redis_key& rk, double longtitude, double latitude, double radius, size_t count, int flag);
-    georadius_result_type georadius_member(const redis_key& rk, sstring& pos, double radius, size_t count, int flag);
+    future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> geeradius_coord_direct(const redis_key& rk, double longtitude, double latitude, double radius, size_t count, int flag);
+    future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> georadius_member_direct(const redis_key& rk, sstring& pos, double radius, size_t count, int flag);
 
     // [BITMAP]
-    std::pair<bool, int> setbit(const redis_key& rk, size_t offset, bool value);
-    std::pair<bool, int> getbit(const redis_key& rk, size_t offset);
-    std::pair<size_t, int> bitcount(const redis_key& rk, long start, long end);
-    std::pair<size_t, int> bitop(const redis_key& rk, int flags, std::vector<sstring>& keys);
-    std::pair<size_t, int> bitpos(const redis_key& rk, bool bit, long start, long end);
-*/
+    future<scattered_message_ptr> setbit(const redis_key& rk, size_t offset, bool value);
+    future<scattered_message_ptr> getbit(const redis_key& rk, size_t offset);
+    future<scattered_message_ptr> bitcount(const redis_key& rk, long start, long end);
+    future<scattered_message_ptr> bitop(const redis_key& rk, int flags, std::vector<sstring>& keys);
+    future<scattered_message_ptr> bitpos(const redis_key& rk, bool bit, long start, long end);
+
     future<> stop();
 private:
-/*
-    georadius_result_type georadius(sorted_set* zset, double longtitude, double latitude, double radius, size_t count, int flag);
-*/
+    class sset_lsa;
+    future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> georadius(sset_lsa&, double longtitude, double latitude, double radius, size_t count, int flag);
     void expired_items();
     static inline long alignment_index_base_on(size_t size, long index)
     {

@@ -69,6 +69,9 @@ struct sset_entry
     {
     }
 
+    ~sset_entry()
+    {
+    }
     struct compare {
         inline bool compare_impl(const char* d1, size_t s1, const char* d2, size_t s2) const noexcept {
             const int len = std::min(s1, s2);
@@ -194,6 +197,22 @@ public:
         return inserted;
     }
 
+    double insert_or_update(sstring& key, double delta)
+    {
+        double result = delta; 
+        auto it = _dict.find(key, sset_entry::compare());
+        if (it != _dict.end()) {
+            result += it->score();
+            it->update_score(result);
+            update(&(*it));
+        }
+        else {
+            auto entry = current_allocator().construct<sset_entry>(key, result);
+            insert(entry);
+        }
+        return result; 
+    }
+
     size_t insert_or_update(std::unordered_map<sstring, double>& members)
     {
         size_t inserted = 0;
@@ -215,6 +234,39 @@ public:
             }
         }
         return inserted;
+    }
+
+    void fetch_by_rank(long begin, long end, std::vector<std::pair<sstring, double>>& entries) const
+    {
+        if (_list.empty()) {
+            return;
+        }
+        auto size = _list.size();
+        if (begin < 0) { begin += static_cast<long>(size); }
+        while (end < 0) { end += static_cast<long>(size); }
+        if (begin < 0) begin = 0;
+        if (begin > end) {
+           return;
+        }
+        if (begin > static_cast<long>(size)) {
+            begin = static_cast<long>(size);
+        }
+        long rank = 0;
+        if (rank_out_of_range(begin, end)) {
+            return;
+        }
+        for (auto it = _list.begin(); it != _list.end(); ++it, ++rank) {
+            if (rank < begin) {
+                continue;
+            }
+            else if (rank > end) {
+                return;
+            }
+            else {
+                const auto& e = *it;
+                entries.emplace_back(std::pair<sstring, double>(sstring(e.key_data(), e.key_size()), e.score()));
+            }
+        }
     }
 
     void fetch_by_rank(long begin, long end, std::vector<const sset_entry*>& entries) const
@@ -273,6 +325,17 @@ public:
         }
     }
 
+    void fetch_by_key(const std::vector<sstring>& keys, std::vector<const sset_entry*>& entries) const
+    {
+        for (size_t i = 0; i < keys.size(); ++i) {
+           auto it = _dict.find(keys[i], sset_entry::compare());
+           if (it != _dict.end()) {
+               const auto& e = *it;
+               entries.push_back(&e);
+           }
+        }
+    }
+
     bool update_score(const sstring& key, double delta)
     {
         auto it = _dict.find(key, sset_entry::compare());
@@ -290,8 +353,8 @@ public:
         for (size_t i = 0; i < entries.size(); ++i) {
             auto lit = list_type::s_iterator_to(*entries[i]);
             auto dit = dict_type::s_iterator_to(*lit);
-            _list.erase(lit);
-            _dict.erase_and_dispose(dit, current_deleter<sset_entry>());
+            _dict.erase(dit);
+            _list.erase_and_dispose(lit, current_deleter<sset_entry>());
         }
         return entries.size();
     }
@@ -304,8 +367,8 @@ public:
             auto dit = _dict.find(key, sset_entry::compare());
             if (dit != _dict.end()) {
                 auto lit = list_type::s_iterator_to(*dit);
-                _list.erase(lit);
-                _dict.erase_and_dispose(dit, current_deleter<sset_entry>());
+                _dict.erase(dit);
+                _list.erase_and_dispose(lit, current_deleter<sset_entry>());
                 removed++;
             }
         }
@@ -323,7 +386,13 @@ public:
         size_t count = 0;
         for (auto it = _list.begin(); it != _list.end(); ++it) {
             auto score = it->score();
-            if (min < score && score < max) {
+            if (score < min) {
+                continue;
+            }
+            else if (score > max) {
+                break;
+            }
+            else {
                 count++;
             }
         }
@@ -368,16 +437,28 @@ public:
     {
         auto removed = _dict.erase(_dict.find(key, sset_entry::compare()));
         if (removed != _dict.end()) {
-            _list.erase_and_dispose(_list.iterator_to(*removed), current_deleter<sset_entry>());
+            _list.erase_and_dispose(list_type::s_iterator_to(*removed), current_deleter<sset_entry>());
         }
     }
 
     std::experimental::optional<size_t> rank(const sstring& key) const
     {
+        size_t rank = 0;
+        auto it = _dict.find(key, sset_entry::compare());
+        if (it != _dict.end()) {
+            auto lit = list_type::s_iterator_to(*it);
+            for (auto i = _list.begin(); i != lit; ++i, ++rank) {}
+            return std::experimental::optional<size_t>(rank);
+        }
         return  std::experimental::optional<size_t>();
     }
+
     std::experimental::optional<double> score(const sstring& key) const
     {
+        auto it = _dict.find(key, sset_entry::compare());
+        if (it != _dict.end()) {
+            return  std::experimental::optional<double>(it->score());
+        }
         return  std::experimental::optional<double>();
     }
 private:

@@ -1005,19 +1005,21 @@ future<scattered_message_ptr> database::zcard(const redis_key& rk)
 
 future<scattered_message_ptr> database::zrem(const redis_key& rk, std::vector<sstring>& members)
 {
-    return current_store().with_entry_run(rk, [this, &rk, &members] (cache_entry* e) {
-        if (e == nullptr) {
-            return reply_builder::build(msg_zero);
-        }
-        if (e->type_of_sset() == false) {
-            return reply_builder::build(msg_type_err);
-        }
-        auto& sset = e->value_sset();
-        auto removed = sset.erase(members);
-        if (sset.empty()) {
-           current_store().erase(rk);
-        }
-        return reply_builder::build(removed);
+    return with_allocator(allocator(), [this, &rk, &members] {
+        return current_store().with_entry_run(rk, [this, &rk, &members] (cache_entry* e) {
+            if (e == nullptr) {
+                return reply_builder::build(msg_zero);
+            }
+            if (e->type_of_sset() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& sset = e->value_sset();
+            auto removed = sset.erase(members);
+            if (sset.empty()) {
+               current_store().erase(rk);
+            }
+            return reply_builder::build(removed);
+        });
     });
 }
 
@@ -1038,22 +1040,37 @@ future<scattered_message_ptr> database::zcount(const redis_key& rk, double min, 
 
 future<scattered_message_ptr> database::zincrby(const redis_key& rk, sstring& member, double delta)
 {
-    return current_store().with_entry_run(rk, [&member, delta] (cache_entry* e) {
-        if (e == nullptr) {
-            return reply_builder::build(msg_zero);
-        }
-        if (e->type_of_sset() == false) {
-            return reply_builder::build(msg_type_err);
-        }
-        auto& sset = e->value_sset();
-        auto result = sset.update_score(member, delta);
-        return reply_builder::build(result ? msg_one : msg_zero);
+    return with_allocator(allocator(), [this, &rk, &member, delta] {
+        return current_store().with_entry_run(rk, [this, &rk, &member, delta] (cache_entry* e) {
+            auto o = e;
+            if (o == nullptr) {
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::sset_initializer());
+                current_store().insert(entry);
+                o = entry;
+            }
+            if (o->type_of_sset() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& sset = o->value_sset();
+            auto result = sset.insert_or_update(member, delta);
+            return reply_builder::build(result);
+        });
     });
 }
 
-std::vector<std::pair<sstring, double>> database::zrange_direct(const redis_key& rk, long begin, long end, bool reverse)
+future<foreign_ptr<lw_shared_ptr<std::vector<std::pair<sstring, double>>>>> database::zrange_direct(const redis_key& rk, long begin, long end)
 {
-    return std::vector<std::pair<sstring, double>>();
+    using return_type = foreign_ptr<lw_shared_ptr<std::vector<std::pair<sstring, double>>>>;
+    using result_type = std::vector<std::pair<sstring, double>>;
+    return current_store().with_entry_run(rk, [begin, end] (const cache_entry* e) {
+        if (e == nullptr || e->type_of_sset() == false) {
+            return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<result_type>>(make_lw_shared<result_type>(result_type {})));
+        }
+        auto& sset = e->value_sset();
+        result_type entries {};
+        sset.fetch_by_rank(begin, end, entries);
+        return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<result_type>>(make_lw_shared<result_type>(std::move(entries))));
+    });
 }
 
 future<scattered_message_ptr> database::zrange(const redis_key& rk, long begin, long end, bool reverse, bool with_score)
@@ -1098,7 +1115,7 @@ future<scattered_message_ptr> database::zrank(const redis_key& rk, sstring& memb
 {
     return current_store().with_entry_run(rk, [this, &member, reverse] (const cache_entry* e) {
         if (e == nullptr) {
-            return reply_builder::build(msg_zero);
+            return reply_builder::build(msg_nil);
         }
         if (e->type_of_sset() == false) {
             return reply_builder::build(msg_type_err);
@@ -1112,7 +1129,7 @@ future<scattered_message_ptr> database::zrank(const redis_key& rk, sstring& memb
            }
            return reply_builder::build(rank);
         }
-        return reply_builder::build(msg_err);
+        return reply_builder::build(msg_nil);
     });
 }
 
@@ -1187,23 +1204,9 @@ bool database::select(size_t index)
     return true;
 }
 
-/*
-std::pair<double, int> database::geodist(const redis_key& rk, sstring& lpos, sstring& rpos, int flag)
+
+future<scattered_message_ptr> database::geodist(const redis_key& rk, sstring& lpos, sstring& rpos, int flag)
 {
-    using result_type = std::pair<double, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {0, REDIS_ERR};
-    }
-    else if (it->type() != REDIS_ZSET) {
-        return result_type {0, REDIS_WRONG_TYPE};
-    }
-    auto _zset = it->zset_ptr();
-    auto lmember = _zset->fetch(redis_key {std::move(lpos)});
-    auto rmember = _zset->fetch(redis_key {std::move(rpos)});
-    if (!lmember || !rmember) {
-        return result_type {0, REDIS_ERR};
-    }
     double factor = 1;
     if (flag & GEODIST_UNIT_M) {
         factor = 1;
@@ -1217,38 +1220,79 @@ std::pair<double, int> database::geodist(const redis_key& rk, sstring& lpos, sst
     else if (flag & GEODIST_UNIT_FT) {
         factor = 1609.34;
     }
-    double lscore = lmember->Double(), rscore = rmember->Double(), dist = 0;
-    if (geo::dist(lscore, rscore, dist)) {
-        return result_type {dist / factor, REDIS_OK};
-    }
-}
-
-std::pair<std::vector<sstring>, int> database::geohash(const redis_key& rk, std::vector<sstring>& members)
-{
-    using result_type = std::pair<std::vector<sstring>, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {std::move(std::vector<sstring>()), REDIS_ERR};
-    }
-    else if (it->type() != REDIS_ZSET) {
-        return result_type {std::move(std::vector<sstring>()), REDIS_WRONG_TYPE};
-    }
-    auto _zset = it->zset_ptr();
-    auto&& items = _zset->fetch(members);
-    std::vector<sstring> geohash_set;
-    for (size_t i = 0; i < items.size(); ++i) {
-        auto& item = items[i];
-        sstring hashstr;
-        if (geo::encode_to_geohash_string(item->Double(), hashstr) == false) {
-            return result_type {std::move(std::vector<sstring>()), REDIS_ERR};
+    return current_store().with_entry_run(rk, [this, &lpos, &rpos, factor] (const cache_entry* e) {
+        if (e == nullptr) {
+           return reply_builder::build(msg_err);
         }
-        geohash_set.emplace_back(std::move(hashstr));;
-    }
-    return result_type {std::move(geohash_set), REDIS_OK};
+        if (e->type_of_sset() == false) {
+           return reply_builder::build(msg_type_err);
+        }
+        auto& sset = e->value_sset();
+        auto l_score_opt = sset.score(lpos);
+        auto r_score_opt = sset.score(rpos);
+        if (!l_score_opt || !r_score_opt) {
+           return reply_builder::build(msg_err);
+        }
+        double dist = 0;
+        if (geo::dist(*l_score_opt, *r_score_opt, dist)) {
+           return reply_builder::build(dist / factor);
+        }
+        else {
+           return reply_builder::build(msg_err);
+        } 
+    });
 }
 
-std::pair<std::vector<std::tuple<double, double, bool>>, int> database::geopos(const redis_key& rk, std::vector<sstring>& members)
+future<scattered_message_ptr> database::geohash(const redis_key& rk, std::vector<sstring>& members)
 {
+    return current_store().with_entry_run(rk, [this, members] (const cache_entry* e) {
+        if (e == nullptr) {
+           return reply_builder::build(msg_err);
+        }
+        if (e->type_of_sset() == false) {
+           return reply_builder::build(msg_type_err);
+        }
+        auto& sset = e->value_sset();
+        std::vector<const sset_entry*> entries;
+        sset.fetch_by_key(members, entries);
+        std::vector<sstring> geohash_set;
+        for (size_t i = 0; i < entries.size(); ++i) {
+            auto entry = entries[i];
+            sstring hashstr;
+            if (geo::encode_to_geohash_string(entry->score(), hashstr) == false) {
+                return reply_builder::build(msg_err);
+            }
+            geohash_set.emplace_back(std::move(hashstr));;
+        }
+        return reply_builder::build(geohash_set);
+    });
+}
+
+future<scattered_message_ptr> database::geopos(const redis_key& rk, std::vector<sstring>& members)
+{
+    return reply_builder::build(msg_err);
+    /*
+    return current_store().with_entry_run(rk, [this, members] (const cache_entry* e) {
+        if (e == nullptr) {
+           return reply_builder::build(msg_err);
+        }
+        if (e->type_of_sset() == false) {
+           return reply_builder::build(msg_wrong_type_err);
+        }
+        auto& sset = e->value_sset();
+        std::vector<const sset_entry*> entries;
+        sset.fetch_by_key(members, entries);
+        std::vector<sstring> geohash_set;
+        for (size_t i = 0; i < entries.size(); ++i) {
+            auto entry = entries[i];
+            sstring hashstr;
+            if (geo::encode_to_geohash_string(entry->score(), hashstr) == false) {
+                return reply_builder::build(msg_err);
+            }
+            geohash_set.emplace_back(std::move(hashstr));;
+        }
+        return reply_builder::build(geohash_set);
+    });
     using result_type = std::pair<std::vector<std::tuple<double, double, bool>>, int>;
     using result_data_type = std::vector<std::tuple<double, double, bool>>;
     auto it = _store->fetch_raw(rk);
@@ -1274,10 +1318,14 @@ std::pair<std::vector<std::tuple<double, double, bool>>, int> database::geopos(c
         }
     }
     return result_type {std::move(result), REDIS_OK};
+    */
 }
-
-database::georadius_result_type database::georadius_coord(const redis_key& rk, double longitude, double latitude, double radius, size_t count, int flag)
+/*
+using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
+future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius_coord_direct(const redis_key& rk, double longitude, double latitude, double radius, size_t count, int flag)
 {
+    using return_type = foreign_ptr<lw_shared_ptr<georadius_result_type>>;
+    return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {})));
     auto it = _store->fetch_raw(rk);
     if (!it) {
         return georadius_result_type {{}, REDIS_ERR};
@@ -1289,8 +1337,11 @@ database::georadius_result_type database::georadius_coord(const redis_key& rk, d
     return georadius(_zset, longitude, latitude, radius, count, flag);
 }
 
-database::georadius_result_type database::georadius_member(const redis_key& rk, sstring& pos, double radius, size_t count, int flag)
+future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius_member(const redis_key& rk, sstring& pos, double radius, size_t count, int flag)
 {
+
+    using return_type = foreign_ptr<lw_shared_ptr<georadius_result_type>>;
+    return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {})));
     auto it = _store->fetch_raw(rk);
     if (!it) {
         return georadius_result_type {{}, REDIS_ERR};
@@ -1310,8 +1361,10 @@ database::georadius_result_type database::georadius_member(const redis_key& rk, 
     return georadius(_zset, longitude, latitude, radius, count, flag);
 }
 
-database::georadius_result_type database::georadius(sorted_set* zset, double longitude, double latitude, double radius, size_t count, int flag)
+future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius(sset_lsa& sset, double longitude, double latitude, double radius, size_t count, int flag)
 {
+    using return_type = foreign_ptr<lw_shared_ptr<georadius_result_type>>;
+    return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {})));
     using data_type = std::vector<std::tuple<sstring, double, double, double, double>>;
     data_type points;
     auto fetch_point = [zset, count] (double min, double max, double log, double lat, double r, data_type& points) -> size_t {
@@ -1343,63 +1396,28 @@ database::georadius_result_type database::georadius(sorted_set* zset, double lon
     }
     return georadius_result_type {std::move(points), REDIS_OK};
 }
-
-std::pair<bool, int> database::setbit(const redis_key& rk, size_t offset, bool value)
-{
-    using result_type = std::pair<bool, int>;
-    if (offset >= BITMAP_MAX_OFFSET) {
-        return result_type {false, REDIS_ERR};
-    }
-    auto it = _store->fetch_raw(rk);
-    bitmap* bm = nullptr;
-    if (!it) {
-        bm = new bitmap();
-        auto new_item = item::create(rk, bm);
-        _store->set(rk, new_item);
-    }
-    else if (it->type() != REDIS_BITMAP) {
-        return result_type {false, REDIS_WRONG_TYPE};
-    }
-    else {
-        bm = it->bitmap_ptr();
-    }
-    return result_type {bm->set_bit(offset, value), REDIS_OK};
-}
-
-std::pair<bool, int> database::getbit(const redis_key& rk, size_t offset)
-{
-    using result_type = std::pair<bool, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {false, REDIS_OK};
-    }
-    else if (it->type() != REDIS_BITMAP) {
-        return result_type {false, REDIS_WRONG_TYPE};
-    }
-    auto bm = it->bitmap_ptr();
-    return result_type {bm->get_bit(offset), REDIS_OK};
-}
-
-std::pair<size_t, int> database::bitcount(const redis_key& rk, long start, long end)
-{
-    using result_type = std::pair<size_t, int>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {0, REDIS_OK};
-    }
-    else if (it->type() != REDIS_BITMAP) {
-        return result_type {0, REDIS_WRONG_TYPE};
-    }
-    auto bm = it->bitmap_ptr();
-    return result_type {bm->bit_count(start, end), REDIS_OK};
-}
-
-std::pair<size_t, int> database::bitpos(const redis_key& rk, bool bit, long start, long end)
-{
-    using result_type = std::pair<size_t, int>;
-    return result_type {0, REDIS_OK};
-}
 */
+
+future<scattered_message_ptr> database::setbit(const redis_key& rk, size_t offset, bool value)
+{
+    return reply_builder::build(msg_nil);
+}
+
+future<scattered_message_ptr> database::getbit(const redis_key& rk, size_t offset)
+{
+    return reply_builder::build(msg_nil);
+}
+
+future<scattered_message_ptr> database::bitcount(const redis_key& rk, long start, long end)
+{
+    return reply_builder::build(msg_nil);
+}
+
+future<scattered_message_ptr> database::bitpos(const redis_key& rk, bool bit, long start, long end)
+{
+    return reply_builder::build(msg_nil);
+}
+
 future<> database::stop()
 {
     return make_ready_future<>();

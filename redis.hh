@@ -158,25 +158,23 @@ public:
     future<> zremrangebyrank(args_collection&, output_stream<char>& out);
     future<> select(args_collection&, output_stream<char>& out);
 
-/*
     // [GEO]
-    future<message> geoadd(args_collection&);
-    future<message> geopos(args_collection&);
-    future<message> geodist(args_collection&);
-    future<message> geohash(args_collection&);
-    future<message> georadius(args_collection&, bool);
+    future<> geoadd(args_collection&, output_stream<char>& out);
+    future<> geopos(args_collection&, output_stream<char>& out);
+    future<> geodist(args_collection&, output_stream<char>& out);
+    future<> geohash(args_collection&, output_stream<char>& out);
+    future<> georadius(args_collection&, bool, output_stream<char>& out);
 
     // [BITMAP]
-    future<message> setbit(args_collection&);
-    future<message> getbit(args_collection&);
-    future<message> bitcount(args_collection&);
-    future<message> bitop(args_collection&);
-    future<message> bitpos(args_collection&);
-    future<message> bitfield(args_collection&);
-*/
+    future<> setbit(args_collection&, output_stream<char>& out);
+    future<> getbit(args_collection&, output_stream<char>& out);
+    future<> bitcount(args_collection&, output_stream<char>& out);
+    future<> bitop(args_collection&, output_stream<char>& out);
+    future<> bitpos(args_collection&, output_stream<char>& out);
+    future<> bitfield(args_collection&, output_stream<char>& out);
 private:
     future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
-    future<std::vector<std::pair<sstring, double>>> range_impl(sstring& key, long begin, long end, bool reverse);
+    //future<std::vector<std::pair<sstring, double>>> range_impl(sstring& key, long begin, long end, bool reverse);
     future<bool> exists_impl(sstring& key);
     future<> srem_impl(sstring& key, sstring& member, output_stream<char>& out);
     future<> sadd_impl(sstring& key, sstring& member, output_stream<char>& out);
@@ -198,8 +196,8 @@ private:
     future<int> hdel_impl(sstring& key, sstring& field);
     future<> counter_by(args_collection& args, bool incr, bool with_step, output_stream<char>& out);
     using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
-    future<georadius_result_type> fetch_points_by_coord_radius(sstring& key, double log, double lat, double radius, size_t count, int flags);
-    future<georadius_result_type> fetch_points_by_coord_radius(sstring& key, sstring& member_key, double radius, size_t count, int flags);
+   // future<georadius_result_type> fetch_points_by_coord_radius(sstring& key, double log, double lat, double radius, size_t count, int flags);
+   // future<georadius_result_type> fetch_points_by_coord_radius(sstring& key, sstring& member_key, double radius, size_t count, int flags);
     struct zset_args
     {
         sstring dest;
@@ -209,6 +207,18 @@ private:
         int aggregate_flag;
     };
     bool parse_zset_args(args_collection& args, zset_args& uargs);
+    static inline double score_aggregation(const double& old, const double& newscore, int flag)
+    {
+        if (flag == ZAGGREGATE_MIN) {
+            return std::min(old, newscore);
+        }
+        else if (flag == ZAGGREGATE_SUM) {
+            return old + newscore;
+        }
+        else {
+            return std::max(old, newscore);
+        }
+    }
 };
 
 } /* namespace redis */

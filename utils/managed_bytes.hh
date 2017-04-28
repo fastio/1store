@@ -183,6 +183,9 @@ public:
         }
     }
 
+    void resize(size_type size) {
+    }
+
     managed_bytes(bytes_view v) : managed_bytes(initialized_later(), v.size()) {
         if (!external()) {
             std::copy(v.begin(), v.end(), _u.small.data);

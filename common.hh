@@ -126,7 +126,7 @@ struct redis_key {
         }
         return *this;
     }
-
+    inline unsigned get_cpu() const { return _hash % smp::count; }
     inline const size_t hash() const { return _hash; }
     inline const sstring& key() const { return _key; }
     inline const size_t size() const { return _key.size(); }
