@@ -36,6 +36,7 @@
 #include "cache.hh"
 #include "dict_lsa.hh"
 #include "sset_lsa.hh"
+#include "geo.hh"
 namespace redis {
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
 
@@ -372,6 +373,75 @@ static future<scattered_message_ptr> build(std::vector<sstring>& data)
         m->append_static(msg_crlf);
     }
     return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
+}
+
+static future<> build_local(output_stream<char>& out, std::vector<std::tuple<sstring, double, double, double, double>>& u, int flags)
+{
+    auto m = make_lw_shared<scattered_message<char>>();
+    m->append_static(msg_sigle_tag);
+    m->append(std::move(to_sstring(u.size())));
+    m->append_static(msg_crlf);
+    int temp = 1, temp2 = 2;
+    bool wd = flags & GEORADIUS_WITHDIST;
+    bool wh = flags & GEORADIUS_WITHHASH;
+    bool wc = flags & GEORADIUS_WITHCOORD;
+    if (wd) temp++;
+    if (wh) temp++;
+    if (wc) temp++;
+    for (size_t i = 0; i < u.size(); ++i) {
+        m->append_static(msg_sigle_tag);
+        m->append(std::move(to_sstring(temp)));
+        m->append_static(msg_crlf);
+
+        //key
+        sstring& key = std::get<0>(u[i]);
+        m->append_static(msg_batch_tag);
+        m->append(to_sstring(key.size()));
+        m->append_static(msg_crlf);
+        m->append(std::move(key));
+        m->append_static(msg_crlf);
+        //dist
+        if (wd) {
+            double dist = std::get<2>(u[i]);
+            geo::from_meters(dist, flags);
+            auto&& n2 = to_sstring(dist);
+            m->append_static(msg_batch_tag);
+            m->append(to_sstring(n2.size()));
+            m->append_static(msg_crlf);
+            m->append(std::move(n2));
+            m->append_static(msg_crlf);
+        }
+        //coord
+        if (wc) {
+            m->append_static(msg_sigle_tag);
+            m->append(std::move(to_sstring(temp2)));
+            m->append_static(msg_crlf);
+            auto&& n1 = to_sstring(std::get<3>(u[i]));
+            m->append_static(msg_batch_tag);
+            m->append(to_sstring(n1.size()));
+            m->append_static(msg_crlf);
+            m->append(std::move(n1));
+            m->append_static(msg_crlf);
+            auto&& n2 = to_sstring(std::get<4>(u[i]));
+            m->append_static(msg_batch_tag);
+            m->append(to_sstring(n2.size()));
+            m->append_static(msg_crlf);
+            m->append(std::move(n2));
+            m->append_static(msg_crlf);
+        }
+        //hash
+        if (wh) {
+            double& score = std::get<1>(u[i]);
+            sstring hashstr;
+            geo::encode_to_geohash_string(score, hashstr);
+            m->append_static(msg_batch_tag);
+            m->append(to_sstring(hashstr.size()));
+            m->append_static(msg_crlf);
+            m->append(std::move(hashstr));
+            m->append_static(msg_crlf);
+        }
+    }
+    return out.write(std::move(*m));
 }
 }; // end of class
 }

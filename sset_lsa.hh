@@ -302,13 +302,16 @@ public:
         }
     }
 
-    void fetch_by_score(const double min, const double max, std::vector<const sset_entry*>& entries) const
+    void fetch_by_score(const double min, const double max, std::vector<const sset_entry*>& entries, size_t limit = 0) const
     {
         if (_list.empty()) {
             return;
         }
         if (score_out_of_range(min, max)) {
             return;
+        }
+        if (limit == 0) {
+            limit = _list.size();
         }
         for (auto it = _list.begin(); it != _list.end(); ++it) {
             const auto& score = it->score();
@@ -321,6 +324,9 @@ public:
             else {
                 const auto& e = *it;
                 entries.push_back(&e);
+                if (entries.size() >= limit) {
+                    break;
+                }
             }
         }
     }

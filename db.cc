@@ -988,6 +988,39 @@ future<scattered_message_ptr> database::zadds(const redis_key& rk, std::unordere
     });
 }
 
+bool database::zadds_direct(const redis_key& rk, std::unordered_map<sstring, double>& members, int flags)
+{
+    return with_allocator(allocator(), [this, &rk, &members, flags] {
+        return current_store().with_entry_run(rk, [this, &rk, &members, flags] (cache_entry* e) {
+            auto o = e;
+            if (o == nullptr) {
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::sset_initializer());
+                current_store().insert(entry);
+                o = entry;
+            }
+            if (o->type_of_sset() == false) {
+                return false;
+            }
+            auto& sset = o->value_sset();
+            size_t inserted = 0;
+            if (flags & ZADD_NX) {
+                inserted = sset.insert_if_not_exists(members);
+            }
+            else if (flags & ZADD_XX) {
+                inserted = sset.update_if_only_exists(members);
+            }
+            else if (flags & ZADD_CH) {
+                inserted = sset.insert_or_update(members);
+            }
+            else {
+                assert(false);
+            }
+            return inserted > 0;
+        });
+    });
+}
+
+
 future<scattered_message_ptr> database::zcard(const redis_key& rk)
 {
     return current_store().with_entry_run(rk, [] (const cache_entry* e) {
@@ -1270,14 +1303,12 @@ future<scattered_message_ptr> database::geohash(const redis_key& rk, std::vector
 
 future<scattered_message_ptr> database::geopos(const redis_key& rk, std::vector<sstring>& members)
 {
-    return reply_builder::build(msg_err);
-    /*
     return current_store().with_entry_run(rk, [this, members] (const cache_entry* e) {
         if (e == nullptr) {
            return reply_builder::build(msg_err);
         }
         if (e->type_of_sset() == false) {
-           return reply_builder::build(msg_wrong_type_err);
+           return reply_builder::build(msg_type_err);
         }
         auto& sset = e->value_sset();
         std::vector<const sset_entry*> entries;
@@ -1293,100 +1324,73 @@ future<scattered_message_ptr> database::geopos(const redis_key& rk, std::vector<
         }
         return reply_builder::build(geohash_set);
     });
-    using result_type = std::pair<std::vector<std::tuple<double, double, bool>>, int>;
-    using result_data_type = std::vector<std::tuple<double, double, bool>>;
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return result_type {std::move(result_data_type()), REDIS_ERR};
-    }
-    else if (it->type() != REDIS_ZSET) {
-        return result_type {std::move(result_data_type()), REDIS_WRONG_TYPE};
-    }
-    auto _zset = it->zset_ptr();
-    auto&& items = _zset->fetch(members);
-    result_data_type result;
-    for (size_t i = 0; i < items.size(); ++i) {
-        auto& item = items[i];
-        double longitude = 0, latitude = 0;
-        if (item) {
-            if (geo::decode_from_geohash(item->Double(), longitude, latitude)) {
-                result.emplace_back(std::move(std::tuple<double, double, bool>(longitude, latitude, true)));
-            }
-        }
-        else {
-            result.emplace_back(std::move(std::tuple<double, double, bool>(0, 0, false)));
-        }
-    }
-    return result_type {std::move(result), REDIS_OK};
-    */
 }
-/*
 using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
 future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius_coord_direct(const redis_key& rk, double longitude, double latitude, double radius, size_t count, int flag)
 {
     using return_type = foreign_ptr<lw_shared_ptr<georadius_result_type>>;
-    return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {})));
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return georadius_result_type {{}, REDIS_ERR};
-    }
-    else if (it->type() != REDIS_ZSET) {
-        return georadius_result_type {{}, REDIS_WRONG_TYPE};
-    }
-    auto _zset = it->zset_ptr();
-    return georadius(_zset, longitude, latitude, radius, count, flag);
+    return current_store().with_entry_run(rk, [this, longitude, latitude, radius, count, flag] (const cache_entry* e) {
+        if (e == nullptr) {
+            return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {{}, REDIS_ERR})));
+        }
+        if (e->type_of_sset() == false) {
+            return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {{}, REDIS_WRONG_TYPE})));
+        }
+        auto& sset = e->value_sset();
+        return georadius(sset, longitude, latitude, radius, count, flag);
+    });
 }
 
-future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius_member(const redis_key& rk, sstring& pos, double radius, size_t count, int flag)
+future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius_member_direct(const redis_key& rk, sstring& pos, double radius, size_t count, int flag)
 {
 
     using return_type = foreign_ptr<lw_shared_ptr<georadius_result_type>>;
-    return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {})));
-    auto it = _store->fetch_raw(rk);
-    if (!it) {
-        return georadius_result_type {{}, REDIS_ERR};
-    }
-    else if (it->type() != REDIS_ZSET) {
-        return georadius_result_type {{}, REDIS_WRONG_TYPE};
-    }
-    auto _zset = it->zset_ptr();
-    auto member = _zset->fetch(redis_key {std::move(pos)});
-    if (!member) {
-        return georadius_result_type {{}, REDIS_ERR};
-    }
-    double score = member->Double(), longitude = 0, latitude = 0;
-    if (geo::decode_from_geohash(score, longitude, latitude) == false) {
-        return georadius_result_type {{}, REDIS_ERR};
-    }
-    return georadius(_zset, longitude, latitude, radius, count, flag);
+    return current_store().with_entry_run(rk, [this, pos, radius, count, flag] (const cache_entry* e) {
+        if (e == nullptr) {
+            return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {{}, REDIS_ERR})));
+        }
+        if (e->type_of_sset() == false) {
+            return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {{}, REDIS_WRONG_TYPE})));
+        }
+        auto& sset = e->value_sset();
+        auto score_opt = sset.score(pos);
+        if (!score_opt) {
+            return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {{}, REDIS_ERR})));
+        }
+        double longitude = 0, latitude = 0;
+        if (geo::decode_from_geohash(*score_opt, longitude, latitude) == false) {
+            return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {{}, REDIS_ERR})));
+        }
+        return georadius(sset, longitude, latitude, radius, count, flag);
+    });
 }
 
-future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius(sset_lsa& sset, double longitude, double latitude, double radius, size_t count, int flag)
+future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius(const sset_lsa& sset, double longitude, double latitude, double radius, size_t count, int flag)
 {
     using return_type = foreign_ptr<lw_shared_ptr<georadius_result_type>>;
-    return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {})));
     using data_type = std::vector<std::tuple<sstring, double, double, double, double>>;
     data_type points;
-    auto fetch_point = [zset, count] (double min, double max, double log, double lat, double r, data_type& points) -> size_t {
-        return zset->range_by_score_if(min, max, count, [&log, &lat, &r, &points] (lw_shared_ptr<item> m) -> bool {
-            double score = m->Double(), longitude = 0, latitude = 0, dist = 0;
+    auto fetch_point = [&sset, count] (double min, double max, double log, double lat, double r, data_type& points) -> size_t {
+        std::vector<const sset_entry*> entries;
+        sset.fetch_by_score(min, max, entries, count);
+        for (size_t i = 0; i < entries.size(); ++i) {
+            auto e = entries[i];
+            double score = e->score(), longitude = 0, latitude = 0, dist = 0;
             if (geo::decode_from_geohash(score, longitude, latitude) == false) {
-                return false;
+                continue;
             }
             if (geo::dist(log, lat, longitude, latitude, dist) == false) {
-                return false;
+                continue;
             }
             if (dist < r) {
-                sstring n(m->key().data(), m->key().size());
+                sstring n(e->key_data(), e->key_size());
                 points.emplace_back(std::move(std::tuple<sstring, double, double, double, double>{std::move(n), score, dist, longitude, latitude}));
-                return true;
             }
-            return false;
-        });
+        }
+        return count;
     };
     if (geo::fetch_points_from_location(longitude, latitude, radius, std::move(fetch_point), points) == false) {
-        points.clear();
-        return georadius_result_type{std::move(points), REDIS_ERR};
+        return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {{}, REDIS_ERR})));
     }
     if (flag & GEORADIUS_ASC) {
         std::sort(points.begin(), points.end(), [] (const auto& l, const auto& r) { return std::get<2>(l) > std::get<2>(r); });
@@ -1394,9 +1398,8 @@ future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius(ss
     else if (flag & GEORADIUS_DESC) {
         std::sort(points.begin(), points.end(), [] (const auto& l, const auto& r) { return std::get<2>(l) < std::get<2>(r); });
     }
-    return georadius_result_type {std::move(points), REDIS_OK};
+    return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {{}, REDIS_OK})));
 }
-*/
 
 future<scattered_message_ptr> database::setbit(const redis_key& rk, size_t offset, bool value)
 {

@@ -1747,8 +1747,6 @@ future<> redis_service::geopos(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::georadius(args_collection& args, bool member, output_stream<char>& out)
 {
-    return out.write(msg_nil);
-    /*
     size_t option_index = member ? 4 : 5;
     if (args._command_args_count < option_index || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1857,66 +1855,50 @@ future<> redis_service::georadius(args_collection& args, bool member, output_str
 
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    auto points_ready = !member ? _db.invoke_on(cpu, &database::georadius_coord, std::move(rk), log, lat, radius, count, flags) : _db.invoke_on(cpu, &database::georadius_coord, std::move(rk), log, lat, radius, count, flags);
-    return  points_ready.then([this, flags, &args, stored_key_index] (georadius_result_type&& u) {
+    auto points_ready = !member ? _db.invoke_on(cpu, &database::georadius_coord_direct, std::move(rk), log, lat, radius, count, flags)
+                                : _db.invoke_on(cpu, &database::georadius_member_direct, std::move(rk), std::ref(member_key), radius, count, flags);
+    return  points_ready.then([this, flags, &args, stored_key_index, &out] (auto&& data) {
         using data_type = std::vector<std::tuple<sstring, double, double, double, double>>;
-        if (u.second == REDIS_OK) {
-            bool store_with_score = flags & GEORADIUS_STORE_SCORE, store_with_dist = flags & GEORADIUS_STORE_DIST;
-            if (store_with_score || store_with_dist) {
-                std::unordered_map<sstring, double> members;
-                data_type& data = u.first;
-                for (size_t i = 0; i < data.size(); ++i) {
-                   auto& data_tuple = data[i];
-                   auto& key = std::get<0>(data_tuple);
-                   auto  score = store_with_score ? std::get<1>(data_tuple) : std::get<2>(data_tuple);
-                   members.emplace(std::pair<sstring, double>(std::ref(key), score));
-                }
-                struct store_state
-                {
-                    std::unordered_map<sstring, double> members;
-                    sstring stored_key;
-                    data_type data;
-                };
-                sstring& stored_key = args._command_args[stored_key_index];
-                return do_with(store_state{std::move(members), std::move(stored_key), std::move(u.first)}, [this, flags] (auto& state) {
-                    return this->zadds_impl(state.stored_key, std::move(state.members), 0).then([this, &state, flags] (auto&& u) {
-                       if (u.second == REDIS_OK) {
-                           return geo_radius_message(state.data, flags);
-                       }
-                       else {
-                          return err_message();
-                       }
-                    });
-                });
+        using return_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
+        return_type& return_data = *data;
+        data_type& data_ = return_data.first;
+        if (return_data.second == REDIS_WRONG_TYPE) {
+            return out.write(msg_type_err);
+        }
+        else if (return_data.second == REDIS_ERR) {
+            return out.write(msg_nil);
+        }
+        bool store_with_score = flags & GEORADIUS_STORE_SCORE, store_with_dist = flags & GEORADIUS_STORE_DIST;
+        if (store_with_score || store_with_dist) {
+            std::unordered_map<sstring, double> members;
+            for (size_t i = 0; i < data_.size(); ++i) {
+                auto& data_tuple = data_[i];
+                auto& key = std::get<0>(data_tuple);
+                auto  score = store_with_score ? std::get<1>(data_tuple) : std::get<2>(data_tuple);
+                members[key] = score;
             }
-            return geo_radius_message(u.first, flags);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return nil_message();
-        }
+            struct store_state
+            {
+                std::unordered_map<sstring, double> members;
+                sstring& stored_key;
+                data_type& data;
+            };
+            sstring& stored_key = args._command_args[stored_key_index];
+            return do_with(store_state{std::move(members), std::ref(stored_key), std::ref(data_)}, [this, &out, flags, &data_] (auto& state) {
+                redis_key rk{std::ref(state.stored_key)};
+                auto cpu = rk.get_cpu();
+                return _db.invoke_on(cpu, &database::zadds_direct, std::move(rk), std::ref(state.members), ZADD_CH).then([&out, flags, &data_] (auto&& m) {
+                   //if (m)
+                    //  return reply_builder::build(data_, flags);
+                   //else
+                      return out.write(msg_err);
+                });
+            });
+         }
+         return reply_builder::build_local(out, data_, flags);
     });
-*/
 }
 
-using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
-/*
-future<georadius_result_type> redis_service::fetch_points_by_coord_radius(sstring& key, double log, double lat, double radius, size_t count, int flags)
-{
-    redis_key rk {std::ref(key)};
-    auto cpu = get_cpu(rk);
-    return _db.invoke_on(cpu, &database::georadius_coord_direct, std::move(rk), log, lat, radius, count, flags);
-}
-
-future<georadius_result_type> redis_service::fetch_points_by_coord_radius(sstring& key, sstring& member_key, double radius, size_t count, int flags)
-{
-    redis_key rk {std::ref(key)};
-    auto cpu = get_cpu(rk);
-    return _db.invoke_on(cpu, &database::georadius_member_direct, std::move(rk), std::ref(member_key), radius, count, flags);
-}
-*/
 future<> redis_service::setbit(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {

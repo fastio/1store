@@ -37,6 +37,7 @@
 namespace stdx = std::experimental;
 namespace redis {
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
+class sset_lsa;
 class database final : private logalloc::region {
 public:
     database();
@@ -110,6 +111,7 @@ public:
 
     // [SORTED SET]
     future<scattered_message_ptr> zadds(const redis_key& rk, std::unordered_map<sstring, double>& members, int flags);
+    bool zadds_direct(const redis_key& rk, std::unordered_map<sstring, double>& members, int flags);
     future<scattered_message_ptr> zcard(const redis_key& rk);
     future<scattered_message_ptr> zrem(const redis_key& rk, std::vector<sstring>& members);
     future<scattered_message_ptr> zcount(const redis_key& rk, double min, double max);
@@ -127,7 +129,7 @@ public:
     future<scattered_message_ptr> geohash(const redis_key& rk, std::vector<sstring>& members);
     future<scattered_message_ptr> geopos(const redis_key& rk, std::vector<sstring>& members);
     using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
-    future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> geeradius_coord_direct(const redis_key& rk, double longtitude, double latitude, double radius, size_t count, int flag);
+    future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> georadius_coord_direct(const redis_key& rk, double longtitude, double latitude, double radius, size_t count, int flag);
     future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> georadius_member_direct(const redis_key& rk, sstring& pos, double radius, size_t count, int flag);
 
     // [BITMAP]
@@ -139,8 +141,7 @@ public:
 
     future<> stop();
 private:
-    class sset_lsa;
-    future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> georadius(sset_lsa&, double longtitude, double latitude, double radius, size_t count, int flag);
+    future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> georadius(const sset_lsa&, double longtitude, double latitude, double radius, size_t count, int flag);
     void expired_items();
     static inline long alignment_index_base_on(size_t size, long index)
     {
