@@ -1888,9 +1888,9 @@ future<> redis_service::georadius(args_collection& args, bool member, output_str
                 redis_key rk{std::ref(state.stored_key)};
                 auto cpu = rk.get_cpu();
                 return _db.invoke_on(cpu, &database::zadds_direct, std::move(rk), std::ref(state.members), ZADD_CH).then([&out, flags, &data_] (auto&& m) {
-                   //if (m)
-                    //  return reply_builder::build(data_, flags);
-                   //else
+                   if (m)
+                     return reply_builder::build_local(out, data_, flags);
+                   else
                       return out.write(msg_err);
                 });
             });
