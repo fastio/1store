@@ -1373,6 +1373,7 @@ future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius(co
     auto fetch_point = [&sset, count] (double min, double max, double log, double lat, double r, data_type& points) -> size_t {
         std::vector<const sset_entry*> entries;
         sset.fetch_by_score(min, max, entries, count);
+        size_t _count = 0;
         for (size_t i = 0; i < entries.size(); ++i) {
             auto e = entries[i];
             double score = e->score(), longitude = 0, latitude = 0, dist = 0;
@@ -1383,11 +1384,12 @@ future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius(co
                 continue;
             }
             if (dist < r) {
+                _count++;
                 sstring n(e->key_data(), e->key_size());
                 points.emplace_back(std::move(std::tuple<sstring, double, double, double, double>{std::move(n), score, dist, longitude, latitude}));
             }
         }
-        return count;
+        return _count;
     };
     if (geo::fetch_points_from_location(longitude, latitude, radius, std::move(fetch_point), points) == false) {
         return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {{}, REDIS_ERR})));
@@ -1398,7 +1400,7 @@ future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius(co
     else if (flag & GEORADIUS_DESC) {
         std::sort(points.begin(), points.end(), [] (const auto& l, const auto& r) { return std::get<2>(l) < std::get<2>(r); });
     }
-    return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {{}, REDIS_OK})));
+    return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {std::move(points), REDIS_OK})));
 }
 
 future<scattered_message_ptr> database::setbit(const redis_key& rk, size_t offset, bool value)

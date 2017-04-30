@@ -208,45 +208,29 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.zrank(_command_args, true, std::ref(out));
                 case redis_protocol_parser::command::zunionstore:
                     return _redis.zunionstore(_command_args, std::ref(out));
+                case redis_protocol_parser::command::zinterstore:
+                    return _redis.zinterstore(_command_args, std::ref(out));
                 case redis_protocol_parser::command::select:
                     return _redis.select(_command_args, std::ref(out));
-                /*
                 case redis_protocol_parser::command::geoadd:
-                    return _redis.geoadd(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.geoadd(_command_args, std::ref(out));
                 case redis_protocol_parser::command::geodist:
-                    return _redis.geodist(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.geodist(_command_args, std::ref(out));
                 case redis_protocol_parser::command::geopos:
-                    return _redis.geopos(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.geopos(_command_args, std::ref(out));
                 case redis_protocol_parser::command::geohash:
-                    return _redis.geohash(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.geohash(_command_args, std::ref(out));
                 case redis_protocol_parser::command::georadius:
-                    return _redis.georadius(_command_args, false).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.georadius(_command_args, false, std::ref(out));
                 case redis_protocol_parser::command::georadiusbymember:
-                    return _redis.georadius(_command_args, true).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.georadius(_command_args, true, std::ref(out));
                 case redis_protocol_parser::command::setbit:
-                    return _redis.setbit(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.setbit(_command_args, std::ref(out));
                 case redis_protocol_parser::command::getbit:
-                    return _redis.getbit(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.getbit(_command_args, std::ref(out));
                 case redis_protocol_parser::command::bitcount:
-                    return _redis.bitcount(_command_args).then([&out] (auto&& m) {
-                        return out.write(std::move(m));
-                    });
+                    return _redis.bitcount(_command_args, std::ref(out));
+                /*
                 case redis_protocol_parser::command::bitpos:
                     return _redis.bitpos(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));

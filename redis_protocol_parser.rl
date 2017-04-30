@@ -184,7 +184,7 @@ command = (setbit | set | getbit | get | del | mget | mset | echo | ping | incr 
            type | expire | pexpire | persist | ttl | pttl | zadd | zcard | zcount | zincrby |
            zrangebyscore | zrank | zremrangebyrank | zremrangebyscore | zremrangebylex | zrem | zrevrangebyscore | zrevrange| zrevrank |
            zscore | zunionstore  | zinterstore | zdiffstore | zunion | zinter | zdiff | zscan | zrangebylex | zlexcount |
-           zrange | select | geoadd | geodist | geohash | geopos | georadius | georadiusbymember | bitcount |
+           zrange | select | geoadd | geodist | geohash | geopos | georadiusbymember | georadius |  bitcount |
            bitpos | bitop | bitfield);
 arg = '$' u32 crlf ${ _arg_size = _u32;};
 

@@ -20,7 +20,48 @@
 */
 #include "geo.hh"
 #include "common.hh"
+#include "util/log.hh"
+using logger =  seastar::logger;
+static logger geo_log ("db");
 namespace redis {
+struct geo_hash
+{
+    uint64_t _hash;
+    uint8_t _step;
+    geo_hash() : _hash(0), _step(0) {}
+};
+struct geo_hash_range
+{
+    double _min;
+    double _max;
+    geo_hash_range() : _min(0), _max(0) {}
+    geo_hash_range(const double min, const double max) : _min(min), _max(max) {}
+};
+struct geo_hash_area
+{
+    geo_hash _hash;
+    geo_hash_range _longitude_range;
+    geo_hash_range _latitude_range;
+    geo_hash_area() : _hash(), _longitude_range(), _latitude_range() {}
+};
+struct geo_hash_neighbors {
+    geo_hash _north;
+    geo_hash _east;
+    geo_hash _west;
+    geo_hash _south;
+    geo_hash _north_east;
+    geo_hash _south_east;
+    geo_hash _north_west;
+    geo_hash _south_west;
+    geo_hash_neighbors() : _north(), _east(), _west(), _south(), _north_east(), _south_east(), _north_west(), _south_west() {}
+};
+struct geo_radius
+{
+    geo_hash _hash;
+    geo_hash_area _area;
+    geo_hash_neighbors _neighbors;
+    geo_radius() : _hash(), _area(), _neighbors() {}
+};
 static inline uint64_t interleave64(uint32_t xlo, uint32_t ylo) {
     static const uint64_t B[] = {
         0x5555555555555555ULL,
@@ -196,7 +237,7 @@ static inline double rad_deg(double ang)
     return ang / (pi / 180.0);
 }
 
-bool geo::dist(const double& llongitude, const double& llatitude, const double& rlongitude, const double& rlatitude, double& line)
+double dist_internal(const double& llongitude, const double& llatitude, const double& rlongitude, const double& rlatitude)
 {
     double lat1r = 0, lon1r = 0, lat2r = 0, lon2r = 0, u = 0, v = 0;
     lat1r = deg_rad(llatitude);
@@ -205,9 +246,15 @@ bool geo::dist(const double& llongitude, const double& llatitude, const double& 
     lon2r = deg_rad(rlongitude);
     u = std::sin((lat2r - lat1r) / 2);
     v = std::sin((lon2r - lon1r) / 2);
-    line = 2.0 * EARTH_RADIUS_IN_METERS * std::asin(std::sqrt(u * u + std::cos(lat1r) * std::cos(lat2r) * v * v));
+    return 2.0 * EARTH_RADIUS_IN_METERS * std::asin(std::sqrt(u * u + std::cos(lat1r) * std::cos(lat2r) * v * v));
+}
+
+bool geo::dist(const double& llongitude, const double& llatitude, const double& rlongitude, const double& rlatitude, double& line)
+{
+    line = dist_internal(llongitude, llatitude, rlongitude, rlatitude);
     return true;
 }
+
 
 bool geo::dist(const double& lhash, const double& rhash, double& output)
 {
@@ -258,9 +305,10 @@ static uint8_t geohash_estimate_steps_by_radius(double range, const double lat)
     return step;
 }
 
-static bool geohash_encode_internal(const double* bounds, const double longitude, const double latitude, uint8_t step, uint64_t& hash)
+static bool geohash_encode_internal(const geo_hash_range& longitude_range, const geo_hash_range& latitude_range, 
+        const double longitude, const double latitude, uint8_t step, uint64_t& hash)
 {
-    if (step > 32 || step == 0 || bounds[0] == 0 || bounds[1] == 0 || bounds[2] == 0 || bounds[3] == 0) {
+    if (step > 32 || step == 0 || longitude_range._max == 0 || longitude_range._min == 0 || latitude_range._max == 0 || latitude_range._min == 0) {
         return false;
     }
 
@@ -268,12 +316,12 @@ static bool geohash_encode_internal(const double* bounds, const double longitude
         return false;
     }
 
-    if (latitude < bounds[2] || latitude > bounds[3] ||  longitude < bounds[0] || longitude > bounds[1]) {
+    if (latitude < latitude_range._min || latitude > latitude_range._max ||  longitude < longitude_range._min || longitude > longitude_range._max) {
         return false;
     }
 
-    double lat_offset =  (latitude - bounds[2]) / (bounds[3] - bounds[2]);
-    double long_offset = (longitude - bounds[0]) / (bounds[1] - bounds[0]);
+    double lat_offset =  (latitude - latitude_range._min) / (latitude_range._max - latitude_range._min);
+    double long_offset = (longitude - longitude_range._min) / (longitude_range._max - longitude_range._min);
 
     lat_offset *= (1 << step);
     long_offset *= (1 << step);
@@ -281,33 +329,32 @@ static bool geohash_encode_internal(const double* bounds, const double longitude
     return true;
 }
 
-static bool geohash_decode_internal(double* bounds, geo::geo_radius& output)
+static bool geohash_decode_internal(const geo_hash_range& longitude_range, const geo_hash_range& latitude_range, const geo_hash& h, geo_hash_area& area)
 {
-    if (output._hash._hash == 0) {
+    if (h._hash == 0) {
         return false;
     }
 
-    output._area._hash._hash = output._hash._hash;
-    output._area._hash._step = output._hash._step;
+    area._hash = h;
 
-    uint8_t step = output._hash._step;
-    uint64_t hash_sep = deinterleave64(output._hash._hash); /* hash = [LAT][LONG] */
+    uint8_t step = h._step;
+    uint64_t hash_sep = deinterleave64(h._hash); /* hash = [LAT][LONG] */
 
-    double lat_scale  = bounds[3] - bounds[2];
-    double long_scale = bounds[1] - bounds[0];
+    double lat_scale  = latitude_range._max - latitude_range._min;
+    double long_scale = longitude_range._max - longitude_range._min;
 
     uint32_t ilato = hash_sep;
     uint32_t ilono = hash_sep >> 32;
 
-     output._area._latitude_range._min  = bounds[2] + (ilato * 1.0 / (1ull << step)) * lat_scale;
-     output._area._latitude_range._max  = bounds[2] + ((ilato + 1) * 1.0 / (1ull << step)) * lat_scale;
-     output._area._longitude_range._min = bounds[0] + (ilono * 1.0 / (1ull << step)) * long_scale;
-     output._area._longitude_range._max = bounds[0] + ((ilono + 1) * 1.0 / (1ull << step)) * long_scale;
+    area._latitude_range._min  = latitude_range._min + (ilato * 1.0 / (1ull << step)) * lat_scale;
+    area._latitude_range._max  = latitude_range._min + ((ilato + 1) * 1.0 / (1ull << step)) * lat_scale;
+    area._longitude_range._min = longitude_range._min + (ilono * 1.0 / (1ull << step)) * long_scale;
+    area._longitude_range._max = longitude_range._min + ((ilono + 1) * 1.0 / (1ull << step)) * long_scale;
 
     return true;
 }
 
-static void geohash_move_x(geo::geo_hash& hash, int8_t d) {
+static void geohash_move_x(geo_hash& hash, int8_t d) {
     if (d == 0)
         return;
 
@@ -327,7 +374,7 @@ static void geohash_move_x(geo::geo_hash& hash, int8_t d) {
     hash._hash = (x | y);
 }
 
-static void geohash_move_y(geo::geo_hash& hash, int8_t d) {
+static void geohash_move_y(geo_hash& hash, int8_t d) {
     if (d == 0)
         return;
 
@@ -345,47 +392,46 @@ static void geohash_move_y(geo::geo_hash& hash, int8_t d) {
     hash._hash = (x | y);
 }
 
-static void geohash_neighbors(geo::geo_radius& output)
+static void geohash_neighbors(const geo_hash& hash, geo_hash_neighbors& neighbors)
 {
-    auto& hash = output._hash;
-    output._neighbors._east = hash;
-    output._neighbors._west = hash;
-    output._neighbors._north = hash;
-    output._neighbors._south = hash;
-    output._neighbors._south_east = hash;
-    output._neighbors._south_west = hash;
-    output._neighbors._north_east = hash;
-    output._neighbors._north_west = hash;
+    neighbors._east = hash;
+    neighbors._west = hash;
+    neighbors._north = hash;
+    neighbors._south = hash;
+    neighbors._south_east = hash;
+    neighbors._south_west = hash;
+    neighbors._north_east = hash;
+    neighbors._north_west = hash;
 
-    geohash_move_x(output._neighbors._east, 1);
-    geohash_move_y(output._neighbors._east, 0);
+    geohash_move_x(neighbors._east, 1);
+    geohash_move_y(neighbors._east, 0);
 
-    geohash_move_x(output._neighbors._west, -1);
-    geohash_move_y(output._neighbors._west, 0);
+    geohash_move_x(neighbors._west, -1);
+    geohash_move_y(neighbors._west, 0);
 
-    geohash_move_x(output._neighbors._south, 0);
-    geohash_move_y(output._neighbors._south, -1);
+    geohash_move_x(neighbors._south, 0);
+    geohash_move_y(neighbors._south, -1);
 
-    geohash_move_x(output._neighbors._north, 0);
-    geohash_move_y(output._neighbors._north, 1);
+    geohash_move_x(neighbors._north, 0);
+    geohash_move_y(neighbors._north, 1);
 
-    geohash_move_x(output._neighbors._north_west, -1);
-    geohash_move_y(output._neighbors._north_west, 1);
+    geohash_move_x(neighbors._north_west, -1);
+    geohash_move_y(neighbors._north_west, 1);
 
-    geohash_move_x(output._neighbors._north_east, 1);
-    geohash_move_y(output._neighbors._north_east, 1);
+    geohash_move_x(neighbors._north_east, 1);
+    geohash_move_y(neighbors._north_east, 1);
 
-    geohash_move_x(output._neighbors._south_east, 1);
-    geohash_move_y(output._neighbors._south_east, -1);
+    geohash_move_x(neighbors._south_east, 1);
+    geohash_move_y(neighbors._south_east, -1);
 
-    geohash_move_x(output._neighbors._south_west, -1);
-    geohash_move_y(output._neighbors._south_west, -1);
+    geohash_move_x(neighbors._south_west, -1);
+    geohash_move_y(neighbors._south_west, -1);
 }
 
-static int fetch_points_in_box(geo::geo_hash& h, double longitude, double latitude, double radius, geo::fetch_point& f, geo::points_type& points)
+static int fetch_points_in_box(geo_hash& h, double longitude, double latitude, double radius, geo::fetch_point& f, geo::points_type& points)
 {
     uint64_t min = 0, max = 0;
-    auto align_hash = [] (const geo::geo_hash& h) -> uint64_t {
+    auto align_hash = [] (const geo_hash& h) -> uint64_t {
         uint64_t hash = h._hash;
         hash <<= (52 - h._step * 2);
         return hash;
@@ -393,6 +439,7 @@ static int fetch_points_in_box(geo::geo_hash& h, double longitude, double latitu
     min = align_hash(h);
     h._hash++;
     max = align_hash(h);
+    int x = h._step;
     return f(min, max, longitude, latitude, radius, points);
 }
 
@@ -410,19 +457,52 @@ bool geo::fetch_points_from_location(double longitude, double latitude, double r
     output._hash._step = geohash_estimate_steps_by_radius(radius, latitude);
 
     // 2. hash
-    bounds[0] = GEO_LONG_MIN, bounds[1] = GEO_LONG_MAX, bounds[2] = GEO_LAT_MIN, bounds[3] = GEO_LAT_MAX;
-    if (geohash_encode_internal(bounds, longitude, latitude, output._hash._step, output._hash._hash) == false) {
+    geo_hash_range longitude_range { GEO_LONG_MIN, GEO_LONG_MAX }, latitude_range { GEO_LAT_MIN, GEO_LAT_MAX };
+    if (geohash_encode_internal(longitude_range, latitude_range, longitude, latitude, output._hash._step, output._hash._hash) == false) {
         return false;
     }
 
     // 3. neighbors
-    geohash_neighbors(output);
+    geohash_neighbors(output._hash, output._neighbors);
 
 
     // 4. area
-    if (geohash_decode_internal(bounds, output) == false) {
-
+    if (geohash_decode_internal(longitude_range, latitude_range, output._hash, output._area) == false) {
         return false;
+    }
+
+    bool decrease_step = false;
+    {
+        geo_hash_area north, south, east, west;
+
+        geohash_decode_internal(longitude_range, latitude_range, output._neighbors._north, north);
+        geohash_decode_internal(longitude_range, latitude_range, output._neighbors._south, south);
+        geohash_decode_internal(longitude_range, latitude_range, output._neighbors._east, east);
+        geohash_decode_internal(longitude_range, latitude_range, output._neighbors._west, west);
+
+        if (dist_internal(longitude, latitude, longitude, north._latitude_range._max) < radius) {
+            decrease_step = true;
+        }
+        if (dist_internal(longitude, latitude, longitude, south._latitude_range._min) < radius) {
+            decrease_step = true;
+        }
+        if (dist_internal(longitude, latitude, east._longitude_range._max, latitude) < radius) {
+            decrease_step = true;
+        }
+        if (dist_internal(longitude, latitude, west._longitude_range._min, latitude) < radius) {
+            decrease_step = true;
+        }
+    }
+
+    if (decrease_step) {
+        output._hash._step--;
+        if (geohash_encode_internal(longitude_range, latitude_range, longitude, latitude, output._hash._step, output._hash._hash) == false) {
+            return false;
+        }
+        geohash_neighbors(output._hash, output._neighbors);
+        if (geohash_decode_internal(longitude_range, latitude_range, output._hash, output._area) == false) {
+            return false;
+        }
     }
 
     if (output._area._latitude_range._min < min_lat) {
@@ -442,15 +522,16 @@ bool geo::fetch_points_from_location(double longitude, double latitude, double r
         output._neighbors._east._step = output._neighbors._south_east._step = output._neighbors._north_east._step = 0;
     }
 
-    geo_hash gh[9] = { output._hash,
-                    output._neighbors._north,
-                    output._neighbors._east,
-                    output._neighbors._west,
-                    output._neighbors._south,
-                    output._neighbors._north_east,
-                    output._neighbors._south_east,
-                    output._neighbors._north_west,
-                    output._neighbors._south_west
+    geo_hash gh[9] = {
+        output._hash,
+        output._neighbors._north,
+        output._neighbors._south,
+        output._neighbors._east,
+        output._neighbors._west,
+        output._neighbors._north_east,
+        output._neighbors._north_west,
+        output._neighbors._south_east,
+        output._neighbors._south_west
     };
     size_t count = 0;
     int last_processed = 0;
