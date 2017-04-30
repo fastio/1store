@@ -36,9 +36,9 @@ bool bits_operation::set(managed_bytes& o, size_t offset, bool value)
     if (index > o.size()) {
         size_t append_size = RESIZE_STEP;
         while (append_size < index) append_size+= RESIZE_STEP;
-        o.resize(append_size);
+        o.extend(append_size, 0);
     }
-    auto byte_val = o[index];
+    uint8_t byte_val = uint8_t(o[index]);
     auto bit = 7 - (offset & 0x7);
     auto bit_val = byte_val & (1 << bit);
 
@@ -50,11 +50,11 @@ bool bits_operation::set(managed_bytes& o, size_t offset, bool value)
 
 bool bits_operation::get(const managed_bytes& o, size_t offset)
 {
-    if (offset > BITMAP_MAX_OFFSET || offset >= o.size()) {
+    auto offset_in_bytes = offset >> 3;
+    if (offset_in_bytes > BITMAP_MAX_OFFSET || offset_in_bytes >= o.size()) {
         return false;
     }
-    auto index = offset >> 3;
-    auto byte_val = o[index];
+    uint8_t byte_val = uint8_t(o[offset_in_bytes]);
     auto bit = 7 - (offset & 0x7);
     auto bit_val = byte_val & (1 << bit);
     return bit_val > 0;
@@ -81,20 +81,21 @@ size_t bits_operation::count(const managed_bytes& o, long start, long end)
     };
 
     while((unsigned long)(o[p]) & 3 && count) {
-        bits_count += static_cast<size_t>(bits_in_byte[static_cast<unsigned int>(o[p++])]);
+        uint8_t v = uint8_t(o[p++]);
+        bits_count += static_cast<size_t>(bits_in_byte[static_cast<unsigned int>(v)]);
         count--;
     }
 
     p4 = p;
     uint32_t d1 = 0, d2 = 0, d3 = 0, d4 = 0, d5 = 0, d6 = 0, d7 = 0;
     while(count>=28) {
-        d1 = o[p4++];
-        d2 = o[p4++];
-        d3 = o[p4++];
-        d4 = o[p4++];
-        d5 = o[p4++];
-        d6 = o[p4++];
-        d7 = o[p4++];
+        d1 = uint8_t(o[p4++]);
+        d2 = uint8_t(o[p4++]);
+        d3 = uint8_t(o[p4++]);
+        d4 = uint8_t(o[p4++]);
+        d5 = uint8_t(o[p4++]);
+        d6 = uint8_t(o[p4++]);
+        d7 = uint8_t(o[p4++]);
         count -= 28;
 
         d1 = d1 - ((d1 >> 1) & 0x55555555);
@@ -120,7 +121,10 @@ size_t bits_operation::count(const managed_bytes& o, long start, long end)
                     ((d7 + (d7 >> 4)) & 0x0F0F0F0F))* 0x01010101) >> 24;
     }
     p = p4;
-    while(count--) bits_count += static_cast<size_t>(bits_in_byte[static_cast<unsigned int>(o[p++])]);
+    while(count--) {
+        uint8_t v = uint8_t(o[p++]);
+        bits_count += static_cast<size_t>(bits_in_byte[static_cast<unsigned int>(v)]);
+    }
     return bits_count;
 }
 }

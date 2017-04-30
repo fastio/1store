@@ -94,6 +94,9 @@ public:
     cache_entry(const sstring key, size_t hash, size_t origin_size) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_BYTES)
     {
+        char init[15] = { 0 };
+        auto entry = current_allocator().construct<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(init), 15});
+        _storage._bytes = std::move(*entry);
     }
 
     cache_entry(const sstring& key, size_t hash, const sstring& data) noexcept

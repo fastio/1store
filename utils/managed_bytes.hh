@@ -183,7 +183,49 @@ public:
         }
     }
 
-    void resize(size_type size) {
+    void extend(size_type new_size, const blob_storage::char_type& v) {
+        assert(new_size > size());
+        if (new_size < max_inline_size) {
+            std::fill(_u.small.data + size(), _u.small.data + new_size, v);
+            _u.small.size = new_size;
+        }
+        else {
+            size_t needed_room_size = size_t(new_size) - size();
+            blob_storage* last = nullptr;
+            auto& alctr = current_allocator();
+            auto maxseg = max_seg(alctr);
+            if (!external()) {
+                needed_room_size += size();
+                auto now = std::min(size_t(needed_room_size), maxseg);
+                void* p = alctr.alloc(&standard_migrator<blob_storage>::object, sizeof(blob_storage) + now, alignof(blob_storage));
+                last = new (p) blob_storage(&_u.ptr, needed_room_size, now);
+                needed_room_size -= now;
+                std::copy_n(_u.small.data, _u.small.size, last->data);
+                std::fill(last->data + _u.small.size, last->data + now, v);
+                _u.small.size = -1;
+                // copy
+            }
+            else {
+                last = _u.ptr;
+                last->size = needed_room_size;
+                while (last->next) {
+                    last = last->next;
+                }
+            }
+
+            try {
+                while (needed_room_size) {
+                    auto now = std::min(size_t(needed_room_size), maxseg);
+                    void* p = alctr.alloc(&standard_migrator<blob_storage>::object, sizeof(blob_storage) + now, alignof(blob_storage));
+                    last = new (p) blob_storage(&last->next, 0, now);
+                    std::fill(last->data, last->data + now, v);
+                    needed_room_size -= now;
+                }
+            } catch (...) {
+                free_chain(last);
+                throw;
+            }
+        }
     }
 
     managed_bytes(bytes_view v) : managed_bytes(initialized_later(), v.size()) {

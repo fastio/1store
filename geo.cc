@@ -439,7 +439,6 @@ static int fetch_points_in_box(geo_hash& h, double longitude, double latitude, d
     min = align_hash(h);
     h._hash++;
     max = align_hash(h);
-    int x = h._step;
     return f(min, max, longitude, latitude, radius, points);
 }
 

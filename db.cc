@@ -1408,8 +1408,13 @@ future<scattered_message_ptr> database::setbit(const redis_key& rk, size_t offse
     return with_allocator(allocator(), [this, &rk, offset, value] {
         return current_store().with_entry_run(rk, [this, &rk, offset, value] (cache_entry* e) {
             auto o = e;
+            size_t offset_in_bytes = offset >> 3;
             if (o == nullptr) {
-               size_t origin_size = offset + offset / 4;
+               size_t offset_in_bytes = offset >> 3;
+               size_t origin_size = offset_in_bytes + offset_in_bytes / 4;
+               if (origin_size < 15) {
+                   origin_size = 15;
+               }
                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), origin_size);
                current_store().insert(entry);
                o = entry;
@@ -1418,9 +1423,9 @@ future<scattered_message_ptr> database::setbit(const redis_key& rk, size_t offse
                 return reply_builder::build(msg_type_err);
             }
             auto& mbytes = o->value_bytes();
-            if (mbytes.size() < offset) {
-                auto extend_size = offset + offset / 4;
-                mbytes.resize(extend_size);
+            if (mbytes.size() < offset_in_bytes) {
+                auto extend_size = offset_in_bytes + offset_in_bytes / 4;
+                mbytes.extend(extend_size, 0);
             }
             auto result = bits_operation::set(mbytes, offset, value);
             return reply_builder::build(result ? msg_one : msg_zero);
