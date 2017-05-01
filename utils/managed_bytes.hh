@@ -204,12 +204,11 @@ public:
             _u.small.size = new_size;
         }
         else {
-            size_t needed_room_size = size_t(new_size) - size();
+            size_t needed_room_size = size_t(new_size);
             blob_storage* last = nullptr;
             auto& alctr = current_allocator();
             auto maxseg = max_seg(alctr);
             if (!external()) {
-                needed_room_size += size();
                 auto now = std::min(size_t(needed_room_size), maxseg);
                 void* p = alctr.alloc(&standard_migrator<blob_storage>::object, sizeof(blob_storage) + now, alignof(blob_storage));
                 last = new (p) blob_storage(needed_room_size, now);
