@@ -169,6 +169,7 @@ modes = {
 }
 
 tests = [
+    'tests/cache_test',
     ]
 
 apps = [
@@ -278,6 +279,10 @@ http = ['seastar/http/transformers.cc',
         'seastar/http/api_docs.cc',
         ]
 
+boost_test_lib = [
+   'seastar/tests/test-utils.cc',
+   'seastar/tests/test_runner.cc',
+]
 
 def maybe_static(flag, libs):
     if flag and not args.static:
@@ -361,7 +366,15 @@ deps = {
       'cache.cc',
       'reply_builder.cc',
       ] + libnet + core + http + utils,
+      'tests/cache_test': ['tests/cache_test.cc'] + core + utils,
 }
+
+boost_tests = [
+    'tests/cache_test',
+    ]
+
+for bt in boost_tests:
+    deps[bt] += boost_test_lib
 
 warnings = [
     '-Wno-mismatched-tags',                 # clang-only

@@ -174,7 +174,6 @@ public:
     future<> bitfield(args_collection&, output_stream<char>& out);
 private:
     future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
-    //future<std::vector<std::pair<sstring, double>>> range_impl(sstring& key, long begin, long end, bool reverse);
     future<bool> exists_impl(sstring& key);
     future<> srem_impl(sstring& key, sstring& member, output_stream<char>& out);
     future<> sadd_impl(sstring& key, sstring& member, output_stream<char>& out);
@@ -196,8 +195,6 @@ private:
     future<int> hdel_impl(sstring& key, sstring& field);
     future<> counter_by(args_collection& args, bool incr, bool with_step, output_stream<char>& out);
     using georadius_result_type = std::pair<std::vector<std::tuple<sstring, double, double, double, double>>, int>;
-   // future<georadius_result_type> fetch_points_by_coord_radius(sstring& key, double log, double lat, double radius, size_t count, int flags);
-   // future<georadius_result_type> fetch_points_by_coord_radius(sstring& key, sstring& member_key, double radius, size_t count, int flags);
     struct zset_args
     {
         sstring dest;

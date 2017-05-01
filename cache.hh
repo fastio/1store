@@ -398,5 +398,15 @@ public:
             _resize_up_threshold = _store.bucket_count() * load_factor;
         }
     }
+
+    inline size_t size() const
+    {
+        return _store.size();
+    }
+
+    inline bool empty() const
+    {
+        return _store.empty();
+    }
 };
 }
