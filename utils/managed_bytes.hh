@@ -49,6 +49,14 @@ struct blob_storage {
         *unaligned_cast<blob_storage**>(backref) = this;
     }
 
+    blob_storage(size_type size, size_type frag_size) noexcept
+        : backref(nullptr)
+        , size(size)
+        , frag_size(frag_size)
+        , next(nullptr)
+    {
+    }
+
     blob_storage(blob_storage&& o) noexcept
         : backref(o.backref)
         , size(o.size)
@@ -62,6 +70,12 @@ struct blob_storage {
         }
         memcpy(data, o.data, frag_size);
     }
+    void move_to(blob_storage** bf)
+    {
+        backref = bf;
+        *unaligned_cast<blob_storage**>(backref) = this;
+    }
+
 } __attribute__((packed));
 
 // A managed version of "bytes" (can be used with LSA).
@@ -198,12 +212,12 @@ public:
                 needed_room_size += size();
                 auto now = std::min(size_t(needed_room_size), maxseg);
                 void* p = alctr.alloc(&standard_migrator<blob_storage>::object, sizeof(blob_storage) + now, alignof(blob_storage));
-                last = new (p) blob_storage(&_u.ptr, needed_room_size, now);
-                needed_room_size -= now;
-                std::copy_n(_u.small.data, _u.small.size, last->data);
+                last = new (p) blob_storage(needed_room_size, now);
+                memcpy(last->data, _u.small.data, _u.small.size);
+                last->move_to(&_u.ptr);
                 std::fill(last->data + _u.small.size, last->data + now, v);
+                needed_room_size -= now;
                 _u.small.size = -1;
-                // copy
             }
             else {
                 last = _u.ptr;

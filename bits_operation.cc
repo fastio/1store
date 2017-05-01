@@ -33,7 +33,7 @@ static const size_t RESIZE_STEP    = 16;
 bool bits_operation::set(managed_bytes& o, size_t offset, bool value)
 {
     auto index = offset >> 3;
-    if (index > o.size()) {
+    if (index >= o.size()) {
         size_t append_size = RESIZE_STEP;
         while (append_size < index) append_size+= RESIZE_STEP;
         o.extend(append_size, 0);
@@ -80,7 +80,7 @@ size_t bits_operation::count(const managed_bytes& o, long start, long end)
         3,4,4,5,4,5,5,6,4,5,5,6,5,6,6,7,4,5,5,6,5,6,6,7,5,6,6,7,6,7,7,8
     };
 
-    while((unsigned long)(o[p]) & 3 && count) {
+    while((unsigned long)(uint8_t(o[p])) & 3 && count) {
         uint8_t v = uint8_t(o[p++]);
         bits_count += static_cast<size_t>(bits_in_byte[static_cast<unsigned int>(v)]);
         count--;
