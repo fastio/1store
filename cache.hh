@@ -57,12 +57,12 @@ protected:
         ENTRY_SSET  = 6,
     };
     entry_type _type;
-    managed_bytes _key;
+    managed_ref<managed_bytes> _key;
     size_t _key_hash;
     union storage {
         double _float_number;
         int64_t _integer_number;
-        managed_bytes _bytes;
+        managed_ref<managed_bytes> _bytes;
         managed_ref<list_lsa> _list;
         managed_ref<dict_lsa> _dict;
         managed_ref<sset_lsa> _sset;
@@ -75,8 +75,7 @@ public:
         , _type(type)
         , _key_hash(hash)
     {
-        auto entry = current_allocator().construct<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(key.data()), key.size()});
-        _key = std::move(*entry);
+        _key = make_managed<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(key.data()), key.size()});
     }
 
     cache_entry(const sstring& key, size_t hash, double data) noexcept
@@ -95,15 +94,13 @@ public:
         : cache_entry(key, hash, entry_type::ENTRY_BYTES)
     {
         char init[15] = { 0 };
-        auto entry = current_allocator().construct<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(init), 15});
-        _storage._bytes = std::move(*entry);
+        _storage._bytes = make_managed<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(init), 15});
     }
 
     cache_entry(const sstring& key, size_t hash, const sstring& data) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_BYTES)
     {
-        auto entry = current_allocator().construct<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(data.data()), data.size()});
-        _storage._bytes = std::move(*entry);
+        _storage._bytes = make_managed<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(data.data()), data.size()});
     }
     struct list_initializer {};
     cache_entry(const sstring& key, size_t hash, list_initializer) noexcept
@@ -164,10 +161,28 @@ public:
 
     virtual ~cache_entry()
     {
+        switch (_type) {
+            case entry_type::ENTRY_FLOAT:
+            case entry_type::ENTRY_INT64:
+                break;
+            case entry_type::ENTRY_BYTES:
+                _storage._bytes.~managed_ref<managed_bytes>();
+                break;
+            case entry_type::ENTRY_LIST:
+                _storage._list.~managed_ref<list_lsa>();
+                break;
+            case entry_type::ENTRY_MAP:
+            case entry_type::ENTRY_SET:
+                _storage._dict.~managed_ref<dict_lsa>();
+                break;
+            case entry_type::ENTRY_SSET:
+                _storage._sset.~managed_ref<sset_lsa>();
+                break;
+        }
     }
 
     friend inline bool operator == (const cache_entry &l, const cache_entry &r) {
-        return (l._key_hash == r._key_hash) && (l._key == r._key);
+        return (l._key_hash == r._key_hash) && (*(l._key) == *(r._key));
     }
 
     friend inline std::size_t hash_value(const cache_entry& e) {
@@ -177,8 +192,8 @@ public:
     struct compare {
     public:
         inline bool operator () (const cache_entry& l, const cache_entry& r) const {
-            const auto& lk = l._key;
-            const auto& rk = r._key;
+            const auto& lk = *(l._key);
+            const auto& rk = *(r._key);
             return (l.key_hash() == r.key_hash()) && (lk == rk);
         }
         inline bool operator () (const redis_key& k, const cache_entry& e) const {
@@ -195,23 +210,23 @@ public:
     }
     inline size_t key_size() const
     {
-        return _key.size();
+        return _key->size();
     }
     inline const bytes_view key() const
     {
-        return { _key.data(), _key.size() };
+        return { _key->data(), _key->size() };
     }
     inline const char* key_data() const
     {
-        return reinterpret_cast<const char*>(_key.data());
+        return reinterpret_cast<const char*>(_key->data());
     }
     inline size_t value_bytes_size() const
     {
-        return _storage._bytes.size();
+        return _storage._bytes->size();
     }
     inline const char* value_bytes_data() const
     {
-        return reinterpret_cast<const char*>(_storage._bytes.data());
+        return reinterpret_cast<const char*>(_storage._bytes->data());
     }
     inline bool type_of_float() const
     {
@@ -257,10 +272,10 @@ public:
         _storage._float_number += step;
     }
     inline managed_bytes& value_bytes() {
-        return _storage._bytes;
+        return *(_storage._bytes);
     }
     inline const managed_bytes& value_bytes() const {
-        return _storage._bytes;
+        return *(_storage._bytes);
     }
     inline list_lsa& value_list() {
         return *(_storage._list);

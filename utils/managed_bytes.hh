@@ -29,7 +29,6 @@
 #include <seastar/core/unaligned.hh>
 #include <unordered_map>
 #include <type_traits>
-
 struct blob_storage {
     using size_type = uint32_t;
     using char_type = bytes_view::value_type;
