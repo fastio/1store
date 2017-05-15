@@ -24,6 +24,8 @@
 #include <algorithm>
 #include "util/log.hh"
 #include "bits_operation.hh"
+#include "core/metrics.hh"
+
 using logger =  seastar::logger;
 static logger db_log ("db");
 
@@ -63,6 +65,7 @@ database::database()
     using namespace std::chrono;
     //_timer.set_callback([this] { expired_items(); });
     //_store = &_data_storages[0];
+    setup_metrics();
 }
 
 database::~database()
@@ -72,11 +75,31 @@ database::~database()
     }
 }
 
+void database::setup_metrics()
+{
+    namespace sm = seastar::metrics;
+    _metrics.add_group("db", {
+        sm::make_gauge("get", [this] { return _stats._get; }, sm::description("GET")),
+        sm::make_gauge("get_hit", [this] { return _stats._get_hit; }, sm::description("GET HIT")),
+        sm::make_gauge("set", [this] { return _stats._set; }, sm::description("SET")),
+        sm::make_gauge("del", [this] { return _stats._del; }, sm::description("DEL")),
+        sm::make_gauge("total_entries", [this] { return _stats._total_entries; }, sm::description("Total entries")),
+        sm::make_gauge("total_string_entries", [this] { return _stats._total_string_entries; }, sm::description("Total string entries")),
+        sm::make_gauge("total_dict_entries", [this] { return _stats._total_dict_entries; }, sm::description("Total dict entries")),
+        sm::make_gauge("total_set_entries", [this] { return _stats._total_set_entries; }, sm::description("Total set entries")),
+        sm::make_gauge("total_sorted_set_entries", [this] { return _stats._total_sorted_set_entries; }, sm::description("Total sorted set entries")),
+        sm::make_gauge("total_geo_entries", [this] { return _stats._total_geo_entries; }, sm::description("Total geo entries")),
+     });
+}
+
 bool database::set_direct(const redis_key& rk, sstring& val, long expire, uint32_t flag)
 {
     return with_allocator(allocator(), [this, &rk, &val] {
         auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
-        current_store().replace(entry);
+        if (current_store().replace(entry)) {
+            ++_stats._total_entries;
+        }
+        ++_stats._set;
         return true;
     });
 }
@@ -86,6 +109,8 @@ future<scattered_message_ptr> database::set(const redis_key& rk, sstring& val, l
     return with_allocator(allocator(), [this, &rk, &val] {
         auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
         current_store().replace(entry);
+        ++_stats._set;
+        ++_stats._total_entries;
         return reply_builder::build(msg_ok);
     });
 }
@@ -93,7 +118,11 @@ future<scattered_message_ptr> database::set(const redis_key& rk, sstring& val, l
 bool database::del_direct(const redis_key& rk)
 {
     return with_allocator(allocator(), [this, &rk] {
-        return current_store().erase(rk);
+        ++_stats._del;
+        auto result =  current_store().erase(rk);
+        if (result)
+            --_stats._total_entries;
+        return result;
     });
 }
 
@@ -101,6 +130,9 @@ future<scattered_message_ptr> database::del(const redis_key& rk)
 {
     return with_allocator(allocator(), [this, &rk] {
         auto result =  current_store().erase(rk);
+        ++_stats._del;
+        if (result)
+            --_stats._total_entries;
         return reply_builder::build(result ? msg_one : msg_zero);
     });
 }
@@ -166,11 +198,13 @@ future<scattered_message_ptr> database::append(const redis_key& rk, sstring& val
 future<scattered_message_ptr> database::get(const redis_key& rk)
 {
     return with_linearized_managed_bytes([this, &rk] {
-        return current_store().with_entry_run(rk, [] (const cache_entry* e) {
+        return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
+           ++_stats._get;
            if (e && e->type_of_bytes() == false) {
                return reply_builder::build(msg_type_err);
            }
            else {
+               if (e != nullptr) ++_stats._get_hit;
                return reply_builder::build<false, true>(e);
            }
         });

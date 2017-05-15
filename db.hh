@@ -24,6 +24,7 @@
 #include "core/shared_ptr.hh"
 #include "core/sharded.hh"
 #include "core/temporary_buffer.hh"
+#include "core/metrics_registration.hh"
 #include <sstream>
 #include <iostream>
 #include "common.hh"
@@ -172,5 +173,23 @@ private:
     cache _cache_stores[DEFAULT_DB_COUNT];
     size_t current_store_index = 0;
     inline cache& current_store() { return _cache_stores[current_store_index]; }
+    seastar::metrics::metric_groups _metrics;
+    struct db_stats {
+        uint64_t _get = 0;
+        uint64_t _get_hit = 0;
+        uint64_t _set = 0;
+        uint64_t _del = 0;
+
+        uint64_t _total_entries = 0;
+        uint64_t _total_string_entries = 0;
+        uint64_t _total_dict_entries = 0;
+        uint64_t _total_set_entries = 0;
+        uint64_t _total_sorted_set_entries = 0;
+        uint64_t _total_geo_entries = 0;
+
+        uint64_t _expired_entries_pending = 0;
+    };
+    db_stats _stats;
+    void setup_metrics();
 };
 }

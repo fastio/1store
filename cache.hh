@@ -365,16 +365,19 @@ public:
         return false;
     }
 
-    inline void replace(cache_entry* entry)
+    inline bool replace(cache_entry* entry)
     {
+        bool res = true; 
         if (entry) {
             static auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
             auto it = _store.find(*entry, hash_fn, cache_entry::compare());
             if (it != _store.end()) {
                 _store.erase_and_dispose(it, current_deleter<cache_entry>());
+                res = false;
             }
         }
         insert(entry);
+        return res;
     }
 
     inline void insert(cache_entry* entry)

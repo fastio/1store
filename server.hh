@@ -22,7 +22,6 @@
 #include "redis.hh"
 #include "db.hh"
 #include "redis.hh"
-#include "system_stats.hh"
 #include "redis_protocol.hh"
 namespace redis {
 class server {

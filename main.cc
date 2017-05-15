@@ -54,7 +54,6 @@ int main(int ac, char** av) {
         auto&& config = app.configuration();
         auto port = config["port"].as<uint16_t>();
         auto pport = config["prometheus_port"].as<uint16_t>();
-        main_log.info("port {}, pport {}", port, pport);
         return db.start().then([&, port] {
             return server.start(std::ref(redis), port);
         }).then([&] {

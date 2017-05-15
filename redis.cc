@@ -40,7 +40,6 @@
 #include <unistd.h>
 #include <cstdlib>
 #include "redis_protocol.hh"
-#include "system_stats.hh"
 #include "db.hh"
 #include "reply_builder.hh"
 #include  <experimental/vector>
