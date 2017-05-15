@@ -34,17 +34,16 @@
 #include "dict_lsa.hh"
 #include "sset_lsa.hh"
 #include "core/sstring.hh"
-
+#include "core/timer-set.hh"
 namespace redis {
 namespace bi = boost::intrusive;
+using clock_type = lowres_clock;
 class cache;
 // cache_entry should be allocated by LSA.
 class cache_entry
 {
 protected:
     friend class cache;
-    using time_point = expiration::time_point;
-    using duration = expiration::duration;
     using hook_type = boost::intrusive::unordered_set_member_hook<>;
     hook_type _cache_link;
     enum class entry_type {
@@ -69,7 +68,11 @@ protected:
         storage() {}
         ~storage() {}
     } _storage;
+    bi::list_member_hook<> _timer_link;
+    expiration _expiry;
 public:
+    using time_point = expiration::time_point;
+    using duration = expiration::duration;
     cache_entry(const sstring& key, size_t hash, entry_type type) noexcept
         : _cache_link()
         , _type(type)
@@ -204,6 +207,14 @@ public:
         }
     };
 public:
+    inline clock_type::time_point get_timeout()
+    {
+        return _expiry.to_time_point();
+    }
+    inline bool cancel() const
+    {
+        return false;
+    }
     inline size_t key_hash() const
     {
         return _key_hash;
@@ -317,15 +328,25 @@ class cache {
     size_t _resize_up_threshold = load_factor * initial_bucket_count;
     cache_type::bucket_type* _buckets;
     cache_type _store;
+    seastar::timer_set<cache_entry, &cache_entry::_timer_link> _alive;
+    timer<clock_type> _timer;
+    clock_type::duration _wc_to_clock_type_delta;
+    allocation_strategy* alloc;
 public:
     cache ()
         : _buckets(new cache_type::bucket_type[initial_bucket_count])
         , _store(cache_type::bucket_traits(_buckets, initial_bucket_count))
     {
+        _timer.set_callback([this] { erase_expired_entries(); });
     }
     ~cache ()
     {
         flush_all();
+    }
+
+    void set_allocation_strategy(allocation_strategy* pa)
+    {
+        alloc = pa;
     }
 
     void flush_all()
@@ -422,6 +443,20 @@ public:
     inline bool empty() const
     {
         return _store.empty();
+    }
+
+    void erase_expired_entries()
+    {
+        with_allocator(*alloc, [this] {
+            auto expired_entries = _alive.expire(clock_type::now());
+            while (!expired_entries.empty()) {
+                auto entry = &*expired_entries.begin();
+                expired_entries.pop_front();
+                auto it = _store.iterator_to(*entry);
+                _store.erase_and_dispose(it, current_deleter<cache_entry>());
+            }
+        });
+        _timer.arm(_alive.get_next_timeout());
     }
 };
 }

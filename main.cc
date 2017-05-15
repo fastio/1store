@@ -21,10 +21,10 @@
 #include "redis.hh"
 #include "db.hh"
 #include "redis.hh"
-#include "system_stats.hh"
 #include "redis_protocol.hh"
 #include "server.hh"
 #include "util/log.hh"
+#include "core/prometheus.hh"
 #define PLATFORM "seastar"
 #define VERSION "v1.0"
 #define VERSION_STRING PLATFORM " " VERSION
@@ -32,38 +32,46 @@
 using logger =  seastar::logger;
 static logger main_log ("main");
 
+
 int main(int ac, char** av) {
     distributed<redis::database> db;
-    distributed<redis::system_stats> system_stats;
     distributed<redis::server> server;
-    redis::metric_server metric(system_stats);
     redis::redis_service redis(db);
-
+    prometheus::config prometheus_config;
+    httpd::http_server_control prometheus_server;
     namespace bpo = boost::program_options;
     app_template app;
     app.add_options()
         ("port", bpo::value<uint16_t>()->default_value(6379), "Redis server port to listen on")
-        ("metric_port", bpo::value<uint16_t>()->default_value(11218), "Metric server port to listen on")
+        ("prometheus_port", bpo::value<uint16_t>()->default_value(10000), "Prometheus server port to listen on")
         ;
 
     return app.run_deprecated(ac, av, [&] {
         engine().at_exit([&] { return server.stop(); });
         engine().at_exit([&] { return db.stop(); });
-        engine().at_exit([&] { return system_stats.stop(); });
-        engine().at_exit([&] { return metric.stop(); });
+        engine().at_exit([&] { return prometheus_server.stop(); });
 
         auto&& config = app.configuration();
         auto port = config["port"].as<uint16_t>();
-        auto metric_port = config["metric_port"].as<uint16_t>();
-        return db.start().then([&system_stats] {
-            return system_stats.start(redis::clock_type::now());
-        }).then([&, port] {
-            return server.start(std::ref(redis), std::ref(system_stats), port);
-        }).then([&server] {
-            return server.invoke_on_all(&redis::server::start);
-        }).then([&, metric_port] {
-            return metric.start(metric_port);
+        auto pport = config["prometheus_port"].as<uint16_t>();
+        main_log.info("port {}, pport {}", port, pport);
+        return db.start().then([&, port] {
+            return server.start(std::ref(redis), port);
         }).then([&] {
+            return server.invoke_on_all(&redis::server::start);
+        }).then([&, pport] {
+             prometheus_config.metric_help = "Redis server statistics";
+             prometheus_config.prefix = "redis";
+             return prometheus_server.start("prometheus").then([&] {
+                 return prometheus::start(prometheus_server, prometheus_config);
+             }).then([&, pport] {
+                listen_options lo;
+                lo.reuse_address = true;
+                return prometheus_server.listen(make_ipv4_address({pport})).handle_exception([pport] (auto ep) {
+                    return make_exception_future<>(ep);
+                });
+             });
+        }).then([&, port] {
             main_log.info("Parallel Redis ... [{}]", port); 
             return make_ready_future<>();
         });

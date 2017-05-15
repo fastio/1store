@@ -357,7 +357,6 @@ deps = {
       'server.cc',
       'main.cc',
       'db.cc',
-      'system_stats.cc',
       'redis_protocol_parser.rl',
       'redis_protocol.cc',
       'geo.cc',
@@ -365,7 +364,7 @@ deps = {
       'list_lsa.cc',
       'cache.cc',
       'reply_builder.cc',
-      ] + libnet + core + http + utils,
+      ] + libnet + core + http + utils + protobuf + prometheus,
       'tests/cache_test': ['tests/cache_test.cc'] + core + utils,
 }
 
