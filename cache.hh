@@ -341,7 +341,6 @@ public:
     }
     ~cache ()
     {
-        flush_all();
     }
 
     void set_allocation_strategy(allocation_strategy* pa)

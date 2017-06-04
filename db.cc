@@ -70,9 +70,11 @@ database::database()
 
 database::~database()
 {
-    for (size_t i = 0; i < DEFAULT_DB_COUNT; ++i) {
-        _cache_stores[i].flush_all();
-    }
+    with_allocator(allocator(), [this] {
+        for (size_t i = 0; i < DEFAULT_DB_COUNT; ++i) {
+            _cache_stores[i].flush_all();
+        }
+    });
 }
 
 void database::setup_metrics()

@@ -19,4 +19,13 @@
 *
 */
 #include "server.hh"
-namespace redis {}
+namespace redis {
+void server::setup_metrics()
+{
+    namespace sm = seastar::metrics;
+    _metrics.add_group("connection", {
+        sm::make_gauge("new", [this] { return _stats._new_connection_count; }, sm::description("New connections")),
+        sm::make_gauge("alived", [this] { return _stats._alived_connection_count; }, sm::description("Alived connections")),
+    });
+}
+}
