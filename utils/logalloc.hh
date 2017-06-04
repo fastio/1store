@@ -244,6 +244,7 @@ class region_group {
     bool reclaimer_can_block() const;
     future<> start_releaser();
     void notify_relief();
+    friend void region_group_binomial_group_sanity_check(const region_group::region_heap& bh);
 public:
     // When creating a region_group, one can specify an optional throttle_threshold parameter. This
     // parameter won't affect normal allocations, but an API is provided, through the region_group's
@@ -590,6 +591,8 @@ public:
     // when data from this region needs to be evicted in order to reclaim space.
     // The function should free some space from this region.
     void make_evictable(eviction_fn);
+
+    const eviction_fn& evictor() const;
 
     friend class region_group;
     friend class allocating_section;
