@@ -25,6 +25,7 @@
 #include "util/log.hh"
 #include "bits_operation.hh"
 #include "core/metrics.hh"
+#include "hll.hh"
 
 using logger =  seastar::logger;
 static logger db_log ("db");
@@ -869,10 +870,21 @@ future<scattered_message_ptr> database::smembers(const redis_key& rk)
     });
 }
 
+future<foreign_ptr<lw_shared_ptr<sstring>>> database::get_direct(const redis_key& rk)
+{
+    using return_type = foreign_ptr<lw_shared_ptr<sstring>>;
+    return current_store().with_entry_run(rk, [] (const cache_entry* e) {
+        if (!e || e->type_of_hll() == false) {
+            return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<sstring>>(nullptr));
+        }
+        return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<sstring>>(make_lw_shared<sstring>(sstring { e->value_bytes_data(), e->value_bytes_size() })));
+    });
+}
+
 future<foreign_ptr<lw_shared_ptr<std::vector<sstring>>>> database::smembers_direct(const redis_key& rk)
 {
     using result_type = std::vector<sstring>;
-    using return_type =foreign_ptr<lw_shared_ptr<result_type>>;
+    using return_type = foreign_ptr<lw_shared_ptr<result_type>>;
     return current_store().with_entry_run(rk, [] (const cache_entry* e) {
         if (!e || e->type_of_set() == false) {
             return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<result_type>>(make_lw_shared<result_type>(result_type {})));
@@ -1503,6 +1515,75 @@ future<scattered_message_ptr> database::bitpos(const redis_key& rk, bool bit, lo
 {
     return reply_builder::build(msg_nil);
 }
+
+future<scattered_message_ptr> database::pfadd(const redis_key& rk, std::vector<sstring>& elements)
+{
+    return with_allocator(allocator(), [this, &rk, &elements] {
+        return current_store().with_entry_run(rk, [this, &rk, &elements] (cache_entry* e) {
+            if (e == nullptr) {
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::hll_initializer());
+                current_store().insert(entry);
+                e = entry;
+            }
+            if (e->type_of_hll() == false) {
+               return reply_builder::build(msg_type_err);
+            }
+            managed_bytes& mbytes = e->value_bytes();
+            auto result = hll::append(mbytes, elements);
+            return reply_builder::build(result);
+        });
+    });
+}
+
+future<scattered_message_ptr> database::pfcount(const redis_key& rk)
+{
+    return current_store().with_entry_run(rk, [] (cache_entry* e) {
+        if (e == nullptr) {
+            return reply_builder::build(msg_zero);
+        }
+        if (e->type_of_hll() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& mbytes = e->value_bytes();
+        auto result = hll::count(mbytes);
+        return reply_builder::build(result);
+    });
+}
+
+future<scattered_message_ptr> database::pfcount_multi(const redis_key& rk, uint8_t* merged_sources, size_t size)
+{
+    return current_store().with_entry_run(rk, [merged_sources, size] (cache_entry* e) {
+        if (e == nullptr) {
+            return reply_builder::build(msg_zero);
+        }
+        if (e->type_of_hll() == false) {
+            return reply_builder::build(msg_type_err);
+        }
+        auto& mbytes = e->value_bytes();
+        auto result = hll::count(mbytes, merged_sources, size);
+        return reply_builder::build(result);
+    });
+}
+
+future<scattered_message_ptr> database::pfmerge(const redis_key& rk, uint8_t* merged_sources, size_t size)
+{
+    return with_allocator(allocator(), [this, &rk, merged_sources, size] {
+        return current_store().with_entry_run(rk, [this, &rk, merged_sources, size] (cache_entry* e) {
+            if (e == nullptr) {
+                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::hll_initializer());
+                current_store().insert(entry);
+                e = entry;
+            }
+            if (e->type_of_hll() == false) {
+                return reply_builder::build(msg_type_err);
+            }
+            auto& mbytes = e->value_bytes();
+            auto result = hll::merge(mbytes, merged_sources, size);
+            return reply_builder::build(result);
+        });
+    });
+}
+
 
 future<> database::stop()
 {

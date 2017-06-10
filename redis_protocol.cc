@@ -230,6 +230,7 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.getbit(_command_args, std::ref(out));
                 case redis_protocol_parser::command::bitcount:
                     return _redis.bitcount(_command_args, std::ref(out));
+
                 /*
                 case redis_protocol_parser::command::bitpos:
                     return _redis.bitpos(_command_args).then([&out] (auto&& m) {
@@ -239,7 +240,13 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                     return _redis.bitop(_command_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
-*/
+                */
+                case redis_protocol_parser::command::pfadd:
+                    return _redis.pfadd(_command_args, std::ref(out));
+                case redis_protocol_parser::command::pfcount:
+                    return _redis.pfcount(_command_args, std::ref(out));
+                case redis_protocol_parser::command::pfmerge:
+                    return _redis.pfmerge(_command_args, std::ref(out));
                 default:
                     return out.write("+Not Implemented");
                 };

@@ -35,6 +35,7 @@
 #include "sset_lsa.hh"
 #include "core/sstring.hh"
 #include "core/timer-set.hh"
+#include "hll.hh"
 namespace redis {
 namespace bi = boost::intrusive;
 using clock_type = lowres_clock;
@@ -54,6 +55,7 @@ protected:
         ENTRY_MAP   = 4,
         ENTRY_SET   = 5,
         ENTRY_SSET  = 6,
+        ENTRY_HLL   = 7,
     };
     entry_type _type;
     managed_ref<managed_bytes> _key;
@@ -96,8 +98,7 @@ public:
     cache_entry(const sstring key, size_t hash, size_t origin_size) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_BYTES)
     {
-        char init[15] = { 0 };
-        _storage._bytes = make_managed<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(init), 15});
+        _storage._bytes = make_managed<managed_bytes>(origin_size, 0);
     }
 
     cache_entry(const sstring& key, size_t hash, const sstring& data) noexcept
@@ -133,6 +134,13 @@ public:
         _storage._sset = make_managed<sset_lsa>();
     }
 
+    struct hll_initializer {};
+    cache_entry(const sstring& key, size_t hash, hll_initializer) noexcept
+        : cache_entry(key, hash, entry_type::ENTRY_HLL)
+    {
+        _storage._bytes = make_managed<managed_bytes>(HLL_BYTES_SIZE, 0);
+    }
+
     cache_entry(cache_entry&& o) noexcept
         : _cache_link(std::move(o._cache_link))
         , _type(o._type)
@@ -147,6 +155,7 @@ public:
                 _storage._integer_number = std::move(o._storage._integer_number);
                 break;
             case entry_type::ENTRY_BYTES:
+            case entry_type::ENTRY_HLL:
                 _storage._bytes = std::move(o._storage._bytes);
                 break;
             case entry_type::ENTRY_LIST:
@@ -169,6 +178,7 @@ public:
             case entry_type::ENTRY_INT64:
                 break;
             case entry_type::ENTRY_BYTES:
+            case entry_type::ENTRY_HLL:
                 _storage._bytes.~managed_ref<managed_bytes>();
                 break;
             case entry_type::ENTRY_LIST:
@@ -263,6 +273,9 @@ public:
     }
     inline bool type_of_sset() const {
         return _type == entry_type::ENTRY_SSET;
+    }
+    inline bool type_of_hll() const {
+        return _type == entry_type::ENTRY_HLL;
     }
     inline int64_t value_integer() const
     {

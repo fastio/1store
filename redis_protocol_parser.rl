@@ -175,7 +175,9 @@ bitcount = "bitcount"i ${_command = command::bitcount; };
 bitop = "bitop"i ${_command = command::bitop; };
 bitfield = "bitfield"i ${_command = command::bitfield; };
 bitpos = "bitpos"i ${_command = command::bitpos; };
-
+pfadd = "pfadd"i ${_command = command::pfadd; };
+pfcount = "pfcount"i ${_command = command::pfcount; };
+pfmerge = "pfmerge"i ${_command = command::pfmerge; };
 
 command = (setbit | set | getbit | get | del | mget | mset | echo | ping | incr | decr | incrby | decrby | command_ | exists | append |
            strlen | lpushx | lpush | lpop | llen | lindex | linsert | lrange | lset | rpushx | rpush | rpop | lrem |
@@ -185,7 +187,8 @@ command = (setbit | set | getbit | get | del | mget | mset | echo | ping | incr 
            zrangebyscore | zrank | zremrangebyrank | zremrangebyscore | zremrangebylex | zrem | zrevrangebyscore | zrevrange| zrevrank |
            zscore | zunionstore  | zinterstore | zdiffstore | zunion | zinter | zdiff | zscan | zrangebylex | zlexcount |
            zrange | select | geoadd | geodist | geohash | geopos | georadiusbymember | georadius |  bitcount |
-           bitpos | bitop | bitfield);
+           bitpos | bitop | bitfield |
+           pfadd | pfcount | pfmerge );
 arg = '$' u32 crlf ${ _arg_size = _u32;};
 
 main := (args_count (arg command crlf) (arg @{fcall blob; } crlf)+) ${_state = state::ok;};
@@ -307,6 +310,9 @@ public:
         bitop,
         bitpos,
         bitfield,
+        pfadd,
+        pfcount,
+        pfmerge,
     };
 
     state _state;

@@ -167,8 +167,13 @@ static const sstring msg_type_set {"+set\r\n"};
 static const sstring msg_type_zset {"+zset\r\n"};
 static const sstring msg_type_hash {"+hash\r\n"};
 
-static constexpr const int GEO_HASH_STEP_MAX  = 26; /* 26*2 = 52 bits. */
+static constexpr const int HLL_P = 14;
+static constexpr const int HLL_BITS = 6;
+static constexpr const int HLL_CARD_CACHE_SIZE = 8;
+static constexpr const int HLL_BUCKET_COUNT = (1 << HLL_P);
+static constexpr const int HLL_BYTES_SIZE = HLL_CARD_CACHE_SIZE + (HLL_BUCKET_COUNT * HLL_BITS + 7) / 8;
 
+static constexpr const int GEO_HASH_STEP_MAX  = 26; /* 26*2 = 52 bits. */
 /* Limits from EPSG:900913 / EPSG:3785 / OSGEO:41001 */
 static constexpr const double GEO_LAT_MIN = -85.05112878;
 static constexpr const double GEO_LAT_MAX = 85.05112878;

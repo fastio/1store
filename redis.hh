@@ -172,6 +172,11 @@ public:
     future<> bitop(args_collection&, output_stream<char>& out);
     future<> bitpos(args_collection&, output_stream<char>& out);
     future<> bitfield(args_collection&, output_stream<char>& out);
+
+    // [HLL]
+    future<> pfadd(args_collection&, output_stream<char>& out);
+    future<> pfcount(args_collection&, output_stream<char>& out);
+    future<> pfmerge(args_collection&, output_stream<char>& out);
 private:
     future<std::pair<size_t, int>> zadds_impl(sstring& key, std::unordered_map<sstring, double>&& members, int flags);
     future<bool> exists_impl(sstring& key);

@@ -360,6 +360,7 @@ deps = {
       'redis_protocol_parser.rl',
       'redis_protocol.cc',
       'geo.cc',
+      'hll.cc',
       'bits_operation.cc',
       'list_lsa.cc',
       'cache.cc',

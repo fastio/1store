@@ -140,6 +140,13 @@ public:
     future<scattered_message_ptr> bitop(const redis_key& rk, int flags, std::vector<sstring>& keys);
     future<scattered_message_ptr> bitpos(const redis_key& rk, bool bit, long start, long end);
 
+    // [HLL]
+    future<scattered_message_ptr> pfadd(const redis_key& rk, std::vector<sstring>& keys);
+    future<scattered_message_ptr> pfcount(const redis_key& rk);
+    future<scattered_message_ptr> pfcount_multi(const redis_key& rk, uint8_t* merged_sources, size_t size);
+    future<scattered_message_ptr> pfmerge(const redis_key& rk, uint8_t* merged_sources, size_t size);
+    future<foreign_ptr<lw_shared_ptr<sstring>>> get_direct(const redis_key& rk);
+
     future<> stop();
 private:
     future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> georadius(const sset_lsa&, double longtitude, double latitude, double radius, size_t count, int flag);

@@ -240,6 +240,19 @@ public:
         }
     }
 
+    managed_bytes(size_type size, const blob_storage::char_type& c) : managed_bytes(initialized_later(), size) {
+        if (!external()) {
+            std::fill_n(_u.small.data, _u.small.size, c);
+            return;
+        }
+        auto b = _u.ptr;
+        while (b) {
+            std::fill_n(b->data, b->frag_size, c);
+            b = b->next;
+        }
+        assert(!b);
+    }
+
     managed_bytes(bytes_view v) : managed_bytes(initialized_later(), v.size()) {
         if (!external()) {
             std::copy(v.begin(), v.end(), _u.small.data);

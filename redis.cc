@@ -1966,57 +1966,99 @@ future<> redis_service::bitop(args_collection& args, output_stream<char>& out)
 future<> redis_service::bitpos(args_collection& args, output_stream<char>& out)
 {
     return out.write(msg_nil);
-    /*
-    if (args._command_args_count < 2 || args._command_args.empty()) {
-        return syntax_err_message();
-    }
-    sstring& key = args._command_args[0];
-    sstring& b = args._command_args[1];
-    long start = 0, end = 0;
-    bool bit = false;
-    if (args._command_args_count == 4) {
-        try {
-            auto bb = std::stoi(b);
-            if (bb != 0 && bb != 1) {
-                return syntax_err_message();
-            }
-            bit = bb == 1;
-            start = std::stol(args._command_args[2]);
-            end = std::stol(args._command_args[3]);
-        } catch (const std::invalid_argument&) {
-            return syntax_err_message();
-        }
-    }
-    redis_key rk {std::ref(key)};
-    auto cpu = get_cpu(rk);
-    if (engine().cpu_id() == cpu) {
-        auto&& u = _db.local().bitpos(std::move(rk), bit, start, end);
-        if (u.second == REDIS_OK) {
-            return size_message(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
-    }
-    return _db.invoke_on(cpu, &database::bitpos, std::move(rk), bit, start, end).then([] (auto&& u) {
-        if (u.second == REDIS_OK) {
-            return size_message(u.first);
-        }
-        else if (u.second == REDIS_WRONG_TYPE) {
-            return wrong_type_err_message();
-        }
-        else {
-            return err_message();
-        }
-    });
-    */
 }
 
 future<> redis_service::bitfield(args_collection& args, output_stream<char>& out)
 {
     return out.write(msg_nil);
+}
+
+future<> redis_service::pfadd(args_collection& args, output_stream<char>& out)
+{
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return out.write(msg_syntax_err);
+    }
+    sstring& key = args._command_args[0];
+    for (size_t i = 1; i < args._command_args_count; ++i) {
+        args._tmp_keys.emplace_back(args._command_args[i]);
+    }
+    redis_key rk {std::ref(key)};
+    auto& elements = args._tmp_keys;
+    auto cpu = get_cpu(rk);
+    return _db.invoke_on(cpu, &database::pfadd, std::move(rk), std::ref(elements)).then([&out] (auto&& m) {
+        return out.write(std::move(*m));
+    });
+}
+
+future<> redis_service::pfcount(args_collection& args, output_stream<char>& out)
+{
+    if (args._command_args_count < 1 || args._command_args.empty()) {
+        return out.write(msg_syntax_err);
+    }
+    if (args._command_args_count == 1) {
+        sstring& key = args._command_args[0];
+        redis_key rk {std::ref(key)};
+        auto cpu = get_cpu(rk);
+        return _db.invoke_on(cpu, &database::pfcount, std::move(rk)).then([&out] (auto&& m) {
+            return out.write(std::move(*m));
+        });
+    }
+    else {
+        struct merge_state {
+            sstring dest;
+            std::vector<sstring>& keys;
+            uint8_t merged_sources[HLL_BYTES_SIZE];
+        };
+        for (size_t i = 1; i < args._command_args_count; ++i) {
+            args._tmp_keys.emplace_back(args._command_args[i]);
+        }
+        return do_with(merge_state{std::move(args._command_args[0]), std::ref(args._tmp_keys), { 0 }}, [this, &out] (auto& state) {
+            return parallel_for_each(std::begin(state.keys), std::end(state.keys), [this, &state] (auto& key) {
+                redis_key rk { std::ref(key) };
+                auto cpu = this->get_cpu(rk);
+                return _db.invoke_on(cpu, &database::get_direct, std::move(rk)).then([&state] (auto&& u) {
+                    //hll::merge(*u, state.merged_sources, HLL_BYTES_SIZE);
+                    return make_ready_future<>();
+                });
+            }).then([this, &state, &out] {
+                redis_key rk { std::ref(state.dest) };
+                auto cpu = this->get_cpu(rk);
+                return _db.invoke_on(cpu, &database::pfcount_multi, std::move(rk), state.merged_sources, HLL_BYTES_SIZE).then([&out] (auto&& m) {
+                    return out.write(std::move(*m));
+                });
+            });
+        });
+    }
+}
+
+future<> redis_service::pfmerge(args_collection& args, output_stream<char>& out)
+{
+    if (args._command_args_count < 2 || args._command_args.empty()) {
+        return out.write(msg_syntax_err);
+    }
+    struct merge_state {
+        sstring dest;
+        std::vector<sstring>& keys;
+        uint8_t merged_sources[HLL_BYTES_SIZE];
+    };
+    for (size_t i = 1; i < args._command_args_count; ++i) {
+        args._tmp_keys.emplace_back(args._command_args[i]);
+    }
+    return do_with(merge_state{std::move(args._command_args[0]), std::ref(args._tmp_keys), { 0 }}, [this, &out] (auto& state) {
+        return parallel_for_each(std::begin(state.keys), std::end(state.keys), [this, &state] (auto& key) {
+            redis_key rk { std::ref(key) };
+            auto cpu = this->get_cpu(rk);
+            return _db.invoke_on(cpu, &database::get_direct, std::move(rk)).then([&state] (auto&& u) {
+                //hll::merge(state.merged_sources, *u);
+                return make_ready_future<>();
+            });
+        }).then([this, &state, &out] {
+            redis_key rk { std::ref(state.dest) };
+            auto cpu = this->get_cpu(rk);
+            return _db.invoke_on(cpu, &database::pfcount_multi, std::move(rk), state.merged_sources, HLL_BYTES_SIZE).then([&out] (auto&& m) {
+                return out.write(std::move(*m));
+            });
+        });
+    });
 }
 } /* namespace redis */
