@@ -20,7 +20,7 @@
 */
 #include "hll.hh"
 #include "common.hh"
-#include "util/log.hh"
+
 namespace redis {
 
 static constexpr const int HLL_BUCKET_COUNT_MAX = (1 << HLL_BITS) - 1;
@@ -37,59 +37,17 @@ static constexpr const double PE[64] = {
     1.0 / (1ULL << 49), 1.0 / (1ULL << 50), 1.0 / (1ULL << 51), 1.0 / (1ULL << 52), 1.0 / (1ULL << 53), 1.0 / (1ULL << 54), 1.0 / (1ULL << 55), 1.0 / (1ULL << 56), 
     1.0 / (1ULL << 57), 1.0 / (1ULL << 58), 1.0 / (1ULL << 59), 1.0 / (1ULL << 60), 1.0 / (1ULL << 61), 1.0 / (1ULL << 62), 1.0 / (1ULL << 63) 
 };
+
 static inline void hll_invalidate_cache(uint8_t* cache, size_t size)
 {
     if (size > 7) {
         cache[7] |= (1 << 7);
     }
 }
+
 static inline bool hll_is_valid_cache(const uint8_t* cache, size_t size)
 {
     return size > 7 && (cache[7] & (1 << 7)) == 0;
-}
-
-static uint64_t murmur_hash_64a (const uint8_t* key, size_t len, unsigned int seed) {
-    const uint64_t m = 0xc6a4a7935bd1e995;
-    const int r = 47;
-    uint64_t h = seed ^ (len * m);
-    const uint8_t *data = key;
-    const uint8_t *end = data + (len - (len & 7));
-
-    while(data != end) {
-        uint64_t k;
-
-        k = (uint64_t) data[0];
-        k |= (uint64_t) data[1] << 8;
-        k |= (uint64_t) data[2] << 16;
-        k |= (uint64_t) data[3] << 24;
-        k |= (uint64_t) data[4] << 32;
-        k |= (uint64_t) data[5] << 40;
-        k |= (uint64_t) data[6] << 48;
-        k |= (uint64_t) data[7] << 56;
-
-        k *= m;
-        k ^= k >> r;
-        k *= m;
-        h ^= k;
-        h *= m;
-        data += 8;
-    }
-
-    switch(len & 7) {
-    case 7: h ^= (uint64_t)data[6] << 48;
-    case 6: h ^= (uint64_t)data[5] << 40;
-    case 5: h ^= (uint64_t)data[4] << 32;
-    case 4: h ^= (uint64_t)data[3] << 24;
-    case 3: h ^= (uint64_t)data[2] << 16;
-    case 2: h ^= (uint64_t)data[1] << 8;
-    case 1: h ^= (uint64_t)data[0];
-            h *= m;
-    };
-
-    h ^= h >> r;
-    h *= m;
-    h ^= h >> r;
-    return h;
 }
 
 static inline void hll_get_counter_on_bucket(uint8_t& counter, const uint8_t* p, long index)
@@ -120,8 +78,8 @@ bool hll_add(managed_bytes& data, const sstring& element)
 {
     uint8_t oldcount = 0, count = 1;
     uint8_t* p = (uint8_t*)(data.data()) + HLL_CARD_CACHE_SIZE;
-    size_t size = data.size();
-    auto hash = murmur_hash_64a(p, size, 0xadc83b19ULL);
+    auto hash = (uint64_t)(std::hash<sstring>()(element));
+    //auto hash = murmur_hash_64a((uint8_t*)element.data(), element.size(), 0xadc83b19ULL);
     auto index = hash & HLL_BUCKET_COUNT_MASK;
     hash |= ((uint64_t) 1 << 63);
     uint64_t bit = HLL_BUCKET_COUNT;
@@ -140,12 +98,13 @@ bool hll_add(managed_bytes& data, const sstring& element)
 
 size_t hll::append(managed_bytes& data, const std::vector<sstring>& elements)
 {
+    size_t result = 0;
     for (size_t i = 0; i < elements.size(); ++i) {
-        if (hll_add(data, elements[i]) == false) {
-            return 0;
+        if (hll_add(data, elements[i])) {
+            ++result;
         }
     }
-    return 1;
+    return result > 0;
 }
 
 
@@ -229,7 +188,7 @@ size_t hll::count(managed_bytes& data)
     S = (1/ S )* ALPHA_BUCKET_COUNT_POWER_2;
 
     if (S < HLL_BUCKET_COUNT * 2.5 && ez != 0) {
-        S = HLL_BUCKET_COUNT * std::log ( HLL_BUCKET_COUNT / ez);
+        S = HLL_BUCKET_COUNT * std::log ( double(HLL_BUCKET_COUNT) / double(ez));
     } else if (HLL_BUCKET_COUNT == 16384 && S < 72000) {
         double bias = 5.9119 * 1.0e-18 * (S * S * S * S)
                       -1.4253 * 1.0e-12 * (S * S * S)+

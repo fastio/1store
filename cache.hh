@@ -36,6 +36,10 @@
 #include "core/sstring.hh"
 #include "core/timer-set.hh"
 #include "hll.hh"
+#include "util/log.hh"
+using logger =  seastar::logger;
+//static logger db_log ("db");
+
 namespace redis {
 namespace bi = boost::intrusive;
 using clock_type = lowres_clock;

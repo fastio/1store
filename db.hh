@@ -145,7 +145,7 @@ public:
     future<scattered_message_ptr> pfcount(const redis_key& rk);
     future<scattered_message_ptr> pfcount_multi(const redis_key& rk, uint8_t* merged_sources, size_t size);
     future<scattered_message_ptr> pfmerge(const redis_key& rk, uint8_t* merged_sources, size_t size);
-    future<foreign_ptr<lw_shared_ptr<sstring>>> get_direct(const redis_key& rk);
+    future<foreign_ptr<lw_shared_ptr<sstring>>> get_hll_direct(const redis_key& rk);
 
     future<> stop();
 private:
@@ -176,7 +176,7 @@ private:
         });
     }
 private:
-    static const int DEFAULT_DB_COUNT = 32;
+    static const int DEFAULT_DB_COUNT = 1;
     cache _cache_stores[DEFAULT_DB_COUNT];
     size_t current_store_index = 0;
     inline cache& current_store() { return _cache_stores[current_store_index]; }

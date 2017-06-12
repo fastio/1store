@@ -1985,7 +1985,7 @@ future<> redis_service::pfadd(args_collection& args, output_stream<char>& out)
     redis_key rk {std::ref(key)};
     auto& elements = args._tmp_keys;
     auto cpu = get_cpu(rk);
-    return _db.invoke_on(cpu, &database::pfadd, std::move(rk), std::ref(elements)).then([&out] (auto&& m) {
+    return _db.invoke_on(cpu, &database::pfadd, rk, std::ref(elements)).then([&out] (auto&& m) {
         return out.write(std::move(*m));
     });
 }
@@ -2016,8 +2016,10 @@ future<> redis_service::pfcount(args_collection& args, output_stream<char>& out)
             return parallel_for_each(std::begin(state.keys), std::end(state.keys), [this, &state] (auto& key) {
                 redis_key rk { std::ref(key) };
                 auto cpu = this->get_cpu(rk);
-                return _db.invoke_on(cpu, &database::get_direct, std::move(rk)).then([&state] (auto&& u) {
-                    //hll::merge(*u, state.merged_sources, HLL_BYTES_SIZE);
+                return _db.invoke_on(cpu, &database::get_hll_direct, std::move(rk)).then([&state] (auto&& u) {
+                    if (u) {
+                        hll::merge(state.merged_sources, HLL_BYTES_SIZE, *u);
+                    }
                     return make_ready_future<>();
                 });
             }).then([this, &state, &out] {
@@ -2048,8 +2050,10 @@ future<> redis_service::pfmerge(args_collection& args, output_stream<char>& out)
         return parallel_for_each(std::begin(state.keys), std::end(state.keys), [this, &state] (auto& key) {
             redis_key rk { std::ref(key) };
             auto cpu = this->get_cpu(rk);
-            return _db.invoke_on(cpu, &database::get_direct, std::move(rk)).then([&state] (auto&& u) {
-                //hll::merge(state.merged_sources, *u);
+            return _db.invoke_on(cpu, &database::get_hll_direct, std::move(rk)).then([&state] (auto&& u) {
+                if (u) {
+                    hll::merge(state.merged_sources, HLL_BYTES_SIZE, *u);
+                }
                 return make_ready_future<>();
             });
         }).then([this, &state, &out] {

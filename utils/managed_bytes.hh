@@ -29,6 +29,7 @@
 #include <seastar/core/unaligned.hh>
 #include <unordered_map>
 #include <type_traits>
+
 struct blob_storage {
     using size_type = uint32_t;
     using char_type = bytes_view::value_type;
@@ -48,14 +49,6 @@ struct blob_storage {
         *unaligned_cast<blob_storage**>(backref) = this;
     }
 
-    blob_storage(size_type size, size_type frag_size) noexcept
-        : backref(nullptr)
-        , size(size)
-        , frag_size(frag_size)
-        , next(nullptr)
-    {
-    }
-
     blob_storage(blob_storage&& o) noexcept
         : backref(o.backref)
         , size(o.size)
@@ -69,12 +62,6 @@ struct blob_storage {
         }
         memcpy(data, o.data, frag_size);
     }
-    void move_to(blob_storage** bf)
-    {
-        backref = bf;
-        *unaligned_cast<blob_storage**>(backref) = this;
-    }
-
 } __attribute__((packed));
 
 // A managed version of "bytes" (can be used with LSA).
@@ -196,63 +183,6 @@ public:
         }
     }
 
-    void extend(size_type new_size, const blob_storage::char_type& v) {
-        assert(new_size > size());
-        if (new_size < max_inline_size) {
-            std::fill(_u.small.data + size(), _u.small.data + new_size, v);
-            _u.small.size = new_size;
-        }
-        else {
-            size_t needed_room_size = size_t(new_size);
-            blob_storage* last = nullptr;
-            auto& alctr = current_allocator();
-            auto maxseg = max_seg(alctr);
-            if (!external()) {
-                auto now = std::min(size_t(needed_room_size), maxseg);
-                void* p = alctr.alloc(&standard_migrator<blob_storage>::object, sizeof(blob_storage) + now, alignof(blob_storage));
-                last = new (p) blob_storage(needed_room_size, now);
-                memcpy(last->data, _u.small.data, _u.small.size);
-                last->move_to(&_u.ptr);
-                std::fill(last->data + _u.small.size, last->data + now, v);
-                needed_room_size -= now;
-                _u.small.size = -1;
-            }
-            else {
-                last = _u.ptr;
-                last->size = needed_room_size;
-                while (last->next) {
-                    last = last->next;
-                }
-            }
-
-            try {
-                while (needed_room_size) {
-                    auto now = std::min(size_t(needed_room_size), maxseg);
-                    void* p = alctr.alloc(&standard_migrator<blob_storage>::object, sizeof(blob_storage) + now, alignof(blob_storage));
-                    last = new (p) blob_storage(&last->next, 0, now);
-                    std::fill(last->data, last->data + now, v);
-                    needed_room_size -= now;
-                }
-            } catch (...) {
-                free_chain(last);
-                throw;
-            }
-        }
-    }
-
-    managed_bytes(size_type size, const blob_storage::char_type& c) : managed_bytes(initialized_later(), size) {
-        if (!external()) {
-            std::fill_n(_u.small.data, _u.small.size, c);
-            return;
-        }
-        auto b = _u.ptr;
-        while (b) {
-            std::fill_n(b->data, b->frag_size, c);
-            b = b->next;
-        }
-        assert(!b);
-    }
-
     managed_bytes(bytes_view v) : managed_bytes(initialized_later(), v.size()) {
         if (!external()) {
             std::copy(v.begin(), v.end(), _u.small.data);
@@ -271,6 +201,62 @@ public:
     }
 
     managed_bytes(std::initializer_list<bytes::value_type> b) : managed_bytes(b.begin(), b.size()) {}
+
+    managed_bytes(size_type size, const blob_storage::char_type& c) : managed_bytes(initialized_later(), size) {
+        if (!external()) {
+            std::fill_n(_u.small.data, _u.small.size, c);
+            return;
+        }
+        auto b = _u.ptr;
+        while (b) {
+            std::fill_n(b->data, b->frag_size, c);
+            b = b->next;
+        }
+        assert(!b);
+    }
+
+    void extend(size_type new_size, const blob_storage::char_type& v)
+    {
+        assert(new_size > size());
+        if (new_size < max_inline_size) {
+            std::fill(_u.small.data + size(), _u.small.data + new_size, v);
+            _u.small.size = new_size;
+        }
+        else {
+            size_t needed_room_size = size_t(new_size);
+            blob_storage* last = nullptr;
+            auto& alctr = current_allocator();
+            auto maxseg = max_seg(alctr);
+            if (!external()) {
+                auto now = std::min(size_t(needed_room_size), maxseg);
+                void* p = alctr.alloc(&standard_migrator<blob_storage>::object, sizeof(blob_storage) + now, alignof(blob_storage));
+                last = new (p) blob_storage(&_u.ptr, needed_room_size, now);
+                memcpy(last->data, _u.small.data, _u.small.size);
+                std::fill(last->data + _u.small.size, last->data + now, v);
+                needed_room_size -= now;
+                _u.small.size = -1;
+            }
+            else {
+                last = _u.ptr;
+                last->size = needed_room_size;
+                while (last->next) {
+                    last = last->next;
+                }
+            }
+            try {
+                while (needed_room_size) {
+                    auto now = std::min(size_t(needed_room_size), maxseg);
+                    void* p = alctr.alloc(&standard_migrator<blob_storage>::object, sizeof(blob_storage) + now, alignof(blob_storage));
+                    last = new (p) blob_storage(&last->next, 0, now);
+                    std::fill(last->data, last->data + now, v);
+                    needed_room_size -= now;
+                }
+            } catch (...) {
+                free_chain(last);
+                throw;
+            }
+        }
+    }
 
     ~managed_bytes() noexcept {
         if (external()) {
@@ -388,15 +374,6 @@ public:
     operator bytes_view() const {
         return { data(), size() };
     }
-
-    bool is_fragmented() const {
-        return external() && _u.ptr->next;
-    }
-
-    operator bytes_mutable_view() {
-        assert(!is_fragmented());
-        return { data(), size() };
-    };
 
     bytes_view::value_type& operator[](size_type index) {
         return value_at_index(index);
