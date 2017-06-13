@@ -82,37 +82,6 @@ struct args_collection {
 using clock_type = lowres_clock;
 static constexpr clock_type::time_point never_expire_timepoint = clock_type::time_point(clock_type::duration::min());
 
-// The defination of `expiration was copied from apps/memcached
-struct expiration {
-    using time_point = clock_type::time_point;
-    using duration   = time_point::duration;
-    time_point _time = never_expire_timepoint;
-
-    expiration() {}
-
-    expiration(long s) {
-        using namespace std::chrono;
-        static_assert(sizeof(clock_type::duration::rep) >= 8, "clock_type::duration::rep must be at least 8 bytes wide");
-
-        if (s == 0U) {
-            return; // means never expire.
-        } else {
-            _time = clock_type::now() + milliseconds(s);
-        }
-    }
-
-    inline const bool ever_expires() const {
-        return _time != never_expire_timepoint;
-    }
-
-    inline const time_point to_time_point() const {
-        return _time;
-    }
-
-    inline void set_never_expired() {
-        _time = never_expire_timepoint;
-    }
-};
 
 class db;
 struct redis_key {

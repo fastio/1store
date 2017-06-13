@@ -108,12 +108,12 @@ size_t hll::append(managed_bytes& data, const std::vector<sstring>& elements)
 }
 
 
-static double hll_bucket_counter_sum(uint8_t* data, size_t size, int& ez)
+static double hll_bucket_counter_sum(const uint8_t* data, size_t size, int& ez)
 {
     ez = 0;
     double E = 0;
 
-    uint8_t *r = data;
+    const uint8_t *r = data;
     unsigned long r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15;
     for (int j = 0; j < 1024; j++) {
         r0 = r[0] & 63; if (r0 == 0) ez++;
@@ -140,6 +140,7 @@ static double hll_bucket_counter_sum(uint8_t* data, size_t size, int& ez)
     }
     return E;
 }
+
 static size_t hll_read_card_from_cache(const managed_bytes& data)
 {
     uint64_t card = 0;
@@ -168,22 +169,11 @@ static void hll_write_card_to_cache(uint64_t card, managed_bytes& data)
     p[7] = (card >> 56) & 0xff;
 }
 
-size_t hll::count(managed_bytes& data, const uint8_t* merged_sources, size_t size)
-{
-    hll::merge(data, merged_sources, size);
-    return hll::count(data);
-}
 
-size_t hll::count(managed_bytes& data)
+static uint64_t compute_card(const uint8_t* data, size_t size)
 {
-    uint64_t card = 0;
-    // read the card from cache.
-    if (hll_is_valid_cache((uint8_t*)(data.data()), HLL_CARD_CACHE_SIZE)) {
-        return hll_read_card_from_cache(data);
-    }
-    // compute the value of card.
     int ez = 0;
-    auto S = hll_bucket_counter_sum((uint8_t*)(data.data()) + HLL_CARD_CACHE_SIZE, data.size() - HLL_CARD_CACHE_SIZE, ez);
+    auto S = hll_bucket_counter_sum(data, size, ez);
 
     S = (1/ S )* ALPHA_BUCKET_COUNT_POWER_2;
 
@@ -197,10 +187,27 @@ size_t hll::count(managed_bytes& data)
                       83.3216;
         S -= S * (bias / 100);
     }
-    // write the value of card to cache.
+    return S;
+}
+
+size_t hll::count(managed_bytes& data)
+{
+    uint64_t card = 0;
+    // read the card from cache.
+    if (hll_is_valid_cache((uint8_t*)(data.data()), HLL_CARD_CACHE_SIZE)) {
+        return hll_read_card_from_cache(data);
+    }
+    // compute the value of card.
+    auto S = compute_card((uint8_t*)(data.data()) + HLL_CARD_CACHE_SIZE, data.size() - HLL_CARD_CACHE_SIZE);
     card = (uint64_t) S;
     hll_write_card_to_cache(card, data);
     return (size_t) card;
+}
+
+size_t hll::count(const uint8_t* merged_sources, size_t size)
+{
+    auto S = compute_card(merged_sources + HLL_CARD_CACHE_SIZE, size - HLL_CARD_CACHE_SIZE);
+    return (size_t) S;
 }
 
 size_t hll::merge(managed_bytes& data, const uint8_t* merged_sources, size_t size)
@@ -209,7 +216,7 @@ size_t hll::merge(managed_bytes& data, const uint8_t* merged_sources, size_t siz
         return 0;
     }
     uint8_t* p = (uint8_t*)(data.data()) + HLL_CARD_CACHE_SIZE;
-    const uint8_t* s = merged_sources;
+    const uint8_t* s = merged_sources + HLL_CARD_CACHE_SIZE;
     uint8_t counter = 0, counter_s = 0;
     for (size_t i = 0; i < HLL_BUCKET_COUNT; ++i) {
         hll_get_counter_on_bucket(counter_s, s, i);
@@ -218,6 +225,7 @@ size_t hll::merge(managed_bytes& data, const uint8_t* merged_sources, size_t siz
             hll_set_counter_on_bucket(p, i, counter_s);
         }
     }
+    hll_invalidate_cache((uint8_t*)data.data(), HLL_CARD_CACHE_SIZE);
     return 1;
 }
 
@@ -227,7 +235,7 @@ size_t hll::merge(uint8_t* data, size_t size, const sstring& merged_sources)
         return 0;
     }
     uint8_t* p = data + HLL_CARD_CACHE_SIZE;
-    const uint8_t* s = (uint8_t*)(merged_sources.data());
+    const uint8_t* s = (uint8_t*)(merged_sources.data()) + HLL_CARD_CACHE_SIZE;
     uint8_t counter = 0, counter_s = 0;
     for (size_t i = 0; i < HLL_BUCKET_COUNT; ++i) {
         hll_get_counter_on_bucket(counter_s, s, i);

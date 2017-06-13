@@ -44,6 +44,38 @@ namespace redis {
 namespace bi = boost::intrusive;
 using clock_type = lowres_clock;
 class cache;
+
+struct expiration {
+    using time_point = clock_type::time_point;
+    using duration   = time_point::duration;
+    time_point _time = never_expire_timepoint;
+
+    expiration() {}
+
+    expiration(long s) {
+        using namespace std::chrono;
+        static_assert(sizeof(clock_type::duration::rep) >= 8, "clock_type::duration::rep must be at least 8 bytes wide");
+
+        if (s == 0U) {
+            return; // means never expire.
+        } else {
+            _time = clock_type::now() + milliseconds(s);
+        }
+    }
+
+    inline const bool ever_expires() const {
+        return _time != never_expire_timepoint;
+    }
+
+    inline const time_point to_time_point() const {
+        return _time;
+    }
+
+    inline void set_never_expired() {
+        _time = never_expire_timepoint;
+    }
+};
+
 // cache_entry should be allocated by LSA.
 class cache_entry
 {
@@ -225,22 +257,32 @@ public:
     {
         return _expiry.to_time_point();
     }
+
+    inline void set_expiry(const expiration& expiry)
+    {
+        _expiry = expiry;
+    }
+
     inline bool cancel() const
     {
         return false;
     }
+
     inline size_t key_hash() const
     {
         return _key_hash;
     }
+
     inline size_t key_size() const
     {
         return _key->size();
     }
+
     inline const bytes_view key() const
     {
         return { _key->data(), _key->size() };
     }
+
     inline const char* key_data() const
     {
         return reinterpret_cast<const char*>(_key->data());
@@ -462,6 +504,23 @@ public:
     inline bool empty() const
     {
         return _store.empty();
+    }
+
+    bool expire(const redis_key& rk, long expired)
+    {
+        bool result = false;
+        static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
+        auto it = _store.find(rk, hash_fn, cache_entry::compare());
+        if (it != _store.end()) {
+            auto expiry = expiration(expired);
+            it->set_expiry(expiry);
+            auto& ref = *it;
+            if (_alive.insert(ref)) {
+                _timer.rearm(it->get_timeout());
+                result = true;
+            }
+        }
+        return result;
     }
 
     void erase_expired_entries()

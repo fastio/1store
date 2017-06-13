@@ -2005,14 +2005,13 @@ future<> redis_service::pfcount(args_collection& args, output_stream<char>& out)
     }
     else {
         struct merge_state {
-            sstring dest;
             std::vector<sstring>& keys;
             uint8_t merged_sources[HLL_BYTES_SIZE];
         };
-        for (size_t i = 1; i < args._command_args_count; ++i) {
+        for (size_t i = 0; i < args._command_args_count; ++i) {
             args._tmp_keys.emplace_back(args._command_args[i]);
         }
-        return do_with(merge_state{std::move(args._command_args[0]), std::ref(args._tmp_keys), { 0 }}, [this, &out] (auto& state) {
+        return do_with(merge_state{std::ref(args._tmp_keys), { 0 }}, [this, &out] (auto& state) {
             return parallel_for_each(std::begin(state.keys), std::end(state.keys), [this, &state] (auto& key) {
                 redis_key rk { std::ref(key) };
                 auto cpu = this->get_cpu(rk);
@@ -2023,11 +2022,8 @@ future<> redis_service::pfcount(args_collection& args, output_stream<char>& out)
                     return make_ready_future<>();
                 });
             }).then([this, &state, &out] {
-                redis_key rk { std::ref(state.dest) };
-                auto cpu = this->get_cpu(rk);
-                return _db.invoke_on(cpu, &database::pfcount_multi, std::move(rk), state.merged_sources, HLL_BYTES_SIZE).then([&out] (auto&& m) {
-                    return out.write(std::move(*m));
-                });
+                auto card = hll::count(state.merged_sources, HLL_BYTES_SIZE);
+                return reply_builder::build_local(out, card);
             });
         });
     }
@@ -2059,7 +2055,7 @@ future<> redis_service::pfmerge(args_collection& args, output_stream<char>& out)
         }).then([this, &state, &out] {
             redis_key rk { std::ref(state.dest) };
             auto cpu = this->get_cpu(rk);
-            return _db.invoke_on(cpu, &database::pfcount_multi, std::move(rk), state.merged_sources, HLL_BYTES_SIZE).then([&out] (auto&& m) {
+            return _db.invoke_on(cpu, &database::pfmerge, std::move(rk), state.merged_sources, HLL_BYTES_SIZE).then([&out] (auto&& m) {
                 return out.write(std::move(*m));
             });
         });

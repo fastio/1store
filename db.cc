@@ -64,8 +64,6 @@ private:
 database::database()
 {
     using namespace std::chrono;
-    //_timer.set_callback([this] { expired_items(); });
-    //_store = &_data_storages[0];
     setup_metrics();
 }
 
@@ -238,7 +236,8 @@ future<scattered_message_ptr> database::type(const redis_key& rk)
 
 future<scattered_message_ptr> database::expire(const redis_key& rk, long expired)
 {
-    return reply_builder::build(msg_nil);
+    auto result = current_store().expire(rk, expired);
+    return reply_builder::build(result ? msg_one : msg_zero);
 }
 
 future<scattered_message_ptr> database::persist(const redis_key& rk)
@@ -1554,21 +1553,6 @@ future<scattered_message_ptr> database::pfcount(const redis_key& rk)
     });
 }
 
-future<scattered_message_ptr> database::pfcount_multi(const redis_key& rk, uint8_t* merged_sources, size_t size)
-{
-    return current_store().with_entry_run(rk, [merged_sources, size] (cache_entry* e) {
-        if (e == nullptr) {
-            return reply_builder::build(msg_zero);
-        }
-        if (e->type_of_hll() == false) {
-            return reply_builder::build(msg_type_err);
-        }
-        auto& mbytes = e->value_bytes();
-        auto result = hll::count(mbytes, merged_sources, size);
-        return reply_builder::build(result);
-    });
-}
-
 future<scattered_message_ptr> database::pfmerge(const redis_key& rk, uint8_t* merged_sources, size_t size)
 {
     return with_allocator(allocator(), [this, &rk, merged_sources, size] {
@@ -1582,8 +1566,8 @@ future<scattered_message_ptr> database::pfmerge(const redis_key& rk, uint8_t* me
                 return reply_builder::build(msg_type_err);
             }
             auto& mbytes = e->value_bytes();
-            auto result = hll::merge(mbytes, merged_sources, size);
-            return reply_builder::build(result);
+            hll::merge(mbytes, merged_sources, size);
+            return reply_builder::build(msg_ok);
         });
     });
 }
@@ -1593,22 +1577,4 @@ future<> database::stop()
 {
     return make_ready_future<>();
 }
-
-void database::expired_items()
-{
-    /*
-    using namespace std::chrono;
-    auto exp = _alive.expire(clock_type::now());
-    while (!exp.empty()) {
-        auto it = *exp.begin();
-        exp.pop_front();
-        // release expired item
-        if (it && it->ever_expires()) {
-            _store->remove(it);
-        }
-    }
-    _timer.arm(_alive.get_next_timeout());
-    */
-}
-
 }

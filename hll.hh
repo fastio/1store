@@ -26,7 +26,7 @@ class hll {
 public:
     static size_t append(managed_bytes& data, const std::vector<sstring>& elements);
     static size_t count(managed_bytes& data);
-    static size_t count(managed_bytes& data, const uint8_t* merged_sources, size_t size);
+    static size_t count(const uint8_t* merged_sources, size_t size);
     static size_t merge(managed_bytes& data, const uint8_t* merged_sources, size_t size); 
     static size_t merge(uint8_t* dest, size_t size, const sstring& merged_sources); 
 };
