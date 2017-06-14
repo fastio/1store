@@ -109,6 +109,7 @@ static const sstring msg_err = {"-ERR\r\n"};
 static const sstring msg_zero = {":0\r\n"};
 static const sstring msg_one = {":1\r\n"};
 static const sstring msg_neg_one = {":-1\r\n"};
+static const sstring msg_neg_two = {":-2\r\n"};
 static const sstring msg_null_blik = {"$-1\r\n"};
 static const sstring msg_null_multi_bulk = {"*-1\r\n"};
 static const sstring msg_empty_multi_bulk = {"*0\r\n"};

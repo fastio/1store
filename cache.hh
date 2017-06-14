@@ -253,14 +253,30 @@ public:
         }
     };
 public:
-    inline clock_type::time_point get_timeout()
+    inline const clock_type::time_point get_timeout() const
     {
         return _expiry.to_time_point();
+    }
+
+    inline const bool ever_expires() const
+    {
+        return _expiry.ever_expires();
+    }
+
+    inline void set_never_expired()
+    {
+        return _expiry.set_never_expired();
     }
 
     inline void set_expiry(const expiration& expiry)
     {
         _expiry = expiry;
+    }
+
+    inline const size_t time_of_live() const
+    {
+        auto dur = get_timeout() - clock_type::now();
+        return static_cast<size_t>(std::chrono::duration_cast<std::chrono::milliseconds>(dur).count());
     }
 
     inline bool cancel() const
@@ -435,7 +451,7 @@ public:
 
     inline bool replace(cache_entry* entry)
     {
-        bool res = true; 
+        bool res = true;
         if (entry) {
             static auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
             auto it = _store.find(*entry, hash_fn, cache_entry::compare());
@@ -446,6 +462,50 @@ public:
         }
         insert(entry);
         return res;
+    }
+
+    inline bool replace(cache_entry* entry, long expired)
+    {
+        bool res = true;
+        if (entry) {
+            static auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
+            auto it = _store.find(*entry, hash_fn, cache_entry::compare());
+            if (it != _store.end()) {
+                _store.erase_and_dispose(it, current_deleter<cache_entry>());
+                res = false;
+            }
+        }
+        insert(entry);
+        return res;
+    }
+
+    // nx = true: Only insert the entry if it does not already exist.
+    // nx = false: Only insert the entry if it already exist.
+    // return value: true if the entry was inserted, otherwise false.
+    inline bool insert_if(cache_entry* entry, long expired, bool nx)
+    {
+        if (!entry) {
+            return false;
+        }
+        static auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
+        auto it = _store.find(*entry, hash_fn, cache_entry::compare());
+        if (!nx && it != _store.end()) {
+            _store.erase_and_dispose(it, current_deleter<cache_entry>());
+        }
+        bool should_insert = (!nx && it != _store.end()) || (nx && it == _store.end());
+        if (should_insert) {
+            if (expired > 0) {
+                auto expiry = expiration(expired);
+                entry->set_expiry(expiry);
+                if (_alive.insert(*entry)) {
+                    _timer.rearm(entry->get_timeout());
+                }
+            }
+            _store.insert(*entry);
+            maybe_rehash();
+            return true;
+        }
+        return false;
     }
 
     inline void insert(cache_entry* entry)

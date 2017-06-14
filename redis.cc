@@ -1088,7 +1088,13 @@ future<> redis_service::expire(args_collection& args, output_stream<char>& out)
         return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
-    long expir = std::atol(args._command_args[1].c_str());
+    long expir = 0;
+    try {
+        expir = std::atol(args._command_args[1].c_str());
+        expir *= 1000;
+    } catch (const std::invalid_argument&) {
+        return out.write(msg_syntax_err);
+    }
     redis_key rk{std::ref(key)};
     auto cpu = get_cpu(rk);
     return _db.invoke_on(cpu, &database::expire, std::move(rk), expir).then([&out] (auto&& m) {
@@ -1102,7 +1108,12 @@ future<> redis_service::pexpire(args_collection& args, output_stream<char>& out)
         return out.write(msg_syntax_err);
     }
     sstring& key = args._command_args[0];
-    long expir = std::atol(args._command_args[1].c_str());
+    long expir = 0;
+    try {
+        expir = std::atol(args._command_args[1].c_str());
+    } catch (const std::invalid_argument&) {
+        return out.write(msg_syntax_err);
+    }
     redis_key rk{std::ref(key)};
     auto cpu = get_cpu(rk);
     return _db.invoke_on(cpu, &database::expire, std::move(rk), expir).then([&out] (auto&& m) {

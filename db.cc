@@ -104,15 +104,25 @@ void database::setup_metrics()
      });
 }
 
-bool database::set_direct(const redis_key& rk, sstring& val, long expire, uint32_t flag)
+bool database::set_direct(const redis_key& rk, sstring& val, long expired, uint32_t flag)
 {
-    return with_allocator(allocator(), [this, &rk, &val] {
+    return with_allocator(allocator(), [this, &rk, &val, expired, flag] {
+        ++_stats._set;
         auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
-        if (current_store().replace(entry)) {
+        if (flag == 0) {
+            current_store().replace(entry);
+            ++_stats._total_entries;
+            return true;
+        }
+        bool result = true;
+        if (current_store().insert_if(entry, expired, flag & FLAG_SET_NX)) {
             ++_stats._total_entries;
         }
-        ++_stats._set;
-        return true;
+        else {
+            result = false;
+            current_allocator().destroy<cache_entry>(entry);
+        }
+        return result;
     });
 }
 
@@ -1008,12 +1018,28 @@ future<scattered_message_ptr> database::srems(const redis_key& rk, std::vector<s
 
 future<scattered_message_ptr> database::pttl(const redis_key& rk)
 {
-    return reply_builder::build(msg_nil);
+    return current_store().with_entry_run(rk, [this, &rk] (const cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_neg_two);
+        }
+        if (!e->ever_expires()) {
+            return reply_builder::build(msg_neg_one);
+        }
+        return reply_builder::build(e->time_of_live());
+    });
 }
 
 future<scattered_message_ptr> database::ttl(const redis_key& rk)
 {
-    return reply_builder::build(msg_nil);
+    return current_store().with_entry_run(rk, [this, &rk] (const cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_neg_two);
+        }
+        if (!e->ever_expires()) {
+            return reply_builder::build(msg_neg_one);
+        }
+        return reply_builder::build(e->time_of_live() / 1000);
+    });
 }
 
 future<scattered_message_ptr> database::zadds(const redis_key& rk, std::unordered_map<sstring, double>& members, int flags)
