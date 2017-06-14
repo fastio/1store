@@ -391,6 +391,8 @@ class cache {
     timer<clock_type> _timer;
     clock_type::duration _wc_to_clock_type_delta;
     allocation_strategy* alloc;
+    using expired_entry_releaser_type = std::function<void(cache_entry& e)>;
+    expired_entry_releaser_type _expired_entry_releaser;
 public:
     cache ()
         : _buckets(new cache_type::bucket_type[initial_bucket_count])
@@ -402,9 +404,10 @@ public:
     {
     }
 
-    void set_allocation_strategy(allocation_strategy* pa)
+    void set_expired_entry_releaser(expired_entry_releaser_type&& releaser)
     {
-        alloc = pa;
+        _alive.clear();
+        _expired_entry_releaser = std::move(releaser);
     }
 
     void flush_all()
@@ -421,6 +424,13 @@ public:
             return true;
         }
         return false;
+    }
+
+    inline bool erase(cache_entry& e)
+    {
+        auto it = _store.iterator_to(e);
+        _store.erase_and_dispose(it, current_deleter<cache_entry>());
+        return true;
     }
 
     inline bool replace(cache_entry* entry)
@@ -525,15 +535,14 @@ public:
 
     void erase_expired_entries()
     {
-        with_allocator(*alloc, [this] {
-            auto expired_entries = _alive.expire(clock_type::now());
-            while (!expired_entries.empty()) {
-                auto entry = &*expired_entries.begin();
-                expired_entries.pop_front();
-                auto it = _store.iterator_to(*entry);
-                _store.erase_and_dispose(it, current_deleter<cache_entry>());
-            }
-        });
+        assert(_expired_entry_releaser);
+
+        auto expired_entries = _alive.expire(clock_type::now());
+        while (!expired_entries.empty()) {
+            auto entry = &*expired_entries.begin();
+            expired_entries.pop_front();
+            _expired_entry_releaser(*entry);
+        }
         _timer.arm(_alive.get_next_timeout());
     }
 };

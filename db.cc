@@ -64,6 +64,15 @@ private:
 database::database()
 {
     using namespace std::chrono;
+
+    for (size_t i = 0; i < DEFAULT_DB_COUNT; ++i) {
+        auto& store = _cache_stores[i];
+        _cache_stores[i].set_expired_entry_releaser([this, &store] (cache_entry& e) {
+             with_allocator(allocator(), [&store, &e] {
+                 store.erase(e);
+             });
+        });
+    }
     setup_metrics();
 }
 
