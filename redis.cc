@@ -192,19 +192,6 @@ future<> redis_service::mset(args_collection& args, output_stream<char>& out)
    });
 }
 
-    /*
-future<item_ptr> redis_service::get_impl(sstring& key)
-{
-    redis_key rk {std::ref(key)};
-    auto cpu = get_cpu(rk);
-    if (engine().cpu_id() == cpu) {
-        return make_ready_future<item_ptr>(_db.local().get(std::move(rk)));
-    }
-    return _db.invoke_on(cpu, &database::get, std::move(rk));
-    return make_ready_future<item_ptr>();
-}
-    */
-
 future<> redis_service::get(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1) {
@@ -220,29 +207,29 @@ future<> redis_service::get(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::mget(args_collection& args, output_stream<char>& out)
 {
-    /*
     if (args._command_args_count < 1) {
         return out.write(msg_syntax_err);
     }
+    using return_type = foreign_ptr<lw_shared_ptr<sstring>>;
     struct mget_state {
         std::vector<sstring> keys;
-        message msg;
+        std::vector<return_type> values;
     };
-    std::vector<sstring> keys;
-    for (size_t i = 0; i < args._command_args.size(); ++i) {
-        keys.emplace_back(std::move(args._command_args[i]));
+    for (size_t i = 0; i < args._command_args_count; ++i) {
+        args._tmp_keys.emplace_back(args._command_args[i]);
     }
-    return do_with(mget_state{std::move(keys), {}}, [this] (auto& state) {
+    return do_with(mget_state{std::move(args._tmp_keys), {}}, [this, &out] (auto& state) {
         return parallel_for_each(std::begin(state.keys), std::end(state.keys), [this, &state] (sstring& key) {
-            return this->get_impl(key).then([&state] (auto&& item) {
-                this_type::append_item<false, true>(state.msg, std::move(item));
+            redis_key rk { std::ref(key) };
+            return _db.invoke_on(this->get_cpu(rk), &database::get_direct, std::move(rk)).then([&state] (auto&& m) {
+                if (m) {
+                   state.values.emplace_back(std::move(m));
+                }
             });
-        }).then([&state] {
-            return make_ready_future<message>(std::move(state.msg));
+        }).then([&state, &out] {
+            return reply_builder::build_local(out, state.values);
         });
-   });
-   */
-    return make_ready_future<>();
+    });
 }
 
 future<> redis_service::strlen(args_collection& args, output_stream<char>& out)

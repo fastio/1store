@@ -80,9 +80,8 @@ database::~database()
 {
     with_allocator(allocator(), [this] {
         for (size_t i = 0; i < DEFAULT_DB_COUNT; ++i) {
-            db_log.info("before release cache [{}] entries {}", i, _cache_stores[i].size());
+            db_log.info("total {} entries were released in cache [{}]", _cache_stores[i].size(), i);
             _cache_stores[i].flush_all();
-            db_log.info("after release cache [{}] entries {}", i, _cache_stores[i].size());
         }
     });
 }
@@ -903,6 +902,19 @@ future<foreign_ptr<lw_shared_ptr<sstring>>> database::get_hll_direct(const redis
     using return_type = foreign_ptr<lw_shared_ptr<sstring>>;
     return current_store().with_entry_run(rk, [] (const cache_entry* e) {
         if (!e || e->type_of_hll() == false) {
+            return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<sstring>>(nullptr));
+        }
+        auto data = e->value_bytes_data();
+        auto size = e->value_bytes_size();
+        return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<sstring>>(make_lw_shared<sstring>(sstring {data, size})));
+    });
+}
+
+future<foreign_ptr<lw_shared_ptr<sstring>>> database::get_direct(const redis_key& rk)
+{
+    using return_type = foreign_ptr<lw_shared_ptr<sstring>>;
+    return current_store().with_entry_run(rk, [] (const cache_entry* e) {
+        if (!e || e->type_of_bytes() == false) {
             return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<sstring>>(nullptr));
         }
         auto data = e->value_bytes_data();

@@ -196,6 +196,27 @@ static future<scattered_message_ptr> build(const std::vector<const dict_entry*>&
     }
 }
 
+static  future<> build_local(output_stream<char>& out, std::vector<foreign_ptr<lw_shared_ptr<sstring>>>& entries)
+{
+    if (!entries.empty()) {
+        auto m = make_lw_shared<scattered_message<char>>();
+        m->append_static(msg_sigle_tag);
+        m->append(std::move(to_sstring(entries.size())));
+        m->append_static(msg_crlf);
+        for (size_t i = 0; i < entries.size(); ++i) {
+            auto& e = entries[i];
+            m->append_static(msg_batch_tag);
+            m->append(to_sstring(e->size()));
+            m->append_static(msg_crlf);
+            m->append(*e);
+            m->append_static(msg_crlf);
+        }
+        return out.write(std::move(*m));
+    }
+    else {
+        return out.write(msg_nil);
+    }
+}
 static  future<> build_local(output_stream<char>& out, const std::vector<sstring>& entries)
 {
     if (!entries.empty()) {

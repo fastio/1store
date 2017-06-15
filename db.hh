@@ -57,6 +57,7 @@ public:
     bool exists_direct(const redis_key& key);
 
     future<scattered_message_ptr> get(const redis_key& key);
+    future<foreign_ptr<lw_shared_ptr<sstring>>> get_direct(const redis_key& rk);
     future<scattered_message_ptr> strlen(const redis_key& key);
 
     future<scattered_message_ptr> expire(const redis_key& rk, long expired);
@@ -174,7 +175,7 @@ private:
         });
     }
 private:
-    static const int DEFAULT_DB_COUNT = 1;
+    static const int DEFAULT_DB_COUNT = 32;
     cache _cache_stores[DEFAULT_DB_COUNT];
     size_t current_store_index = 0;
     inline cache& current_store() { return _cache_stores[current_store_index]; }
