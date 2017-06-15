@@ -74,7 +74,7 @@ static future<scattered_message_ptr> build(double number)
 static future<scattered_message_ptr> build(const sstring& message)
 {
    auto m = make_lw_shared<scattered_message<char>>();
-   m->append_static(message);
+   m->append(message);
    return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
 }
 

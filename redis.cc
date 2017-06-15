@@ -78,13 +78,13 @@ future<> redis_service::set(args_collection& args, output_stream<char>& out)
     sstring& key = args._command_args[0];
     sstring& val = args._command_args[1];
     long expir = 0;
-    uint8_t flag = 0;
+    uint8_t flag = FLAG_SET_NO;
     // [EX seconds] [PS milliseconds] [NX] [XX]
     if (args._command_args_count > 2) {
         for (unsigned int i = 2; i < args._command_args_count; ++i) {
             sstring* v = (i == args._command_args_count - 1) ? nullptr : &(args._command_args[i + 1]);
             sstring& o = args._command_args[i];
-            if (o.size() != 3) {
+            if (o.size() != 2) {
                 return out.write(msg_syntax_err);
             }
             if ((o[0] == 'e' || o[0] == 'E') && (o[1] == 'x' || o[1] == 'X') && o[2] == '\0') {
@@ -92,14 +92,24 @@ future<> redis_service::set(args_collection& args, output_stream<char>& out)
                 if (v == nullptr) {
                     return out.write(msg_syntax_err);
                 }
-                expir = std::atol(v->c_str()) * 1000;
+                try {
+                    expir = std::atol(v->c_str()) * 1000;
+                } catch (const std::invalid_argument&) {
+                    return out.write(msg_syntax_err);
+                }
+                i++;
             }
             if ((o[0] == 'p' || o[0] == 'P') && (o[1] == 'x' || o[1] == 'X') && o[2] == '\0') {
                 flag |= FLAG_SET_PX;
                 if (v == nullptr) {
                     return out.write(msg_syntax_err);
                 }
-                expir = std::atol(v->c_str());
+                try {
+                    expir = std::atol(v->c_str());
+                } catch (const std::invalid_argument&) {
+                    return out.write(msg_syntax_err);
+                }
+                i++;
             }
             if ((o[0] == 'n' || o[0] == 'N') && (o[1] == 'x' || o[1] == 'X') && o[2] == '\0') {
                 flag |= FLAG_SET_NX;

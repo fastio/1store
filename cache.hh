@@ -38,7 +38,7 @@
 #include "hll.hh"
 #include "util/log.hh"
 using logger =  seastar::logger;
-//static logger db_log ("db");
+static logger logc ("cache");
 
 namespace redis {
 namespace bi = boost::intrusive;
@@ -230,6 +230,26 @@ public:
         }
     }
 
+    const sstring type_name() const
+    {
+        switch (_type) {
+            case entry_type::ENTRY_FLOAT:
+            case entry_type::ENTRY_INT64:
+            case entry_type::ENTRY_BYTES:
+                return msg_type_string;
+            case entry_type::ENTRY_HLL:
+                return msg_type_hll;
+            case entry_type::ENTRY_LIST:
+                return msg_type_list;
+            case entry_type::ENTRY_MAP:
+                return msg_type_hash;
+            case entry_type::ENTRY_SET:
+                return msg_type_set;
+            case entry_type::ENTRY_SSET:
+                return msg_type_zset;
+        }
+        return msg_type_none;
+    }
     friend inline bool operator == (const cache_entry &l, const cache_entry &r) {
         return (l._key_hash == r._key_hash) && (*(l._key) == *(r._key));
     }
@@ -428,6 +448,11 @@ public:
 
     void flush_all()
     {
+        for (auto it = _store.begin(); it != _store.end(); ++it) {
+            if (it->ever_expires()) {
+                _alive.remove(*it);
+            }
+        }
         _store.erase_and_dispose(_store.begin(), _store.end(), current_deleter<cache_entry>());
     }
 
@@ -436,6 +461,9 @@ public:
         static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
         auto it = _store.find(key, hash_fn, cache_entry::compare());
         if (it != _store.end()) {
+            if (it->ever_expires()) {
+                _alive.remove(*it);
+            }
             _store.erase_and_dispose(it, current_deleter<cache_entry>());
             return true;
         }
@@ -456,6 +484,9 @@ public:
             static auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
             auto it = _store.find(*entry, hash_fn, cache_entry::compare());
             if (it != _store.end()) {
+                if (it->ever_expires()) {
+                    _alive.remove(*it);
+                }
                 _store.erase_and_dispose(it, current_deleter<cache_entry>());
                 res = false;
             }
@@ -471,6 +502,9 @@ public:
             static auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
             auto it = _store.find(*entry, hash_fn, cache_entry::compare());
             if (it != _store.end()) {
+                if (it->ever_expires()) {
+                    _alive.remove(*it);
+                }
                 _store.erase_and_dispose(it, current_deleter<cache_entry>());
                 res = false;
             }
@@ -479,20 +513,21 @@ public:
         return res;
     }
 
-    // nx = true: Only insert the entry if it does not already exist.
-    // nx = false: Only insert the entry if it already exist.
     // return value: true if the entry was inserted, otherwise false.
-    inline bool insert_if(cache_entry* entry, long expired, bool nx)
+    inline bool insert_if(cache_entry* entry, long expired, bool nx, bool xx)
     {
         if (!entry) {
             return false;
         }
         static auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
         auto it = _store.find(*entry, hash_fn, cache_entry::compare());
-        if (!nx && it != _store.end()) {
+        if (xx && it != _store.end()) {
+            if (it->ever_expires()) {
+                _alive.remove(*it);
+            }
             _store.erase_and_dispose(it, current_deleter<cache_entry>());
         }
-        bool should_insert = (!nx && it != _store.end()) || (nx && it == _store.end());
+        bool should_insert = (xx && it != _store.end()) || (nx && it == _store.end()) || (!nx && !xx);
         if (should_insert) {
             if (expired > 0) {
                 auto expiry = expiration(expired);
@@ -604,6 +639,20 @@ public:
             _expired_entry_releaser(*entry);
         }
         _timer.arm(_alive.get_next_timeout());
+    }
+
+    bool never_expired(const redis_key& rk)
+    {
+        bool result = false;
+        static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
+        auto it = _store.find(rk, hash_fn, cache_entry::compare());
+        if (it != _store.end() && it->ever_expires()) {
+            it->set_never_expired();
+            auto& ref = *it;
+            _alive.remove(ref);
+            result = true;
+        }
+        return result;
     }
 };
 }

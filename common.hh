@@ -49,10 +49,11 @@ namespace stdx = std::experimental;
 namespace redis {
 
 enum {
-    FLAG_SET_EX = 1 << 0,
-    FLAG_SET_PX = 1 << 1,
-    FLAG_SET_NX = 1 << 2,
-    FLAG_SET_XX = 1 << 3,
+    FLAG_SET_NO = 1 << 0,
+    FLAG_SET_EX = 1 << 1,
+    FLAG_SET_PX = 1 << 2,
+    FLAG_SET_NX = 1 << 3,
+    FLAG_SET_XX = 1 << 4,
 };
 
 enum {
@@ -133,6 +134,7 @@ static constexpr const int REDIS_WRONG_TYPE = -2;
 static const sstring msg_type_string {"+string\r\n"};
 static const sstring msg_type_none {"+none\r\n"};
 static const sstring msg_type_list {"+list\r\n"};
+static const sstring msg_type_hll {"+hyperloglog\r\n"};
 static const sstring msg_type_set {"+set\r\n"};
 static const sstring msg_type_zset {"+zset\r\n"};
 static const sstring msg_type_hash {"+hash\r\n"};

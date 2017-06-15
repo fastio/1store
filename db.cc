@@ -109,13 +109,8 @@ bool database::set_direct(const redis_key& rk, sstring& val, long expired, uint3
     return with_allocator(allocator(), [this, &rk, &val, expired, flag] {
         ++_stats._set;
         auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
-        if (flag == 0) {
-            current_store().replace(entry);
-            ++_stats._total_entries;
-            return true;
-        }
         bool result = true;
-        if (current_store().insert_if(entry, expired, flag & FLAG_SET_NX)) {
+        if (current_store().insert_if(entry, expired, flag & FLAG_SET_NX, flag & FLAG_SET_XX)) {
             ++_stats._total_entries;
         }
         else {
@@ -126,14 +121,20 @@ bool database::set_direct(const redis_key& rk, sstring& val, long expired, uint3
     });
 }
 
-future<scattered_message_ptr> database::set(const redis_key& rk, sstring& val, long expire, uint32_t flag)
+future<scattered_message_ptr> database::set(const redis_key& rk, sstring& val, long expired, uint32_t flag)
 {
-    return with_allocator(allocator(), [this, &rk, &val] {
-        auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
-        current_store().replace(entry);
+    return with_allocator(allocator(), [this, &rk, &val, expired, flag] {
         ++_stats._set;
-        ++_stats._total_entries;
-        return reply_builder::build(msg_ok);
+        auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
+        bool result = true;
+        if (current_store().insert_if(entry, expired, flag & FLAG_SET_NX, flag & FLAG_SET_XX)) {
+            ++_stats._total_entries;
+        }
+        else {
+            result = false;
+            current_allocator().destroy<cache_entry>(entry);
+        }
+        return reply_builder::build(result ? msg_ok : msg_nil);
     });
 }
 
@@ -250,7 +251,13 @@ future<scattered_message_ptr> database::strlen(const redis_key& rk)
 
 future<scattered_message_ptr> database::type(const redis_key& rk)
 {
-    return reply_builder::build(msg_nil);
+    return current_store().with_entry_run(rk, [this, &rk] (const cache_entry* e) {
+        if (!e) {
+            return reply_builder::build(msg_type_none);
+        }
+        auto type = e->type_name();
+        return reply_builder::build(type);
+    });
 }
 
 future<scattered_message_ptr> database::expire(const redis_key& rk, long expired)
@@ -261,7 +268,8 @@ future<scattered_message_ptr> database::expire(const redis_key& rk, long expired
 
 future<scattered_message_ptr> database::persist(const redis_key& rk)
 {
-    return reply_builder::build(msg_nil);
+    auto result = current_store().never_expired(rk);
+    return reply_builder::build(result ? msg_one : msg_zero);
 }
 
 future<scattered_message_ptr> database::push(const redis_key& rk, sstring& val, bool force, bool left)
