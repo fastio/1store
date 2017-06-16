@@ -20,47 +20,16 @@ Now, the redis commands were supported by Pedis as follow:
   * **HyperLogLog**: PFADD, PFCOUNT, PFMERGE
   * **OTHER**: ECHO, PING, SELECT
 
-## Building Pedis on Ubuntu 14.04
+## Building Pedis
 
-In addition to required packages by Seastar, the following packages are required by Pedis.
+In fact, the building instructions of Seastar also works for Pedis.
 
-Installing required packages:
-```
-sudo apt-get install libaio-dev ninja-build ragel libhwloc-dev libnuma-dev libpciaccess-dev libcrypto++-dev libboost-all-dev libxen-dev libxml2-dev xfslibs-dev
-```
+See building instructions for [Fedora](docs/building-fedora.md), [CentOS](docs/building-centos.md) and [Ubuntu](docs/building-ubuntu.md).
 
-Installing GCC 4.9 for gnu++1y. Unlike the Fedora case above, this will
-not harm the existing installation of GCC 4.8, and will install an
-additional set of compilers, and additional commands named gcc-4.9,
-g++-4.9, etc., that need to be used explicitly, while the "gcc", "g++",
-etc., commands continue to point to the 4.8 versions.
+## Getting started
 
 ```
-# Install add-apt-repository
-sudo apt-get install software-properties-common python-software-properties
-# Use it to add Ubuntu's testing compiler repository
-sudo add-apt-repository ppa:ubuntu-toolchain-r/test
-sudo apt-get update
-# Install gcc 4.9 and relatives
-sudo apt-get install g++-4.9
-# Also set up necessary header file links and stuff (?)
-sudo apt-get install gcc-4.9-multilib g++-4.9-multilib
-```
-
-To compile Seastar explicitly using gcc 4.9, use:
-```
-git clone https://github.com/fastio/pedis.git
-cd pedis
-git submodule update --init --recursive
-./configure.py --compiler=g++-4.9
-ninja 
-```
-
-
-## Run Pedis 
-
-```
-./build/release/pedis --smp 1
+./build/release/pedis --c 1 -m 1G
 
 ```
 
