@@ -69,7 +69,6 @@ public:
         _listener = engine().listen(make_ipv4_address({_port}), lo);
         keep_doing([this] {
            return _listener->accept().then([this] (connected_socket fd, socket_address addr) mutable {
-               return seastar::async([this, &fd, addr] {
                ++_stats._new_connection_count;
                ++_stats._alived_connection_count;
                auto conn = make_lw_shared<connection>(std::move(fd), addr, _redis);
@@ -80,7 +79,6 @@ public:
                }).finally([this, conn] {
                    --_stats._alived_connection_count;
                    return conn->_out.close().finally([conn]{});
-               });
                });
            });
        }).or_terminate();
