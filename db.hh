@@ -28,7 +28,6 @@
 #include <sstream>
 #include <iostream>
 #include "common.hh"
-#include "redis_timer_set.hh"
 #include "geo.hh"
 #include "bits_operation.hh"
 #include <tuple>
@@ -161,6 +160,7 @@ private:
     template<bool Key, bool Value>
     future<scattered_message_ptr> hgetall_impl(const redis_key& rk)
     {
+        ++_stat._read;
         return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
             if (!e) {
                 return reply_builder::build(msg_err);
@@ -171,31 +171,30 @@ private:
             auto& map = e->value_map();
             std::vector<const dict_entry*> entries;
             map.fetch(entries);
+            if (!entries.empty()) ++_stat._hit;
             return reply_builder::build<Key, Value>(entries);
         });
     }
 private:
-    static const int DEFAULT_DB_COUNT = 32;
+    static const int DEFAULT_DB_COUNT = 1;
     cache _cache_stores[DEFAULT_DB_COUNT];
     size_t current_store_index = 0;
     inline cache& current_store() { return _cache_stores[current_store_index]; }
     seastar::metrics::metric_groups _metrics;
-    struct db_stats {
-        uint64_t _get = 0;
-        uint64_t _get_hit = 0;
-        uint64_t _set = 0;
-        uint64_t _del = 0;
-
-        uint64_t _total_entries = 0;
+    struct stats {
+        uint64_t _read = 0;
+        uint64_t _hit = 0;
+        uint64_t _total_counter_entries = 0;
         uint64_t _total_string_entries = 0;
         uint64_t _total_dict_entries = 0;
+        uint64_t _total_list_entries = 0;
         uint64_t _total_set_entries = 0;
-        uint64_t _total_sorted_set_entries = 0;
-        uint64_t _total_geo_entries = 0;
-
-        uint64_t _expired_entries_pending = 0;
+        uint64_t _total_zset_entries = 0;
+        uint64_t _total_bitmap_entries = 0;
+        uint64_t _total_hll_entries = 0;
     };
-    db_stats _stats;
+    stats _stat;
     void setup_metrics();
+    size_t sum_expiring_entries();
 };
 }

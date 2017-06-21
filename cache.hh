@@ -440,6 +440,12 @@ public:
     {
     }
 
+    inline size_t expiring_size() const
+    {
+        return _alive.size();
+    }
+
+
     void set_expired_entry_releaser(expired_entry_releaser_type&& releaser)
     {
         _alive.clear();
@@ -521,7 +527,7 @@ public:
         }
         static auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
         auto it = _store.find(*entry, hash_fn, cache_entry::compare());
-        if (xx && it != _store.end()) {
+        if (it != _store.end() && (xx || (!xx && !nx))) {
             if (it->ever_expires()) {
                 _alive.remove(*it);
             }

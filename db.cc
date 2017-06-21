@@ -86,31 +86,39 @@ database::~database()
     });
 }
 
+size_t database::sum_expiring_entries()
+{
+    size_t sum = 0;
+    for (size_t i = 0; i < DEFAULT_DB_COUNT; ++i) {
+        sum += _cache_stores[i].expiring_size();
+    }
+    return sum;
+}
+
 void database::setup_metrics()
 {
     namespace sm = seastar::metrics;
     _metrics.add_group("db", {
-        sm::make_gauge("get", [this] { return _stats._get; }, sm::description("GET")),
-        sm::make_gauge("get_hit", [this] { return _stats._get_hit; }, sm::description("GET HIT")),
-        sm::make_gauge("set", [this] { return _stats._set; }, sm::description("SET")),
-        sm::make_gauge("del", [this] { return _stats._del; }, sm::description("DEL")),
-        sm::make_gauge("total_entries", [this] { return _stats._total_entries; }, sm::description("Total entries")),
-        sm::make_gauge("total_string_entries", [this] { return _stats._total_string_entries; }, sm::description("Total string entries")),
-        sm::make_gauge("total_dict_entries", [this] { return _stats._total_dict_entries; }, sm::description("Total dict entries")),
-        sm::make_gauge("total_set_entries", [this] { return _stats._total_set_entries; }, sm::description("Total set entries")),
-        sm::make_gauge("total_sorted_set_entries", [this] { return _stats._total_sorted_set_entries; }, sm::description("Total sorted set entries")),
-        sm::make_gauge("total_geo_entries", [this] { return _stats._total_geo_entries; }, sm::description("Total geo entries")),
-     });
+        sm::make_gauge("read", [this] { return _stat._read; }, sm::description("Total number of read operations")),
+        sm::make_gauge("hit", [this] { return _stat._hit; }, sm::description("Total number of the read hit")),
+        sm::make_gauge("total_counter_entries", [this] { return _stat._total_counter_entries; }, sm::description("Total of counter entries")),
+        sm::make_gauge("total_string_entries", [this] { return _stat._total_string_entries; }, sm::description("Total of string entries")),
+        sm::make_gauge("total_dict_entries", [this] { return _stat._total_dict_entries; }, sm::description("Total of dict entries")),
+        sm::make_gauge("total_list_entries", [this] { return _stat._total_list_entries; }, sm::description("Total of list entries")),
+        sm::make_gauge("total_set_entries", [this] { return _stat._total_set_entries; }, sm::description("Total of set entries")),
+        sm::make_gauge("total_sorted_set_entries", [this] { return _stat._total_zset_entries; }, sm::description("Total of sorted set entries")),
+        sm::make_gauge("total_hll_entries", [this] { return _stat._total_hll_entries; }, sm::description("Total of hyperloglog entries")),
+        sm::make_gauge("total_expiring_entries", [this] { return sum_expiring_entries(); }, sm::description("Total of expiring entries")),
+    });
 }
 
 bool database::set_direct(const redis_key& rk, sstring& val, long expired, uint32_t flag)
 {
     return with_allocator(allocator(), [this, &rk, &val, expired, flag] {
-        ++_stats._set;
         auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
         bool result = true;
         if (current_store().insert_if(entry, expired, flag & FLAG_SET_NX, flag & FLAG_SET_XX)) {
-            ++_stats._total_entries;
+            ++_stat._total_string_entries;
         }
         else {
             result = false;
@@ -123,11 +131,10 @@ bool database::set_direct(const redis_key& rk, sstring& val, long expired, uint3
 future<scattered_message_ptr> database::set(const redis_key& rk, sstring& val, long expired, uint32_t flag)
 {
     return with_allocator(allocator(), [this, &rk, &val, expired, flag] {
-        ++_stats._set;
         auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
         bool result = true;
         if (current_store().insert_if(entry, expired, flag & FLAG_SET_NX, flag & FLAG_SET_XX)) {
-            ++_stats._total_entries;
+            ++_stat._total_string_entries;
         }
         else {
             result = false;
@@ -139,22 +146,60 @@ future<scattered_message_ptr> database::set(const redis_key& rk, sstring& val, l
 
 bool database::del_direct(const redis_key& rk)
 {
-    return with_allocator(allocator(), [this, &rk] {
-        ++_stats._del;
-        auto result =  current_store().erase(rk);
-        if (result)
-            --_stats._total_entries;
+    return current_store().with_entry_run(rk, [this, &rk] (cache_entry* e) {
+        if (!e) return false;
+        if (e->type_of_bytes()) {
+            --_stat._total_string_entries;
+        }
+        else if (e->type_of_set()) {
+            --_stat._total_set_entries;
+        }
+        else if (e->type_of_list()) {
+            --_stat._total_list_entries;
+        }
+        else if (e->type_of_map()) {
+            --_stat._total_dict_entries;
+        }
+        else if (e->type_of_sset()) {
+            --_stat._total_zset_entries;
+        }
+        else if (e->type_of_hll()) {
+            --_stat._total_hll_entries;
+        }
+        else {
+            --_stat._total_counter_entries;
+        }
+        auto result =  current_store().erase(*e);
         return result;
     });
 }
 
 future<scattered_message_ptr> database::del(const redis_key& rk)
 {
-    return with_allocator(allocator(), [this, &rk] {
-        auto result =  current_store().erase(rk);
-        ++_stats._del;
-        if (result)
-            --_stats._total_entries;
+    return current_store().with_entry_run(rk, [this, &rk] (cache_entry* e) {
+        if (!e) return reply_builder::build(msg_zero);
+        if (e->type_of_bytes()) {
+            --_stat._total_string_entries;
+        }
+        else if (e->type_of_set()) {
+            --_stat._total_set_entries;
+        }
+        else if (e->type_of_list()) {
+            --_stat._total_list_entries;
+        }
+        else if (e->type_of_map()) {
+            --_stat._total_dict_entries;
+        }
+        else if (e->type_of_sset()) {
+            --_stat._total_zset_entries;
+        }
+        else if (e->type_of_hll()) {
+            --_stat._total_hll_entries;
+        }
+        else {
+            --_stat._total_counter_entries;
+        }
+        auto result =  current_store().erase(*e);
         return reply_builder::build(result ? msg_one : msg_zero);
     });
 }
@@ -178,12 +223,18 @@ future<scattered_message_ptr> database::counter_by(const redis_key& rk, int64_t 
                 // not exists
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), int64_t{step});
                 current_store().replace(entry);
+                ++_stat._total_counter_entries;
                 return reply_builder::build<false, true>(entry);
             }
             if (!e->type_of_integer()) {
                 return reply_builder::build(msg_type_err);
             }
-            e->value_integer_incr(incr ? step : -step);
+            if (incr) {
+                e->value_integer_incr(step);
+            }
+            else {
+                e->value_integer_incr(-step);
+            }
             return reply_builder::build<false, true>(e);
         });
     });
@@ -197,55 +248,50 @@ future<scattered_message_ptr> database::append(const redis_key& rk, sstring& val
                 // not exists
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
                 current_store().replace(entry);
+                ++_stat._total_string_entries;
                 return reply_builder::build(val.size());
             }
             if (!e->type_of_bytes()) {
                 return reply_builder::build(msg_type_err);
             }
-            return with_linearized_managed_bytes([this, e, &val] {
-                size_t new_size = e->value_bytes_size() + val.size();
-                auto data = std::unique_ptr<bytes_view::value_type[]>(new bytes_view::value_type[new_size]);
-                std::copy_n(e->value_bytes_data(), e->value_bytes_size(), data.get());
-                std::copy_n(val.data(), val.size(), data.get() + e->value_bytes_size());
-                auto new_value = current_allocator().construct<managed_bytes>(data.get(), new_size);
-                auto& old_value = e->value_bytes();
-                current_allocator().destroy<managed_bytes>(&old_value);
-                e->value_bytes() = std::move(*new_value);
-                return reply_builder::build(new_size);
-            });
+            size_t new_size = e->value_bytes_size() + val.size();
+            auto data = std::unique_ptr<bytes_view::value_type[]>(new bytes_view::value_type[new_size]);
+            std::copy_n(e->value_bytes_data(), e->value_bytes_size(), data.get());
+            std::copy_n(val.data(), val.size(), data.get() + e->value_bytes_size());
+            auto new_value = current_allocator().construct<managed_bytes>(data.get(), new_size);
+            auto& old_value = e->value_bytes();
+            current_allocator().destroy<managed_bytes>(&old_value);
+            e->value_bytes() = std::move(*new_value);
+            return reply_builder::build(new_size);
         });
     });
 }
 
 future<scattered_message_ptr> database::get(const redis_key& rk)
 {
-    return with_linearized_managed_bytes([this, &rk] {
-        return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
-           ++_stats._get;
-           if (e && e->type_of_bytes() == false) {
-               return reply_builder::build(msg_type_err);
-           }
-           else {
-               if (e != nullptr) ++_stats._get_hit;
-               return reply_builder::build<false, true>(e);
-           }
-        });
+    ++_stat._read;
+    return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
+       if (e && e->type_of_bytes() == false) {
+           return reply_builder::build(msg_type_err);
+       }
+       else {
+           if (e != nullptr) ++_stat._hit;
+           return reply_builder::build<false, true>(e);
+       }
     });
 }
 
 future<scattered_message_ptr> database::strlen(const redis_key& rk)
 {
-    return with_linearized_managed_bytes([this, &rk] {
-        return current_store().with_entry_run(rk, [] (const cache_entry* e) {
-            if (e) {
-                if (e->type_of_bytes()) {
-                    return reply_builder::build(e->value_bytes_size());
-                }
-                return reply_builder::build(msg_type_err);
+    return current_store().with_entry_run(rk, [] (const cache_entry* e) {
+        if (e) {
+            if (e->type_of_bytes()) {
+                return reply_builder::build(e->value_bytes_size());
             }
-            return reply_builder::build(msg_zero);
-        });
-   });
+            return reply_builder::build(msg_type_err);
+        }
+        return reply_builder::build(msg_zero);
+    });
 }
 
 future<scattered_message_ptr> database::type(const redis_key& rk)
@@ -283,6 +329,7 @@ future<scattered_message_ptr> database::push(const redis_key& rk, sstring& val, 
                 // create new list object
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::list_initializer());
                 current_store().insert(entry);
+                ++_stat._total_list_entries;
                 e = entry;
             }
             if (e->type_of_list() == false) {
@@ -307,6 +354,7 @@ future<scattered_message_ptr> database::push_multi(const redis_key& rk, std::vec
                 // create new list object
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::list_initializer());
                 current_store().insert(entry);
+                ++_stat._total_list_entries;
                 e = entry;
             }
             if (e->type_of_list() == false) {
@@ -323,6 +371,7 @@ future<scattered_message_ptr> database::push_multi(const redis_key& rk, std::vec
 
 future<scattered_message_ptr> database::pop(const redis_key& rk, bool left)
 {
+    ++_stat._read;
     return with_allocator(allocator(), [this, &rk, left] () {
         return current_store().with_entry_run(rk, [this, &rk, left] (cache_entry* e) {
             if (!e) {
@@ -331,16 +380,16 @@ future<scattered_message_ptr> database::pop(const redis_key& rk, bool left)
             if (e->type_of_list() == false) {
                 return reply_builder::build(msg_type_err);
             }
-            return with_linearized_managed_bytes([this, &rk, e, left] () {
-                auto& list = e->value_list();
-                assert(!list.empty());
-                auto reply = reply_builder::build(left ? list.front() : list.back());
-                left ? list.pop_front() : list.pop_back();
-                if (list.empty()) {
-                   current_store().erase(rk);
-                }
-                return reply;
-            });
+            auto& list = e->value_list();
+            assert(!list.empty());
+            auto reply = reply_builder::build(left ? list.front() : list.back());
+            left ? list.pop_front() : list.pop_back();
+            if (list.empty()) {
+               --_stat._total_list_entries;
+               current_store().erase(rk);
+            }
+            ++_stat._hit;
+            return reply;
         });
     });
 }
@@ -361,7 +410,8 @@ future<scattered_message_ptr> database::llen(const redis_key& rk)
 
 future<scattered_message_ptr> database::lindex(const redis_key& rk, long idx)
 {
-    return current_store().with_entry_run(rk, [&rk, idx] (const cache_entry* e) {
+    ++_stat._read;
+    return current_store().with_entry_run(rk, [this, &rk, idx] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_nil);
         }
@@ -374,13 +424,15 @@ future<scattered_message_ptr> database::lindex(const redis_key& rk, long idx)
             return reply_builder::build(msg_nil);
         }
         auto& result = list.at(static_cast<size_t>(index));
+        ++_stat._hit;
         return reply_builder::build(result);
     });
 }
 
 future<scattered_message_ptr> database::lrange(const redis_key& rk, long start, long end)
 {
-    return current_store().with_entry_run(rk, [&rk, &start, &end] (const cache_entry* e) {
+    ++_stat._read;
+    return current_store().with_entry_run(rk, [this, &rk, &start, &end] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_err);
         }
@@ -399,6 +451,7 @@ future<scattered_message_ptr> database::lrange(const redis_key& rk, long start, 
               data.push_back(&b);
            }
         }
+        if (!data.empty()) ++_stat._hit;
         return reply_builder::build(data);
     });
 }
@@ -419,6 +472,7 @@ future<scattered_message_ptr> database::lrem(const redis_key& rk, long count, ss
             else if (count > 0) removed = list.trem<false, true>(val, count);
             else removed = list.trem<false, false>(val, count);
             if (list.empty()) {
+                --_stat._total_list_entries;
                 current_store().erase(rk);
             }
             return reply_builder::build(removed);
@@ -497,6 +551,7 @@ future<scattered_message_ptr> database::ltrim(const redis_key& rk, long start, l
             }
             list.trim(static_cast<size_t>(nstart), static_cast<size_t>(nend));
             if (list.empty()) {
+                --_stat._total_list_entries;
                 current_store().erase(rk);
             }
             return reply_builder::build(msg_ok);
@@ -513,6 +568,7 @@ future<scattered_message_ptr> database::hset(const redis_key& rk, sstring& key, 
                 // the rk was not exists, then create it.
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::dict_initializer());
                 current_store().insert(entry);
+                ++_stat._total_dict_entries;
                 e = entry;
             }
             if (e->type_of_map() == false) {
@@ -536,6 +592,7 @@ future<scattered_message_ptr> database::hincrby(const redis_key& rk, sstring& ke
                 // the rk was not exists, then create it.
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::dict_initializer());
                 current_store().insert(entry);
+                ++_stat._total_dict_entries;
                 e = entry;
             }
             if (e->type_of_map() == false) {
@@ -567,6 +624,7 @@ future<scattered_message_ptr> database::hincrbyfloat(const redis_key& rk, sstrin
                 // the rk was not exists, then create it.
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::dict_initializer());
                 current_store().insert(entry);
+                ++_stat._total_dict_entries;
                 e = entry;
             }
             if (e->type_of_map() == false) {
@@ -598,6 +656,7 @@ future<scattered_message_ptr> database::hmset(const redis_key& rk, std::unordere
                 // the rk was not exists, then create it.
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::dict_initializer());
                 current_store().insert(entry);
+                ++_stat._total_dict_entries;
                 e = entry;
             }
             if (e->type_of_map() == false) {
@@ -617,6 +676,7 @@ future<scattered_message_ptr> database::hmset(const redis_key& rk, std::unordere
 
 future<scattered_message_ptr> database::hget(const redis_key& rk, sstring& key)
 {
+    ++_stat._read;
     return current_store().with_entry_run(rk, [this, &key] (cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_err);
@@ -625,10 +685,9 @@ future<scattered_message_ptr> database::hget(const redis_key& rk, sstring& key)
             return reply_builder::build(msg_type_err);
         }
         auto& map = e->value_map();
-        return map.with_entry_run(key, [] (const dict_entry* d) {
-            return with_linearized_managed_bytes([d] {
-                return reply_builder::build<false, true>(d);
-            });
+        return map.with_entry_run(key, [this] (const dict_entry* d) {
+            if (d) ++_stat._hit;
+            return reply_builder::build<false, true>(d);
         });
     });
 }
@@ -651,6 +710,7 @@ future<scattered_message_ptr> database::hdel_multi(const redis_key& rk, std::vec
                 }
             }
             if (map.empty()) {
+                --_stat._total_dict_entries;
                 current_store().erase(rk);
             }
             return reply_builder::build(removed);
@@ -672,6 +732,7 @@ future<scattered_message_ptr> database::hdel(const redis_key& rk, sstring& key)
             auto& map = e->value_map();
             bool exists = map.erase(key);
             if (map.empty()) {
+                --_stat._total_dict_entries;
                 current_store().erase(rk);
             }
             return reply_builder::build(exists ? msg_ok : msg_err);
@@ -747,6 +808,7 @@ future<scattered_message_ptr> database::hgetall_keys(const redis_key& rk)
 
 future<scattered_message_ptr> database::hmget(const redis_key& rk, std::vector<sstring>& keys)
 {
+    ++_stat._read;
     return current_store().with_entry_run(rk, [this, &keys] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_err);
@@ -757,13 +819,15 @@ future<scattered_message_ptr> database::hmget(const redis_key& rk, std::vector<s
         auto& map = e->value_map();
         std::vector<const dict_entry*> entries;
         map.fetch(keys, entries);
+        if (!entries.empty()) ++_stat._hit;
         return reply_builder::build<false, true>(entries);
     });
 }
 
 future<scattered_message_ptr> database::srandmember(const redis_key& rk, size_t count)
 {
-     return current_store().with_entry_run(rk, [&count] (const cache_entry* e) {
+    ++_stat._read;
+     return current_store().with_entry_run(rk, [this, &count] (const cache_entry* e) {
         std::vector<const dict_entry*> result;
         if (!e) {
             return reply_builder::build<true, false>(result);
@@ -778,6 +842,7 @@ future<scattered_message_ptr> database::srandmember(const redis_key& rk, size_t 
             auto entry = set.at(index);
             result.push_back(&(*entry));
         }
+        if (!result.empty()) ++_stat._hit;
         return reply_builder::build<true, false>(result);
      });
 }
@@ -790,6 +855,7 @@ future<scattered_message_ptr> database::sadds(const redis_key& rk, std::vector<s
             if (!o) {
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::set_initializer());
                 current_store().insert(entry);
+                ++_stat._total_set_entries;
                 o = entry;
             }
             if (o->type_of_set() == false) {
@@ -815,6 +881,7 @@ bool database::sadd_direct(const redis_key& rk, sstring& member)
             if (!o) {
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::set_initializer());
                 current_store().insert(entry);
+                ++_stat._total_set_entries;
                 o = entry;
             }
             if (o->type_of_set() == false) {
@@ -835,6 +902,7 @@ bool database::sadds_direct(const redis_key& rk, std::vector<sstring>& members)
             if (!o) {
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::set_initializer());
                 current_store().insert(entry);
+                ++_stat._total_set_entries;
                 o = entry;
             }
             if (o->type_of_set() == false) {
@@ -883,7 +951,8 @@ future<scattered_message_ptr> database::sismember(const redis_key& rk, sstring& 
 
 future<scattered_message_ptr> database::smembers(const redis_key& rk)
 {
-    return current_store().with_entry_run(rk, [] (const cache_entry* e) {
+    ++_stat._read;
+    return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_nil);
         }
@@ -893,47 +962,54 @@ future<scattered_message_ptr> database::smembers(const redis_key& rk)
         auto& set = e->value_set();
         std::vector<const dict_entry*> entries;
         set.fetch(entries);
+        if (!entries.empty()) ++_stat._hit;
         return reply_builder::build<true, false>(entries);
     });
 }
 
 future<foreign_ptr<lw_shared_ptr<sstring>>> database::get_hll_direct(const redis_key& rk)
 {
+    ++_stat._read;
     using return_type = foreign_ptr<lw_shared_ptr<sstring>>;
-    return current_store().with_entry_run(rk, [] (const cache_entry* e) {
+    return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
         if (!e || e->type_of_hll() == false) {
             return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<sstring>>(nullptr));
         }
         auto data = e->value_bytes_data();
         auto size = e->value_bytes_size();
+        ++_stat._hit;
         return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<sstring>>(make_lw_shared<sstring>(sstring {data, size})));
     });
 }
 
 future<foreign_ptr<lw_shared_ptr<sstring>>> database::get_direct(const redis_key& rk)
 {
+    ++_stat._read;
     using return_type = foreign_ptr<lw_shared_ptr<sstring>>;
-    return current_store().with_entry_run(rk, [] (const cache_entry* e) {
+    return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
         if (!e || e->type_of_bytes() == false) {
             return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<sstring>>(nullptr));
         }
         auto data = e->value_bytes_data();
         auto size = e->value_bytes_size();
+        ++_stat._hit;
         return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<sstring>>(make_lw_shared<sstring>(sstring {data, size})));
     });
 }
 
 future<foreign_ptr<lw_shared_ptr<std::vector<sstring>>>> database::smembers_direct(const redis_key& rk)
 {
+    ++_stat._read;
     using result_type = std::vector<sstring>;
     using return_type = foreign_ptr<lw_shared_ptr<result_type>>;
-    return current_store().with_entry_run(rk, [] (const cache_entry* e) {
+    return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
         if (!e || e->type_of_set() == false) {
             return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<result_type>>(make_lw_shared<result_type>(result_type {})));
         }
         auto& set = e->value_set();
         result_type keys;
         set.fetch_keys(keys);
+        if (!keys.empty()) ++_stat._hit;
         return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<result_type>>(make_lw_shared<result_type>(std::move(keys))));
     });
 }
@@ -964,6 +1040,7 @@ future<scattered_message_ptr> database::spop(const redis_key& rk, size_t count)
                     set.erase(it);
                 }
                 if (set.empty()) {
+                    --_stat._total_set_entries;
                     current_store().erase(rk);
                 }
             }
@@ -985,6 +1062,7 @@ future<scattered_message_ptr> database::srem(const redis_key& rk, sstring& membe
             auto& set = e->value_set();
             auto result = set.erase(member);
             if (set.empty()) {
+                --_stat._total_set_entries;
                 current_store().erase(rk);
             }
             return reply_builder::build(result ? msg_one : msg_zero);
@@ -1004,6 +1082,7 @@ bool database::srem_direct(const redis_key& rk, sstring& member)
             auto& set = e->value_set();
             auto result = set.erase(member);
             if (set.empty()) {
+                --_stat._total_set_entries;
                 current_store().erase(rk);
             }
             return result;
@@ -1029,6 +1108,7 @@ future<scattered_message_ptr> database::srems(const redis_key& rk, std::vector<s
                 }
             }
             if (set.empty()) {
+                --_stat._total_set_entries;
                 current_store().erase(rk);
             }
             return reply_builder::build(removed);
@@ -1070,6 +1150,7 @@ future<scattered_message_ptr> database::zadds(const redis_key& rk, std::unordere
             if (o == nullptr) {
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::sset_initializer());
                 current_store().insert(entry);
+                ++_stat._total_zset_entries;
                 o = entry;
             }
             if (o->type_of_sset() == false) {
@@ -1102,6 +1183,7 @@ bool database::zadds_direct(const redis_key& rk, std::unordered_map<sstring, dou
             if (o == nullptr) {
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::sset_initializer());
                 current_store().insert(entry);
+                ++_stat._total_zset_entries;
                 o = entry;
             }
             if (o->type_of_sset() == false) {
@@ -1155,6 +1237,7 @@ future<scattered_message_ptr> database::zrem(const redis_key& rk, std::vector<ss
             auto& sset = e->value_sset();
             auto removed = sset.erase(members);
             if (sset.empty()) {
+               --_stat._total_zset_entries;
                current_store().erase(rk);
             }
             return reply_builder::build(removed);
@@ -1185,6 +1268,7 @@ future<scattered_message_ptr> database::zincrby(const redis_key& rk, sstring& me
             if (o == nullptr) {
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::sset_initializer());
                 current_store().insert(entry);
+                ++_stat._total_zset_entries;
                 o = entry;
             }
             if (o->type_of_sset() == false) {
@@ -1199,22 +1283,25 @@ future<scattered_message_ptr> database::zincrby(const redis_key& rk, sstring& me
 
 future<foreign_ptr<lw_shared_ptr<std::vector<std::pair<sstring, double>>>>> database::zrange_direct(const redis_key& rk, long begin, long end)
 {
+    ++_stat._read;
     using return_type = foreign_ptr<lw_shared_ptr<std::vector<std::pair<sstring, double>>>>;
     using result_type = std::vector<std::pair<sstring, double>>;
-    return current_store().with_entry_run(rk, [begin, end] (const cache_entry* e) {
+    return current_store().with_entry_run(rk, [this, begin, end] (const cache_entry* e) {
         if (e == nullptr || e->type_of_sset() == false) {
             return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<result_type>>(make_lw_shared<result_type>(result_type {})));
         }
         auto& sset = e->value_sset();
         result_type entries {};
         sset.fetch_by_rank(begin, end, entries);
+        if (!entries.empty()) ++_stat._hit;
         return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<result_type>>(make_lw_shared<result_type>(std::move(entries))));
     });
 }
 
 future<scattered_message_ptr> database::zrange(const redis_key& rk, long begin, long end, bool reverse, bool with_score)
 {
-    return current_store().with_entry_run(rk, [begin, end, reverse, with_score] (const cache_entry* e) {
+    ++_stat._read;
+    return current_store().with_entry_run(rk, [this, begin, end, reverse, with_score] (const cache_entry* e) {
         std::vector<const sset_entry*> entries;
         if (e == nullptr) {
             return reply_builder::build(entries, with_score);
@@ -1227,13 +1314,15 @@ future<scattered_message_ptr> database::zrange(const redis_key& rk, long begin, 
         if (reverse) {
            std::reverse(std::begin(entries), std::end(entries));
         }
+        if (!entries.empty()) ++_stat._hit;
         return reply_builder::build(entries, with_score);
     });
 }
 
 future<scattered_message_ptr> database::zrangebyscore(const redis_key& rk, double min, double max, bool reverse, bool with_score)
 {
-    return current_store().with_entry_run(rk, [min, max, reverse, with_score] (const cache_entry* e) {
+    ++_stat._read;
+    return current_store().with_entry_run(rk, [this, min, max, reverse, with_score] (const cache_entry* e) {
         std::vector<const sset_entry*> entries;
         if (e == nullptr) {
             return reply_builder::build(entries, with_score);
@@ -1246,12 +1335,14 @@ future<scattered_message_ptr> database::zrangebyscore(const redis_key& rk, doubl
         if (reverse) {
            std::reverse(std::begin(entries), std::end(entries));
         }
+        if (!entries.empty()) ++_stat._hit;
         return reply_builder::build(entries, with_score);
     });
 }
 
 future<scattered_message_ptr> database::zrank(const redis_key& rk, sstring& member, bool reverse)
 {
+    ++_stat._read;
     return current_store().with_entry_run(rk, [this, &member, reverse] (const cache_entry* e) {
         if (e == nullptr) {
             return reply_builder::build(msg_nil);
@@ -1266,6 +1357,7 @@ future<scattered_message_ptr> database::zrank(const redis_key& rk, sstring& memb
            if (reverse) {
                rank = sset.size() - rank;
            }
+           ++_stat._hit;
            return reply_builder::build(rank);
         }
         return reply_builder::build(msg_nil);
@@ -1274,7 +1366,8 @@ future<scattered_message_ptr> database::zrank(const redis_key& rk, sstring& memb
 
 future<scattered_message_ptr> database::zscore(const redis_key& rk, sstring& member)
 {
-    return current_store().with_entry_run(rk, [&member] (const cache_entry* e) {
+    ++_stat._read;
+    return current_store().with_entry_run(rk, [this, &member] (const cache_entry* e) {
         if (e == nullptr) {
             return reply_builder::build(msg_zero);
         }
@@ -1285,6 +1378,7 @@ future<scattered_message_ptr> database::zscore(const redis_key& rk, sstring& mem
         auto score_opt = sset.score(member);
         if (score_opt) {
            return reply_builder::build(*score_opt);
+           ++_stat._hit;
         }
         return reply_builder::build(msg_err);
     });
@@ -1305,6 +1399,7 @@ future<scattered_message_ptr> database::zremrangebyscore(const redis_key& rk, do
             sset.fetch_by_score(min, max, entries);
             auto removed = sset.erase(entries);
             if (sset.empty()) {
+                --_stat._total_zset_entries;
                 current_store().erase(rk);
             }
             return reply_builder::build(removed);
@@ -1327,6 +1422,7 @@ future<scattered_message_ptr> database::zremrangebyrank(const redis_key& rk, siz
             sset.fetch_by_rank(begin, end, entries);
             auto removed = sset.erase(entries);
             if (sset.empty()) {
+                --_stat._total_zset_entries;
                 current_store().erase(rk);
             }
             return reply_builder::build(removed);
@@ -1346,6 +1442,7 @@ bool database::select(size_t index)
 
 future<scattered_message_ptr> database::geodist(const redis_key& rk, sstring& lpos, sstring& rpos, int flag)
 {
+    ++_stat._read;
     double factor = 1;
     if (flag & GEODIST_UNIT_M) {
         factor = 1;
@@ -1374,6 +1471,7 @@ future<scattered_message_ptr> database::geodist(const redis_key& rk, sstring& lp
         }
         double dist = 0;
         if (geo::dist(*l_score_opt, *r_score_opt, dist)) {
+           ++_stat._hit;
            return reply_builder::build(dist / factor);
         }
         else {
@@ -1384,6 +1482,7 @@ future<scattered_message_ptr> database::geodist(const redis_key& rk, sstring& lp
 
 future<scattered_message_ptr> database::geohash(const redis_key& rk, std::vector<sstring>& members)
 {
+    ++_stat._read;
     return current_store().with_entry_run(rk, [this, members] (const cache_entry* e) {
         if (e == nullptr) {
            return reply_builder::build(msg_err);
@@ -1403,12 +1502,14 @@ future<scattered_message_ptr> database::geohash(const redis_key& rk, std::vector
             }
             geohash_set.emplace_back(std::move(hashstr));;
         }
+        if (!geohash_set.empty()) ++_stat._hit;
         return reply_builder::build(geohash_set);
     });
 }
 
 future<scattered_message_ptr> database::geopos(const redis_key& rk, std::vector<sstring>& members)
 {
+    ++_stat._read;
     return current_store().with_entry_run(rk, [this, members] (const cache_entry* e) {
         if (e == nullptr) {
            return reply_builder::build(msg_err);
@@ -1428,6 +1529,7 @@ future<scattered_message_ptr> database::geopos(const redis_key& rk, std::vector<
             }
             geohash_set.emplace_back(std::move(hashstr));;
         }
+        if (!geohash_set.empty()) ++_stat._hit;
         return reply_builder::build(geohash_set);
     });
 }
@@ -1473,6 +1575,7 @@ future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius_me
 
 future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius(const sset_lsa& sset, double longitude, double latitude, double radius, size_t count, int flag)
 {
+    ++_stat._read;
     using return_type = foreign_ptr<lw_shared_ptr<georadius_result_type>>;
     using data_type = std::vector<std::tuple<sstring, double, double, double, double>>;
     data_type points;
@@ -1506,6 +1609,7 @@ future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius(co
     else if (flag & GEORADIUS_DESC) {
         std::sort(points.begin(), points.end(), [] (const auto& l, const auto& r) { return std::get<2>(l) < std::get<2>(r); });
     }
+    if (!points.empty()) ++_stat._hit;
     return make_ready_future<return_type>(foreign_ptr<lw_shared_ptr<georadius_result_type>>(make_lw_shared<georadius_result_type>(georadius_result_type {std::move(points), REDIS_OK})));
 }
 
@@ -1523,6 +1627,7 @@ future<scattered_message_ptr> database::setbit(const redis_key& rk, size_t offse
                }
                auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), origin_size);
                current_store().insert(entry);
+                --_stat._total_bitmap_entries;
                o = entry;
             }
             if (o->type_of_bytes() == false) {
@@ -1541,7 +1646,8 @@ future<scattered_message_ptr> database::setbit(const redis_key& rk, size_t offse
 
 future<scattered_message_ptr> database::getbit(const redis_key& rk, size_t offset)
 {
-    return current_store().with_entry_run(rk, [offset] (const cache_entry* e) {
+    ++_stat._read;
+    return current_store().with_entry_run(rk, [this, offset] (const cache_entry* e) {
         if (e == nullptr) {
             return reply_builder::build(msg_zero);
         }
@@ -1550,13 +1656,15 @@ future<scattered_message_ptr> database::getbit(const redis_key& rk, size_t offse
         }
         auto& mbytes = e->value_bytes();
         auto result = bits_operation::get(mbytes, offset);
+        ++_stat._hit;
         return reply_builder::build(result ? msg_one : msg_zero);
     });
 }
 
 future<scattered_message_ptr> database::bitcount(const redis_key& rk, long start, long end)
 {
-    return current_store().with_entry_run(rk, [start, end] (const cache_entry* e) {
+    ++_stat._read;
+    return current_store().with_entry_run(rk, [this, start, end] (const cache_entry* e) {
         if (e == nullptr) {
             return reply_builder::build(msg_zero);
         }
@@ -1565,6 +1673,7 @@ future<scattered_message_ptr> database::bitcount(const redis_key& rk, long start
         }
         auto& mbytes = e->value_bytes();
         auto result = bits_operation::count(mbytes, start, end);
+        ++_stat._hit;
         return reply_builder::build(result);
     });
 }
@@ -1581,6 +1690,7 @@ future<scattered_message_ptr> database::pfadd(const redis_key& rk, std::vector<s
             if (e == nullptr) {
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::hll_initializer());
                 current_store().insert(entry);
+                --_stat._total_hll_entries;
                 e = entry;
             }
             if (e->type_of_hll() == false) {
@@ -1595,7 +1705,8 @@ future<scattered_message_ptr> database::pfadd(const redis_key& rk, std::vector<s
 
 future<scattered_message_ptr> database::pfcount(const redis_key& rk)
 {
-    return current_store().with_entry_run(rk, [] (cache_entry* e) {
+    ++_stat._read;
+    return current_store().with_entry_run(rk, [this] (cache_entry* e) {
         if (e == nullptr) {
             return reply_builder::build(msg_zero);
         }
@@ -1604,6 +1715,7 @@ future<scattered_message_ptr> database::pfcount(const redis_key& rk)
         }
         auto& mbytes = e->value_bytes();
         auto result = hll::count(mbytes);
+        ++_stat._hit;
         return reply_builder::build(result);
     });
 }
@@ -1615,6 +1727,7 @@ future<scattered_message_ptr> database::pfmerge(const redis_key& rk, uint8_t* me
             if (e == nullptr) {
                 auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), cache_entry::hll_initializer());
                 current_store().insert(entry);
+                --_stat._total_hll_entries;
                 e = entry;
             }
             if (e->type_of_hll() == false) {

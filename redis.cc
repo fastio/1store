@@ -43,6 +43,7 @@
 #include "db.hh"
 #include "reply_builder.hh"
 #include  <experimental/vector>
+#include "core/metrics.hh"
 using namespace net;
 namespace redis {
 
@@ -51,8 +52,106 @@ using logger =  seastar::logger;
 static logger redis_log ("redis");
 
 namespace stdx = std::experimental;
+void redis_service::setup_metrics()
+{
+    namespace sm = seastar::metrics;
+    _metrics.add_group("service", {
+        sm::make_gauge("echo", [this] { return _stat._echo; }, sm::description("ECHO")),
+        sm::make_gauge("set", [this] { return _stat._set; }, sm::description("SET")),
+        sm::make_gauge("get", [this] { return _stat._get; }, sm::description("GET")),
+        sm::make_gauge("del", [this] { return _stat._del; }, sm::description("DEL")),
+        sm::make_gauge("mset", [this] { return _stat._mset; }, sm::description("MSET")),
+        sm::make_gauge("mget", [this] { return _stat._mget; }, sm::description("MGET")),
+        sm::make_gauge("strlen", [this] { return _stat._strlen; }, sm::description("STRLEN")),
+        sm::make_gauge("exists", [this] { return _stat._exists; }, sm::description("EXISTS")),
+        sm::make_gauge("append", [this] { return _stat._append; }, sm::description("APPEND")),
+        sm::make_gauge("lpush", [this] { return _stat._lpush; }, sm::description("LPUSH")),
+        sm::make_gauge("lpushx", [this] { return _stat._lpushx; }, sm::description("LPUSHX")),
+        sm::make_gauge("lpop", [this] { return _stat._lpop; }, sm::description("LPOP")),
+        sm::make_gauge("rpop", [this] { return _stat._rpop; }, sm::description("RPOP")),
+        sm::make_gauge("lindex", [this] { return _stat._lindex; }, sm::description("LINDEX")),
+        sm::make_gauge("llen", [this] { return _stat._llen; }, sm::description("LLEN")),
+        sm::make_gauge("linsert", [this] { return _stat._linsert; }, sm::description("LINSERT")),
+        sm::make_gauge("lrange", [this] { return _stat._lrange; }, sm::description("LRANGE")),
+        sm::make_gauge("lset", [this] { return _stat._lset; }, sm::description("LSET")),
+        sm::make_gauge("ltrim", [this] { return _stat._ltrim; }, sm::description("LTRIM")),
+        sm::make_gauge("lrem", [this] { return _stat._lrem; }, sm::description("LREM")),
+        sm::make_gauge("incr", [this] { return _stat._incr; }, sm::description("INCR")),
+        sm::make_gauge("incrby", [this] { return _stat._incrby; }, sm::description("INCRBY")),
+        sm::make_gauge("decr", [this] { return _stat._decr; }, sm::description("DECR")),
+        sm::make_gauge("decrby", [this] { return _stat._decrby; }, sm::description("DECRBY")),
+        sm::make_gauge("hdel", [this] { return _stat._hdel; }, sm::description("HDEL")),
+        sm::make_gauge("hexists", [this] { return _stat._hexists; }, sm::description("HEXISTS")),
+        sm::make_gauge("hset", [this] { return _stat._hset; }, sm::description("HSET")),
+        sm::make_gauge("hmset", [this] { return _stat._hmset; }, sm::description("HMSET")),
+        sm::make_gauge("hincrby", [this] { return _stat._hincrby; }, sm::description("HINCR")),
+        sm::make_gauge("hincrbyfloat", [this] { return _stat._hincrbyfloat; }, sm::description("HINCRBYFLOAT")),
+        sm::make_gauge("hlen", [this] { return _stat._hlen; }, sm::description("HLEN")),
+        sm::make_gauge("hstrlen", [this] { return _stat._hstrlen; }, sm::description("HSTRLEN")),
+        sm::make_gauge("hgetall", [this] { return _stat._hgetall; }, sm::description("HGETALL")),
+        sm::make_gauge("hgetallkeys", [this] { return _stat._hgetall_keys; }, sm::description("HGETALLKEYS")),
+        sm::make_gauge("hgetallvalues", [this] { return _stat._hgetall_values; }, sm::description("HGETALLVALUES")),
+        sm::make_gauge("hmget", [this] { return _stat._hmget; }, sm::description("HMGET")),
+        sm::make_gauge("smembers", [this] { return _stat._smembers; }, sm::description("SMEMBERS")),
+        sm::make_gauge("sadd", [this] { return _stat._sadd; }, sm::description("SADD")),
+        sm::make_gauge("scard", [this] { return _stat._scard; }, sm::description("SCARD")),
+        sm::make_gauge("sismember", [this] { return _stat._sismember; }, sm::description("SISMEMBER")),
+        sm::make_gauge("srem", [this] { return _stat._srem; }, sm::description("SREM")),
+        sm::make_gauge("sdiff", [this] { return _stat._sdiff; }, sm::description("SDIFF")),
+        sm::make_gauge("sdiffstore", [this] { return _stat._sdiff_store; }, sm::description("SDIFFSTORE")),
+        sm::make_gauge("sinter", [this] { return _stat._sinter; }, sm::description("SINTER")),
+        sm::make_gauge("sinterstore", [this] { return _stat._sinter_store; }, sm::description("SINTERSTORE")),
+        sm::make_gauge("sunion", [this] { return _stat._sunion; }, sm::description("SUNION")),
+        sm::make_gauge("sunionstore", [this] { return _stat._sunion_store; }, sm::description("SUNIONSTORE")),
+        sm::make_gauge("smove", [this] { return _stat._smove; }, sm::description("SMOVE")),
+        sm::make_gauge("srandmember", [this] { return _stat._srandmember; }, sm::description("SRANDMEMBER")),
+        sm::make_gauge("spop", [this] { return _stat._spop; }, sm::description("SPOP")),
+        sm::make_gauge("type", [this] { return _stat._type; }, sm::description("TYPE")),
+        sm::make_gauge("expire", [this] { return _stat._expire; }, sm::description("EXPIRE")),
+        sm::make_gauge("pexpire", [this] { return _stat._pexpire; }, sm::description("PEXPIRE")),
+        sm::make_gauge("ttl", [this] { return _stat._ttl; }, sm::description("TTL")),
+        sm::make_gauge("pttl", [this] { return _stat._pttl; }, sm::description("PTTL")),
+        sm::make_gauge("persist", [this] { return _stat._persist; }, sm::description("PERSIST")),
+        sm::make_gauge("zadd", [this] { return _stat._zadd; }, sm::description("ZADD")),
+        sm::make_gauge("zcard", [this] { return _stat._zcard; }, sm::description("ZCARD")),
+        sm::make_gauge("zrange", [this] { return _stat._zrange; }, sm::description("ZRANGE")),
+        sm::make_gauge("zrangebyscore", [this] { return _stat._zrangebyscore; }, sm::description("ZRANGEBYSCORE")),
+        sm::make_gauge("zcount", [this] { return _stat._zcount; }, sm::description("ZCOUNT")),
+        sm::make_gauge("zincrby", [this] { return _stat._zincrby; }, sm::description("ZINCRBY")),
+        sm::make_gauge("zrank", [this] { return _stat._zrank; }, sm::description("ZRANK")),
+        sm::make_gauge("zrem", [this] { return _stat._zrem; }, sm::description("ZREM")),
+        sm::make_gauge("zscore", [this] { return _stat._zscore; }, sm::description("ZSCORE")),
+        sm::make_gauge("zremrangebyscore", [this] { return _stat._zremrangebyscore; }, sm::description("ZREMRANGEBYSCORE")),
+        sm::make_gauge("zremrangebyrank", [this] { return _stat._zremrangebyrank; }, sm::description("ZREMRANGEBYRANK")),
+        sm::make_gauge("zdiffstore", [this] { return _stat._zdiffstore; }, sm::description("ZDIFFSTORE")),
+        sm::make_gauge("zunionstore", [this] { return _stat._zunionstore; }, sm::description("ZUNIONSTORE")),
+        sm::make_gauge("zinterstore", [this] { return _stat._zinterstore; }, sm::description("ZINTERSTORE")),
+        sm::make_gauge("zdiff", [this] { return _stat._zdiff; }, sm::description("ZDIFF")),
+        sm::make_gauge("zunion", [this] { return _stat._zunion; }, sm::description("ZUNION")),
+        sm::make_gauge("zinter", [this] { return _stat._zinter; }, sm::description("ZINTER")),
+        sm::make_gauge("zrangebylex", [this] { return _stat._zrangebylex; }, sm::description("ZRANGEBYLEX")),
+        sm::make_gauge("zlexcount", [this] { return _stat._zlexcount; }, sm::description("ZLEXCOUNT")),
+        sm::make_gauge("select", [this] { return _stat._select; }, sm::description("SELECT")),
+        sm::make_gauge("geoadd", [this] { return _stat._geoadd; }, sm::description("GEOADD")),
+        sm::make_gauge("geodist", [this] { return _stat._geodist; }, sm::description("GEODIST")),
+        sm::make_gauge("geohash", [this] { return _stat._geohash; }, sm::description("GEOHASH")),
+        sm::make_gauge("geopos", [this] { return _stat._geopos; }, sm::description("GEOPOS")),
+        sm::make_gauge("georadius", [this] { return _stat._georadius; }, sm::description("GEORADIUS")),
+        sm::make_gauge("setbit", [this] { return _stat._setbit; }, sm::description("SETBIT")),
+        sm::make_gauge("getbit", [this] { return _stat._getbit; }, sm::description("GETBIT")),
+        sm::make_gauge("bitcount", [this] { return _stat._bitcount; }, sm::description("BITCOUNT")),
+        sm::make_gauge("bitop", [this] { return _stat._bitop; }, sm::description("BITOP")),
+        sm::make_gauge("bitpos", [this] { return _stat._bitpos; }, sm::description("BITPOS")),
+        sm::make_gauge("bitfield", [this] { return _stat._bitfield; }, sm::description("BITFIELD")),
+        sm::make_gauge("pfadd", [this] { return _stat._pfadd; }, sm::description("PFADD")),
+        sm::make_gauge("pfcount", [this] { return _stat._pfcount; }, sm::description("PFCOUNT")),
+        sm::make_gauge("pfmerge", [this] { return _stat._pfmerge; }, sm::description("PFMERGE")),
+     });
+}
+
 future<sstring> redis_service::echo(args_collection& args)
 {
+    ++_stat._echo;
     if (args._command_args_count < 1) {
         return make_ready_future<sstring>("");
     }
@@ -71,6 +170,7 @@ future<bool> redis_service::set_impl(sstring& key, sstring& val, long expir, uin
 
 future<> redis_service::set(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._set;
     // parse args
     if (args._command_args_count < 2) {
         return out.write(msg_syntax_err);
@@ -134,6 +234,7 @@ future<bool> redis_service::remove_impl(sstring& key) {
 
 future<> redis_service::del(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._del;
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -165,6 +266,7 @@ future<> redis_service::del(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::mset(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._mset;
     if (args._command_args_count <= 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -183,8 +285,9 @@ future<> redis_service::mset(args_collection& args, output_stream<char>& out)
         return parallel_for_each(std::begin(state.key_value_pairs), std::end(state.key_value_pairs), [this, &state] (auto& entry) {
             sstring& key = entry.first;
             sstring& value = entry.second;
-            return this->set_impl(key, value, 0, 0).then([&state] (auto u) {
-                if (u) state.success_count++ ;
+            redis_key rk {std::ref(key)};
+            return _db.invoke_on(this->get_cpu(rk), &database::set_direct, std::move(rk), std::ref(value), 0, FLAG_SET_NO).then([&state] (auto m) {
+                if (m) state.success_count++ ;
             });
         }).then([&state, &out] {
             return out.write(state.key_value_pairs.size() == state.success_count ? msg_ok : msg_err);
@@ -194,6 +297,7 @@ future<> redis_service::mset(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::get(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._get;
     if (args._command_args_count < 1) {
         return out.write(msg_syntax_err);
     }
@@ -207,6 +311,7 @@ future<> redis_service::get(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::mget(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._mget;
     if (args._command_args_count < 1) {
         return out.write(msg_syntax_err);
     }
@@ -234,6 +339,7 @@ future<> redis_service::mget(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::strlen(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._strlen;
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -254,6 +360,7 @@ future<bool> redis_service::exists_impl(sstring& key)
 
 future<> redis_service::exists(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._exists;
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -285,6 +392,7 @@ future<> redis_service::exists(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::append(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._append;
     if (args._command_args_count <= 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -333,31 +441,37 @@ future<> redis_service::push_impl(args_collection& args, bool force, bool left, 
 
 future<> redis_service::lpush(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._lpush;
     return push_impl(args, true, false, out);
 }
 
 future<> redis_service::lpushx(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._lpushx;
     return push_impl(args, false, false, out);
 }
 
 future<> redis_service::rpush(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._rpush;
     return push_impl(args, true, true, out);
 }
 
 future<> redis_service::rpushx(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._rpushx;
     return push_impl(args, false, true, out);
 }
 
 future<> redis_service::lpop(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._lpop;
     return pop_impl(args, false, out);
 }
 
 future<> redis_service::rpop(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._rpop;
     return pop_impl(args, true, out);
 }
 
@@ -376,6 +490,7 @@ future<> redis_service::pop_impl(args_collection& args, bool left, output_stream
 
 future<> redis_service::lindex(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._lindex;
     if (args._command_args_count <= 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -390,6 +505,7 @@ future<> redis_service::lindex(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::llen(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._llen;
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -403,6 +519,7 @@ future<> redis_service::llen(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::linsert(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._linsert;
     if (args._command_args_count <= 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -422,6 +539,7 @@ future<> redis_service::linsert(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::lrange(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._lrange;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -439,6 +557,7 @@ future<> redis_service::lrange(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::lset(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._lset;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -455,6 +574,7 @@ future<> redis_service::lset(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::ltrim(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._ltrim;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -470,6 +590,7 @@ future<> redis_service::ltrim(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::lrem(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._lrem;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -485,19 +606,23 @@ future<> redis_service::lrem(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::incr(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._incr;
     return counter_by(args, true, false, out);
 }
 
 future<> redis_service::incrby(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._incrby;
     return counter_by(args, true, true, out);
 }
 future<> redis_service::decr(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._decr;
     return counter_by(args, false, false, out);
 }
 future<> redis_service::decrby(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._decrby;
     return counter_by(args, false, true, out);
 }
 
@@ -525,6 +650,7 @@ future<> redis_service::counter_by(args_collection& args, bool incr, bool with_s
 
 future<> redis_service::hdel(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hdel;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -548,6 +674,7 @@ future<> redis_service::hdel(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::hexists(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hexists;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -562,6 +689,7 @@ future<> redis_service::hexists(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::hset(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hset;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -577,6 +705,7 @@ future<> redis_service::hset(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::hmset(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hmset;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -594,6 +723,7 @@ future<> redis_service::hmset(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::hincrby(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hincrby;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -610,6 +740,7 @@ future<> redis_service::hincrby(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::hincrbyfloat(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hincrbyfloat;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -626,6 +757,7 @@ future<> redis_service::hincrbyfloat(args_collection& args, output_stream<char>&
 
 future<> redis_service::hlen(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hlen;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -639,6 +771,7 @@ future<> redis_service::hlen(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::hstrlen(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hstrlen;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -653,6 +786,7 @@ future<> redis_service::hstrlen(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::hget(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hget;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -667,6 +801,7 @@ future<> redis_service::hget(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::hgetall(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hgetall;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -680,6 +815,7 @@ future<> redis_service::hgetall(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::hgetall_keys(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hgetall_keys;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -693,6 +829,7 @@ future<> redis_service::hgetall_keys(args_collection& args, output_stream<char>&
 
 future<> redis_service::hgetall_values(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hgetall_values;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -706,6 +843,7 @@ future<> redis_service::hgetall_values(args_collection& args, output_stream<char
 
 future<> redis_service::hmget(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._hmget;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -732,6 +870,7 @@ future<> redis_service::smembers_impl(sstring& key, output_stream<char>& out)
 
 future<> redis_service::smembers(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._smembers;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -761,6 +900,7 @@ future<> redis_service::sadds_impl_return_keys(sstring& key, std::vector<sstring
 
 future<> redis_service::sadd(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._sadd;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -772,6 +912,7 @@ future<> redis_service::sadd(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::scard(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._scard;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -784,6 +925,7 @@ future<> redis_service::scard(args_collection& args, output_stream<char>& out)
 }
 future<> redis_service::sismember(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._sismember;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -798,6 +940,7 @@ future<> redis_service::sismember(args_collection& args, output_stream<char>& ou
 
 future<> redis_service::srem(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._srem;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -825,6 +968,7 @@ future<> redis_service::sdiff_store(args_collection& args, output_stream<char>& 
 
 future<> redis_service::sdiff(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._sdiff;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -911,6 +1055,7 @@ future<> redis_service::sinter_impl(std::vector<sstring>& keys, sstring* dest, o
 
 future<> redis_service::sinter(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._sinter;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -922,6 +1067,7 @@ future<> redis_service::sinter(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::sinter_store(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._sinter_store;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -965,6 +1111,7 @@ future<> redis_service::sunion_impl(std::vector<sstring>& keys, sstring* dest, o
 
 future<> redis_service::sunion(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._sunion;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -976,6 +1123,7 @@ future<> redis_service::sunion(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::sunion_store(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._sunion_store;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1002,6 +1150,7 @@ future<bool> redis_service::sadd_direct(sstring& key, sstring& member)
 
 future<> redis_service::smove(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._smove;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1027,6 +1176,7 @@ future<> redis_service::smove(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::srandmember(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._srandmember;
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1048,6 +1198,7 @@ future<> redis_service::srandmember(args_collection& args, output_stream<char>& 
 
 future<> redis_service::spop(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._spop;
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1068,6 +1219,7 @@ future<> redis_service::spop(args_collection& args, output_stream<char>& out)
 }
 future<> redis_service::type(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._type;
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1081,6 +1233,7 @@ future<> redis_service::type(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::expire(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._expire;
     if (args._command_args_count <= 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1101,6 +1254,7 @@ future<> redis_service::expire(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::pexpire(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._pexpire;
     if (args._command_args_count <= 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1120,6 +1274,7 @@ future<> redis_service::pexpire(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::pttl(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._pttl;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1133,6 +1288,7 @@ future<> redis_service::pttl(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::ttl(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._ttl;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1146,6 +1302,7 @@ future<> redis_service::ttl(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::persist(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._persist;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1159,6 +1316,7 @@ future<> redis_service::persist(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::zadd(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zadd;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1225,6 +1383,7 @@ future<> redis_service::zadd(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::zcard(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zcard;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1238,6 +1397,7 @@ future<> redis_service::zcard(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::zrange(args_collection& args, bool reverse, output_stream<char>& out)
 {
+    ++_stat._zrange;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1266,6 +1426,7 @@ future<> redis_service::zrange(args_collection& args, bool reverse, output_strea
 
 future<> redis_service::zrangebyscore(args_collection& args, bool reverse, output_stream<char>& out)
 {
+    ++_stat._zrangebyscore;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1294,6 +1455,7 @@ future<> redis_service::zrangebyscore(args_collection& args, bool reverse, outpu
 
 future<> redis_service::zcount(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zcount;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1314,6 +1476,7 @@ future<> redis_service::zcount(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::zincrby(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zincrby;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1334,6 +1497,7 @@ future<> redis_service::zincrby(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::zrank(args_collection& args, bool reverse, output_stream<char>& out)
 {
+    ++_stat._zrank;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1348,6 +1512,7 @@ future<> redis_service::zrank(args_collection& args, bool reverse, output_stream
 
 future<> redis_service::zrem(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zrem;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1365,6 +1530,7 @@ future<> redis_service::zrem(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::zscore(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zscore;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1450,6 +1616,7 @@ bool redis_service::parse_zset_args(args_collection& args, zset_args& uargs)
 
 future<> redis_service::zunionstore(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zunionstore;
     zset_args uargs;
     if (parse_zset_args(args, uargs) == false) {
         return out.write(msg_syntax_err);
@@ -1494,6 +1661,7 @@ future<> redis_service::zunionstore(args_collection& args, output_stream<char>& 
 
 future<> redis_service::zinterstore(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zinterstore;
     zset_args uargs;
     if (parse_zset_args(args, uargs) == false) {
         return out.write(msg_syntax_err);
@@ -1557,6 +1725,7 @@ future<> redis_service::zinterstore(args_collection& args, output_stream<char>& 
 
 future<> redis_service::zremrangebyscore(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zremrangebyscore;
     // ZREMRANGEBYSCORE key min max
     // Removes all elements in the sorted set stored at key with a score between min and max (inclusive).
     // Integer reply: the number of elements removed.
@@ -1580,6 +1749,7 @@ future<> redis_service::zremrangebyscore(args_collection& args, output_stream<ch
 
 future<> redis_service::zremrangebyrank(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zremrangebyrank;
     // ZREMRANGEBYRANK key begin end
     // Removes all elements in the sorted set stored at key with a rank between start and end (inclusive).
     // Integer reply: the number of elements removed.
@@ -1603,36 +1773,43 @@ future<> redis_service::zremrangebyrank(args_collection& args, output_stream<cha
 
 future<> redis_service::zdiffstore(args_collection&, output_stream<char>& out)
 {
+    ++_stat._zdiffstore;
     return out.write(msg_syntax_err);
 }
 
 future<> redis_service::zunion(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zunion;
     return out.write(msg_syntax_err);
 }
 
 future<> redis_service::zinter(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zinter;
     return out.write(msg_syntax_err);
 }
 
 future<> redis_service::zdiff(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zdiff;
     return out.write(msg_syntax_err);
 }
 
 future<> redis_service::zrangebylex(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zrangebylex;
     return out.write(msg_syntax_err);
 }
 
 future<> redis_service::zlexcount(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._zlexcount;
     return out.write(msg_syntax_err);
 }
 
 future<> redis_service::select(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._select;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1661,6 +1838,7 @@ future<> redis_service::select(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::geoadd(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._geoadd;
     if (args._command_args_count < 4 || (args._command_args_count - 1) % 3 != 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1690,6 +1868,7 @@ future<> redis_service::geoadd(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::geodist(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._geodist;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1721,6 +1900,7 @@ future<> redis_service::geodist(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::geohash(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._geohash;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1737,6 +1917,7 @@ future<> redis_service::geohash(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::geopos(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._geopos;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1754,6 +1935,7 @@ future<> redis_service::geopos(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::georadius(args_collection& args, bool member, output_stream<char>& out)
 {
+    ++_stat._georadius;
     size_t option_index = member ? 4 : 5;
     if (args._command_args_count < option_index || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1908,6 +2090,7 @@ future<> redis_service::georadius(args_collection& args, bool member, output_str
 
 future<> redis_service::setbit(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._setbit;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1929,6 +2112,7 @@ future<> redis_service::setbit(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::getbit(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._getbit;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1948,6 +2132,7 @@ future<> redis_service::getbit(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::bitcount(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._bitcount;
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -1968,21 +2153,25 @@ future<> redis_service::bitcount(args_collection& args, output_stream<char>& out
 
 future<> redis_service::bitop(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._bitop;
     return out.write(msg_nil);
 }
 
 future<> redis_service::bitpos(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._bitpos;
     return out.write(msg_nil);
 }
 
 future<> redis_service::bitfield(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._bitfield;
     return out.write(msg_nil);
 }
 
 future<> redis_service::pfadd(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._pfadd;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -2000,6 +2189,7 @@ future<> redis_service::pfadd(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::pfcount(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._pfcount;
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
@@ -2039,6 +2229,7 @@ future<> redis_service::pfcount(args_collection& args, output_stream<char>& out)
 
 future<> redis_service::pfmerge(args_collection& args, output_stream<char>& out)
 {
+    ++_stat._pfmerge;
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
     }
