@@ -77,22 +77,22 @@ struct expiration {
 };
 
 // cache_entry should be allocated by LSA.
+enum class entry_type {
+    ENTRY_FLOAT = 0,
+    ENTRY_INT64 = 1,
+    ENTRY_BYTES = 2,
+    ENTRY_LIST  = 3,
+    ENTRY_MAP   = 4,
+    ENTRY_SET   = 5,
+    ENTRY_SSET  = 6,
+    ENTRY_HLL   = 7,
+};
 class cache_entry
 {
 protected:
     friend class cache;
     using hook_type = boost::intrusive::unordered_set_member_hook<>;
     hook_type _cache_link;
-    enum class entry_type {
-        ENTRY_FLOAT = 0,
-        ENTRY_INT64 = 1,
-        ENTRY_BYTES = 2,
-        ENTRY_LIST  = 3,
-        ENTRY_MAP   = 4,
-        ENTRY_SET   = 5,
-        ENTRY_SSET  = 6,
-        ENTRY_HLL   = 7,
-    };
     entry_type _type;
     managed_ref<managed_bytes> _key;
     size_t _key_hash;
@@ -330,6 +330,10 @@ public:
     inline const char* value_bytes_data() const
     {
         return reinterpret_cast<const char*>(_storage._bytes->data());
+    }
+    inline entry_type type() const
+    {
+        return _type;
     }
     inline bool type_of_float() const
     {

@@ -259,7 +259,6 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
         try {
             f.get();
         } catch (std::bad_alloc& e) {
-            in.close();
             return out.write(msg_err);
         }
         return make_ready_future<>();

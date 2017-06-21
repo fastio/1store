@@ -68,8 +68,34 @@ database::database()
     for (size_t i = 0; i < DEFAULT_DB_COUNT; ++i) {
         auto& store = _cache_stores[i];
         _cache_stores[i].set_expired_entry_releaser([this, &store] (cache_entry& e) {
-             with_allocator(allocator(), [&store, &e] {
-                 store.erase(e);
+             with_allocator(allocator(), [this, &store, &e] {
+                 auto type = e.type();
+                 if (store.erase(e)) {
+                     switch (type) {
+                         case entry_type::ENTRY_FLOAT:
+                         case entry_type::ENTRY_INT64:
+                             --_stat._total_counter_entries;
+                             break;
+                         case entry_type::ENTRY_BYTES:
+                             --_stat._total_string_entries;
+                             break;
+                         case entry_type::ENTRY_LIST:
+                             --_stat._total_list_entries;
+                             break;
+                         case entry_type::ENTRY_MAP:
+                             --_stat._total_bitmap_entries;
+                             break;
+                         case entry_type::ENTRY_SET:
+                             --_stat._total_set_entries;
+                             break;
+                         case entry_type::ENTRY_SSET:
+                             --_stat._total_zset_entries;
+                             break;
+                         case entry_type::ENTRY_HLL:
+                             --_stat._total_hll_entries;
+                             break;
+                     }
+                 }
              });
         });
     }
