@@ -14,7 +14,7 @@
 * KIND, either express or implied.  See the License for the
 * specific language governing permissions and limitations
 * under the License.
-* 
+*
 *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
@@ -27,6 +27,59 @@
 
 namespace redis {
 class redis_service;
+
+class request_latency_tracer
+{
+    static constexpr const int SAMPLE_COUNT = 256;
+    circular_buffer<double> _latencies;
+    double _average_latency = 0;
+    uint64_t _requests_served = 0;
+    uint64_t _requests_serving = 0;
+    uint64_t _requests_exception = 0;
+    steady_clock_type::time_point _timestamp = steady_clock_type::now();
+public:
+    request_latency_tracer() {}
+    ~request_latency_tracer() {}
+
+    inline uint64_t number_exceptions() const {
+        return _requests_exception;
+    }
+
+    inline double latency() const {
+        return _average_latency;
+    }
+
+    inline uint64_t served() const {
+        return _requests_served;
+    }
+
+    inline uint64_t serving() const {
+        return _requests_serving;
+    }
+
+    inline void begin_trace_latency() {
+        ++_requests_serving;
+        _timestamp = steady_clock_type::now();
+    }
+
+    inline void incr_number_exceptions() {
+        ++_requests_exception;
+    }
+
+    inline void end_trace_latency() {
+        auto rt = static_cast<double>((steady_clock_type::now() - _timestamp).count() / 1000.0); //us
+        _latencies.push_front(rt);
+        if (_latencies.size() > SAMPLE_COUNT) {
+            auto drop = _latencies.back();
+            _latencies.pop_back();
+            _average_latency -= (drop / SAMPLE_COUNT);
+        }
+        --_requests_serving;
+        ++_requests_served;
+        _average_latency += (rt / SAMPLE_COUNT);
+    }
+};
+
 class redis_protocol {
 private:
     redis_service& _redis;
@@ -43,6 +96,6 @@ public:
         };
         std::cout << "}\n";
     }
-    future<> handle(input_stream<char>& in, output_stream<char>& out);
+    future<> handle(input_stream<char>& in, output_stream<char>& out, request_latency_tracer& tracer);
 };
 }

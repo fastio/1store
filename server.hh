@@ -50,11 +50,12 @@ private:
     };
     seastar::metrics::metric_groups _metrics;
     void setup_metrics();
-    struct connection_stats {
-        uint64_t _new_connection_count = 0;
-        uint64_t _alived_connection_count = 0;
+    struct stats {
+        uint64_t _connections_current = 0;
+        uint64_t _connections_total = 0;
     };
-    connection_stats _stats;
+    stats _stats;
+    request_latency_tracer _latency_tracer;
 public:
     server(redis_service& db, uint16_t port = 6379)
         : _redis(db)
@@ -69,15 +70,15 @@ public:
         _listener = engine().listen(make_ipv4_address({_port}), lo);
         keep_doing([this] {
            return _listener->accept().then([this] (connected_socket fd, socket_address addr) mutable {
-               ++_stats._new_connection_count;
-               ++_stats._alived_connection_count;
+               ++_stats._connections_total;
+               ++_stats._connections_current;
                auto conn = make_lw_shared<connection>(std::move(fd), addr, _redis);
                do_until([conn] { return conn->_in.eof(); }, [this, conn] {
-                   return conn->_proto.handle(conn->_in, conn->_out).then([conn] {
+                   return conn->_proto.handle(conn->_in, conn->_out, _latency_tracer).then([this, conn] {
                        return conn->_out.flush();
                    });
                }).finally([this, conn] {
-                   --_stats._alived_connection_count;
+                   --_stats._connections_current;
                    return conn->_out.close().finally([conn]{});
                });
            });

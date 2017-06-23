@@ -217,6 +217,7 @@ static  future<> build_local(output_stream<char>& out, std::vector<foreign_ptr<l
         return out.write(msg_nil);
     }
 }
+
 static  future<> build_local(output_stream<char>& out, const std::vector<sstring>& entries)
 {
     if (!entries.empty()) {

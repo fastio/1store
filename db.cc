@@ -125,21 +125,112 @@ void database::setup_metrics()
 {
     namespace sm = seastar::metrics;
     _metrics.add_group("db", {
-        sm::make_gauge("read", [this] { return _stat._read; }, sm::description("Total number of read operations")),
-        sm::make_gauge("hit", [this] { return _stat._hit; }, sm::description("Total number of the read hit")),
-        sm::make_gauge("total_counter_entries", [this] { return _stat._total_counter_entries; }, sm::description("Total of counter entries")),
-        sm::make_gauge("total_string_entries", [this] { return _stat._total_string_entries; }, sm::description("Total of string entries")),
-        sm::make_gauge("total_dict_entries", [this] { return _stat._total_dict_entries; }, sm::description("Total of dict entries")),
-        sm::make_gauge("total_list_entries", [this] { return _stat._total_list_entries; }, sm::description("Total of list entries")),
-        sm::make_gauge("total_set_entries", [this] { return _stat._total_set_entries; }, sm::description("Total of set entries")),
-        sm::make_gauge("total_sorted_set_entries", [this] { return _stat._total_zset_entries; }, sm::description("Total of sorted set entries")),
-        sm::make_gauge("total_hll_entries", [this] { return _stat._total_hll_entries; }, sm::description("Total of hyperloglog entries")),
-        sm::make_gauge("total_expiring_entries", [this] { return sum_expiring_entries(); }, sm::description("Total of expiring entries")),
+        sm::make_counter("read", [this] { return _stat._read; }, sm::description("Total number of read operations.")),
+        sm::make_counter("hit", [this] { return _stat._hit; }, sm::description("Total number of the read hit.")),
+        sm::make_counter("total_counter_entries", [this] { return _stat._total_counter_entries; }, sm::description("Total of counter entries.")),
+        sm::make_counter("total_string_entries", [this] { return _stat._total_string_entries; }, sm::description("Total of string entries.")),
+        sm::make_counter("total_dict_entries", [this] { return _stat._total_dict_entries; }, sm::description("Total of dict entries.")),
+        sm::make_counter("total_list_entries", [this] { return _stat._total_list_entries; }, sm::description("Total of list entries.")),
+        sm::make_counter("total_set_entries", [this] { return _stat._total_set_entries; }, sm::description("Total of set entries.")),
+        sm::make_counter("total_sorted_set_entries", [this] { return _stat._total_zset_entries; }, sm::description("Total of sorted set entries.")),
+        sm::make_counter("total_hll_entries", [this] { return _stat._total_hll_entries; }, sm::description("Total of hyperloglog entries.")),
+        sm::make_counter("total_expiring_entries", [this] { return sum_expiring_entries(); }, sm::description("Total of expiring entries.")),
     });
+
+    _metrics.add_group("op", {
+        sm::make_counter("echo", [this] { return _stat._echo; }, sm::description("ECHO")),
+        sm::make_counter("set", [this] { return _stat._set; }, sm::description("SET")),
+        sm::make_counter("get", [this] { return _stat._get; }, sm::description("GET")),
+        sm::make_counter("del", [this] { return _stat._del; }, sm::description("DEL")),
+        sm::make_counter("mset", [this] { return _stat._mset; }, sm::description("MSET")),
+        sm::make_counter("mget", [this] { return _stat._mget; }, sm::description("MGET")),
+        sm::make_counter("strlen", [this] { return _stat._strlen; }, sm::description("STRLEN")),
+        sm::make_counter("exists", [this] { return _stat._exists; }, sm::description("EXISTS")),
+        sm::make_counter("append", [this] { return _stat._append; }, sm::description("APPEND")),
+        sm::make_counter("lpush", [this] { return _stat._lpush; }, sm::description("LPUSH")),
+        sm::make_counter("lpushx", [this] { return _stat._lpushx; }, sm::description("LPUSHX")),
+        sm::make_counter("lpop", [this] { return _stat._lpop; }, sm::description("LPOP")),
+        sm::make_counter("rpop", [this] { return _stat._rpop; }, sm::description("RPOP")),
+        sm::make_counter("lindex", [this] { return _stat._lindex; }, sm::description("LINDEX")),
+        sm::make_counter("llen", [this] { return _stat._llen; }, sm::description("LLEN")),
+        sm::make_counter("linsert", [this] { return _stat._linsert; }, sm::description("LINSERT")),
+        sm::make_counter("lrange", [this] { return _stat._lrange; }, sm::description("LRANGE")),
+        sm::make_counter("lset", [this] { return _stat._lset; }, sm::description("LSET")),
+        sm::make_counter("ltrim", [this] { return _stat._ltrim; }, sm::description("LTRIM")),
+        sm::make_counter("lrem", [this] { return _stat._lrem; }, sm::description("LREM")),
+        sm::make_counter("counter", [this] { return _stat._counter; }, sm::description("DECR")),
+        sm::make_counter("hdel", [this] { return _stat._hdel; }, sm::description("HDEL")),
+        sm::make_counter("hexists", [this] { return _stat._hexists; }, sm::description("HEXISTS")),
+        sm::make_counter("hset", [this] { return _stat._hset; }, sm::description("HSET")),
+        sm::make_counter("hmset", [this] { return _stat._hmset; }, sm::description("HMSET")),
+        sm::make_counter("hincrby", [this] { return _stat._hincrby; }, sm::description("HINCR")),
+        sm::make_counter("hincrbyfloat", [this] { return _stat._hincrbyfloat; }, sm::description("HINCRBYFLOAT")),
+        sm::make_counter("hlen", [this] { return _stat._hlen; }, sm::description("HLEN")),
+        sm::make_counter("hstrlen", [this] { return _stat._hstrlen; }, sm::description("HSTRLEN")),
+        sm::make_counter("hgetall", [this] { return _stat._hgetall; }, sm::description("HGETALL")),
+        sm::make_counter("hgetallkeys", [this] { return _stat._hgetall_keys; }, sm::description("HGETALLKEYS")),
+        sm::make_counter("hgetallvalues", [this] { return _stat._hgetall_values; }, sm::description("HGETALLVALUES")),
+        sm::make_counter("hmget", [this] { return _stat._hmget; }, sm::description("HMGET")),
+        sm::make_counter("smembers", [this] { return _stat._smembers; }, sm::description("SMEMBERS")),
+        sm::make_counter("sadd", [this] { return _stat._sadd; }, sm::description("SADD")),
+        sm::make_counter("scard", [this] { return _stat._scard; }, sm::description("SCARD")),
+        sm::make_counter("sismember", [this] { return _stat._sismember; }, sm::description("SISMEMBER")),
+        sm::make_counter("srem", [this] { return _stat._srem; }, sm::description("SREM")),
+        sm::make_counter("sdiff", [this] { return _stat._sdiff; }, sm::description("SDIFF")),
+        sm::make_counter("sdiffstore", [this] { return _stat._sdiff_store; }, sm::description("SDIFFSTORE")),
+        sm::make_counter("sinter", [this] { return _stat._sinter; }, sm::description("SINTER")),
+        sm::make_counter("sinterstore", [this] { return _stat._sinter_store; }, sm::description("SINTERSTORE")),
+        sm::make_counter("sunion", [this] { return _stat._sunion; }, sm::description("SUNION")),
+        sm::make_counter("sunionstore", [this] { return _stat._sunion_store; }, sm::description("SUNIONSTORE")),
+        sm::make_counter("smove", [this] { return _stat._smove; }, sm::description("SMOVE")),
+        sm::make_counter("srandmember", [this] { return _stat._srandmember; }, sm::description("SRANDMEMBER")),
+        sm::make_counter("spop", [this] { return _stat._spop; }, sm::description("SPOP")),
+        sm::make_counter("type", [this] { return _stat._type; }, sm::description("TYPE")),
+        sm::make_counter("expire", [this] { return _stat._expire; }, sm::description("EXPIRE")),
+        sm::make_counter("pexpire", [this] { return _stat._pexpire; }, sm::description("PEXPIRE")),
+        sm::make_counter("ttl", [this] { return _stat._ttl; }, sm::description("TTL")),
+        sm::make_counter("pttl", [this] { return _stat._pttl; }, sm::description("PTTL")),
+        sm::make_counter("persist", [this] { return _stat._persist; }, sm::description("PERSIST")),
+        sm::make_counter("zadd", [this] { return _stat._zadd; }, sm::description("ZADD")),
+        sm::make_counter("zcard", [this] { return _stat._zcard; }, sm::description("ZCARD")),
+        sm::make_counter("zrange", [this] { return _stat._zrange; }, sm::description("ZRANGE")),
+        sm::make_counter("zrangebyscore", [this] { return _stat._zrangebyscore; }, sm::description("ZRANGEBYSCORE")),
+        sm::make_counter("zcount", [this] { return _stat._zcount; }, sm::description("ZCOUNT")),
+        sm::make_counter("zincrby", [this] { return _stat._zincrby; }, sm::description("ZINCRBY")),
+        sm::make_counter("zrank", [this] { return _stat._zrank; }, sm::description("ZRANK")),
+        sm::make_counter("zrem", [this] { return _stat._zrem; }, sm::description("ZREM")),
+        sm::make_counter("zscore", [this] { return _stat._zscore; }, sm::description("ZSCORE")),
+        sm::make_counter("zremrangebyscore", [this] { return _stat._zremrangebyscore; }, sm::description("ZREMRANGEBYSCORE")),
+        sm::make_counter("zremrangebyrank", [this] { return _stat._zremrangebyrank; }, sm::description("ZREMRANGEBYRANK")),
+        sm::make_counter("zdiffstore", [this] { return _stat._zdiffstore; }, sm::description("ZDIFFSTORE")),
+        sm::make_counter("zunionstore", [this] { return _stat._zunionstore; }, sm::description("ZUNIONSTORE")),
+        sm::make_counter("zinterstore", [this] { return _stat._zinterstore; }, sm::description("ZINTERSTORE")),
+        sm::make_counter("zdiff", [this] { return _stat._zdiff; }, sm::description("ZDIFF")),
+        sm::make_counter("zunion", [this] { return _stat._zunion; }, sm::description("ZUNION")),
+        sm::make_counter("zinter", [this] { return _stat._zinter; }, sm::description("ZINTER")),
+        sm::make_counter("zrangebylex", [this] { return _stat._zrangebylex; }, sm::description("ZRANGEBYLEX")),
+        sm::make_counter("zlexcount", [this] { return _stat._zlexcount; }, sm::description("ZLEXCOUNT")),
+        sm::make_counter("select", [this] { return _stat._select; }, sm::description("SELECT")),
+        sm::make_counter("geoadd", [this] { return _stat._geoadd; }, sm::description("GEOADD")),
+        sm::make_counter("geodist", [this] { return _stat._geodist; }, sm::description("GEODIST")),
+        sm::make_counter("geohash", [this] { return _stat._geohash; }, sm::description("GEOHASH")),
+        sm::make_counter("geopos", [this] { return _stat._geopos; }, sm::description("GEOPOS")),
+        sm::make_counter("georadius", [this] { return _stat._georadius; }, sm::description("GEORADIUS")),
+        sm::make_counter("setbit", [this] { return _stat._setbit; }, sm::description("SETBIT")),
+        sm::make_counter("getbit", [this] { return _stat._getbit; }, sm::description("GETBIT")),
+        sm::make_counter("bitcount", [this] { return _stat._bitcount; }, sm::description("BITCOUNT")),
+        sm::make_counter("bitop", [this] { return _stat._bitop; }, sm::description("BITOP")),
+        sm::make_counter("bitpos", [this] { return _stat._bitpos; }, sm::description("BITPOS")),
+        sm::make_counter("bitfield", [this] { return _stat._bitfield; }, sm::description("BITFIELD")),
+        sm::make_counter("pfadd", [this] { return _stat._pfadd; }, sm::description("PFADD")),
+        sm::make_counter("pfcount", [this] { return _stat._pfcount; }, sm::description("PFCOUNT")),
+        sm::make_counter("pfmerge", [this] { return _stat._pfmerge; }, sm::description("PFMERGE")),
+     });
 }
 
 bool database::set_direct(const redis_key& rk, sstring& val, long expired, uint32_t flag)
 {
+    ++_stat._set;
     return with_allocator(allocator(), [this, &rk, &val, expired, flag] {
         auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
         bool result = true;
@@ -156,6 +247,7 @@ bool database::set_direct(const redis_key& rk, sstring& val, long expired, uint3
 
 future<scattered_message_ptr> database::set(const redis_key& rk, sstring& val, long expired, uint32_t flag)
 {
+    ++_stat._set;
     return with_allocator(allocator(), [this, &rk, &val, expired, flag] {
         auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
         bool result = true;
@@ -172,6 +264,7 @@ future<scattered_message_ptr> database::set(const redis_key& rk, sstring& val, l
 
 bool database::del_direct(const redis_key& rk)
 {
+    ++_stat._del;
     return current_store().with_entry_run(rk, [this, &rk] (cache_entry* e) {
         if (!e) return false;
         if (e->type_of_bytes()) {
@@ -202,6 +295,7 @@ bool database::del_direct(const redis_key& rk)
 
 future<scattered_message_ptr> database::del(const redis_key& rk)
 {
+    ++_stat._del;
     return current_store().with_entry_run(rk, [this, &rk] (cache_entry* e) {
         if (!e) return reply_builder::build(msg_zero);
         if (e->type_of_bytes()) {
@@ -232,17 +326,20 @@ future<scattered_message_ptr> database::del(const redis_key& rk)
 
 bool database::exists_direct(const redis_key& rk)
 {
+    ++_stat._exists;
     return current_store().exists(rk);
 }
 
 future<scattered_message_ptr> database::exists(const redis_key& rk)
 {
+    ++_stat._exists;
     auto result = current_store().exists(rk);
     return reply_builder::build(result ? msg_one : msg_zero);
 }
 
 future<scattered_message_ptr> database::counter_by(const redis_key& rk, int64_t step, bool incr)
 {
+    ++_stat._counter;
     return with_allocator(allocator(), [this, &rk, step, incr] {
         return current_store().with_entry_run(rk, [this, &rk, step, incr] (cache_entry* e) {
             if (!e) {
@@ -268,6 +365,7 @@ future<scattered_message_ptr> database::counter_by(const redis_key& rk, int64_t 
 
 future<scattered_message_ptr> database::append(const redis_key& rk, sstring& val)
 {
+    ++_stat._append;
     return with_allocator(allocator(), [this, &rk, &val] {
         return current_store().with_entry_run(rk, [this, &rk, &val] (cache_entry* e) {
             if (!e) {
@@ -296,6 +394,7 @@ future<scattered_message_ptr> database::append(const redis_key& rk, sstring& val
 future<scattered_message_ptr> database::get(const redis_key& rk)
 {
     ++_stat._read;
+    ++_stat._get;
     return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
        if (e && e->type_of_bytes() == false) {
            return reply_builder::build(msg_type_err);
@@ -309,6 +408,7 @@ future<scattered_message_ptr> database::get(const redis_key& rk)
 
 future<scattered_message_ptr> database::strlen(const redis_key& rk)
 {
+    ++_stat._strlen;
     return current_store().with_entry_run(rk, [] (const cache_entry* e) {
         if (e) {
             if (e->type_of_bytes()) {
@@ -322,6 +422,7 @@ future<scattered_message_ptr> database::strlen(const redis_key& rk)
 
 future<scattered_message_ptr> database::type(const redis_key& rk)
 {
+    ++_stat._type;
     return current_store().with_entry_run(rk, [this, &rk] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_type_none);
@@ -333,18 +434,21 @@ future<scattered_message_ptr> database::type(const redis_key& rk)
 
 future<scattered_message_ptr> database::expire(const redis_key& rk, long expired)
 {
+    ++_stat._expire;
     auto result = current_store().expire(rk, expired);
     return reply_builder::build(result ? msg_one : msg_zero);
 }
 
 future<scattered_message_ptr> database::persist(const redis_key& rk)
 {
+    ++_stat._persist;
     auto result = current_store().never_expired(rk);
     return reply_builder::build(result ? msg_one : msg_zero);
 }
 
 future<scattered_message_ptr> database::push(const redis_key& rk, sstring& val, bool force, bool left)
 {
+    left ? ++_stat._lpush : ++_stat._rpush;
     return with_allocator(allocator(), [this, &rk, &val, force, left] () {
         return current_store().with_entry_run(rk, [this, &rk, &val, force, left] (cache_entry* o) {
             auto e = o;
@@ -370,6 +474,7 @@ future<scattered_message_ptr> database::push(const redis_key& rk, sstring& val, 
 
 future<scattered_message_ptr> database::push_multi(const redis_key& rk, std::vector<sstring>& values, bool force, bool left)
 {
+    left ? ++_stat._lpush : ++_stat._rpush;
     return with_allocator(allocator(), [this, &rk, &values, force, left] () {
         return current_store().with_entry_run(rk, [this, &rk, &values, force, left] (cache_entry* o) {
             auto e = o;
@@ -398,6 +503,7 @@ future<scattered_message_ptr> database::push_multi(const redis_key& rk, std::vec
 future<scattered_message_ptr> database::pop(const redis_key& rk, bool left)
 {
     ++_stat._read;
+    left ? ++_stat._lpop : ++_stat._rpop;
     return with_allocator(allocator(), [this, &rk, left] () {
         return current_store().with_entry_run(rk, [this, &rk, left] (cache_entry* e) {
             if (!e) {
@@ -422,6 +528,7 @@ future<scattered_message_ptr> database::pop(const redis_key& rk, bool left)
 
 future<scattered_message_ptr> database::llen(const redis_key& rk)
 {
+    ++_stat._llen;
     return current_store().with_entry_run(rk, [&rk] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_zero);
@@ -437,6 +544,7 @@ future<scattered_message_ptr> database::llen(const redis_key& rk)
 future<scattered_message_ptr> database::lindex(const redis_key& rk, long idx)
 {
     ++_stat._read;
+    ++_stat._lindex;
     return current_store().with_entry_run(rk, [this, &rk, idx] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_nil);
@@ -458,6 +566,7 @@ future<scattered_message_ptr> database::lindex(const redis_key& rk, long idx)
 future<scattered_message_ptr> database::lrange(const redis_key& rk, long start, long end)
 {
     ++_stat._read;
+    ++_stat._lrange;
     return current_store().with_entry_run(rk, [this, &rk, &start, &end] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_err);
@@ -484,6 +593,7 @@ future<scattered_message_ptr> database::lrange(const redis_key& rk, long start, 
 
 future<scattered_message_ptr> database::lrem(const redis_key& rk, long count, sstring& val)
 {
+    ++_stat._lrem;
     return with_allocator(allocator(), [this, &rk, count, &val] {
         return current_store().with_entry_run(rk, [this, &rk, &val, &count] (cache_entry* e) {
             if (!e) {
@@ -508,6 +618,7 @@ future<scattered_message_ptr> database::lrem(const redis_key& rk, long count, ss
 
 future<scattered_message_ptr> database::linsert(const redis_key& rk, sstring& pivot, sstring& val, bool after)
 {
+    ++_stat._linsert;
     return with_allocator(allocator(), [this, &rk, &pivot, &val, after] {
         return current_store().with_entry_run(rk, [this, &rk, &val, &pivot, after] (cache_entry* e) {
             if (!e) {
@@ -536,6 +647,7 @@ future<scattered_message_ptr> database::linsert(const redis_key& rk, sstring& pi
 
 future<scattered_message_ptr> database::lset(const redis_key& rk, long idx, sstring& val)
 {
+    ++_stat._lset;
     return with_allocator(allocator(), [this, &rk, idx, &val] {
         return current_store().with_entry_run(rk, [this, &rk, idx, &val] (cache_entry* e) {
             if (!e) {
@@ -560,6 +672,7 @@ future<scattered_message_ptr> database::lset(const redis_key& rk, long idx, sstr
 
 future<scattered_message_ptr> database::ltrim(const redis_key& rk, long start, long end)
 {
+    ++_stat._ltrim;
     return with_allocator(allocator(), [this, &rk, start, end] {
         return current_store().with_entry_run(rk, [this, &rk, start, end] (cache_entry* e) {
             if (!e) {
@@ -587,6 +700,7 @@ future<scattered_message_ptr> database::ltrim(const redis_key& rk, long start, l
 
 future<scattered_message_ptr> database::hset(const redis_key& rk, sstring& key, sstring& val)
 {
+    ++_stat._hset;
     return with_allocator(allocator(), [this, &rk, &key, &val] {
         return current_store().with_entry_run(rk, [this, &rk, &key, &val] (cache_entry* o) {
             auto e = o;
@@ -611,6 +725,7 @@ future<scattered_message_ptr> database::hset(const redis_key& rk, sstring& key, 
 
 future<scattered_message_ptr> database::hincrby(const redis_key& rk, sstring& key, int64_t delta)
 {
+    ++_stat._hincrby;
     return with_allocator(allocator(), [this, &rk, &key, delta] {
         return current_store().with_entry_run(rk, [this, &rk, &key, delta] (cache_entry* o) {
             auto e = o;
@@ -643,6 +758,7 @@ future<scattered_message_ptr> database::hincrby(const redis_key& rk, sstring& ke
 
 future<scattered_message_ptr> database::hincrbyfloat(const redis_key& rk, sstring& key, double delta)
 {
+    ++_stat._hincrbyfloat;
     return with_allocator(allocator(), [this, &rk, &key, delta] {
         return current_store().with_entry_run(rk, [this, &rk, &key, delta] (cache_entry* o) {
             auto e = o;
@@ -675,6 +791,7 @@ future<scattered_message_ptr> database::hincrbyfloat(const redis_key& rk, sstrin
 
 future<scattered_message_ptr> database::hmset(const redis_key& rk, std::unordered_map<sstring, sstring>& kvs)
 {
+    ++_stat._hmset;
     return with_allocator(allocator(), [this, &rk, &kvs] {
         return current_store().with_entry_run(rk, [this, &rk, &kvs] (cache_entry* o) {
             auto e = o;
@@ -703,6 +820,7 @@ future<scattered_message_ptr> database::hmset(const redis_key& rk, std::unordere
 future<scattered_message_ptr> database::hget(const redis_key& rk, sstring& key)
 {
     ++_stat._read;
+    ++_stat._hget;
     return current_store().with_entry_run(rk, [this, &key] (cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_err);
@@ -720,6 +838,7 @@ future<scattered_message_ptr> database::hget(const redis_key& rk, sstring& key)
 
 future<scattered_message_ptr> database::hdel_multi(const redis_key& rk, std::vector<sstring>& keys)
 {
+    ++_stat._hdel;
     return with_allocator(allocator(), [this, &rk, &keys] {
         return current_store().with_entry_run(rk, [this, &rk, &keys] (cache_entry* e) {
             if (!e) {
@@ -747,6 +866,7 @@ future<scattered_message_ptr> database::hdel_multi(const redis_key& rk, std::vec
 
 future<scattered_message_ptr> database::hdel(const redis_key& rk, sstring& key)
 {
+    ++_stat._hdel;
     return with_allocator(allocator(), [this, &rk, &key] {
         return current_store().with_entry_run(rk, [this, &rk, &key] (cache_entry* e) {
             if (!e) {
@@ -768,6 +888,7 @@ future<scattered_message_ptr> database::hdel(const redis_key& rk, sstring& key)
 
 future<scattered_message_ptr> database::hexists(const redis_key& rk, sstring& key)
 {
+    ++_stat._hexists;
     return with_allocator(allocator(), [this, &rk, &key] {
         return current_store().with_entry_run(rk, [this, &key] (cache_entry* e) {
             if (!e) {
@@ -785,6 +906,7 @@ future<scattered_message_ptr> database::hexists(const redis_key& rk, sstring& ke
 
 future<scattered_message_ptr> database::hstrlen(const redis_key& rk, sstring& key)
 {
+    ++_stat._hstrlen;
     return current_store().with_entry_run(rk, [this, &key] (cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_zero);
@@ -804,6 +926,7 @@ future<scattered_message_ptr> database::hstrlen(const redis_key& rk, sstring& ke
 
 future<scattered_message_ptr> database::hlen(const redis_key& rk)
 {
+    ++_stat._hlen;
     return current_store().with_entry_run(rk, [this] (cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_zero);
@@ -835,6 +958,7 @@ future<scattered_message_ptr> database::hgetall_keys(const redis_key& rk)
 future<scattered_message_ptr> database::hmget(const redis_key& rk, std::vector<sstring>& keys)
 {
     ++_stat._read;
+    ++_stat._hmget;
     return current_store().with_entry_run(rk, [this, &keys] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_err);
@@ -853,6 +977,7 @@ future<scattered_message_ptr> database::hmget(const redis_key& rk, std::vector<s
 future<scattered_message_ptr> database::srandmember(const redis_key& rk, size_t count)
 {
     ++_stat._read;
+    ++_stat._srandmember;
      return current_store().with_entry_run(rk, [this, &count] (const cache_entry* e) {
         std::vector<const dict_entry*> result;
         if (!e) {
@@ -875,6 +1000,7 @@ future<scattered_message_ptr> database::srandmember(const redis_key& rk, size_t 
 
 future<scattered_message_ptr> database::sadds(const redis_key& rk, std::vector<sstring>& members)
 {
+    ++_stat._sadd;
     return with_allocator(allocator(), [this, &rk, &members] {
         return current_store().with_entry_run(rk, [this, &rk, &members] (cache_entry* e) {
             auto o = e;
@@ -901,6 +1027,7 @@ future<scattered_message_ptr> database::sadds(const redis_key& rk, std::vector<s
 
 bool database::sadd_direct(const redis_key& rk, sstring& member)
 {
+    ++_stat._sadd;
     return with_allocator(allocator(), [this, &rk, &member] {
         return current_store().with_entry_run(rk, [this, &rk, &member] (cache_entry* e) {
             auto o = e;
@@ -922,6 +1049,7 @@ bool database::sadd_direct(const redis_key& rk, sstring& member)
 
 bool database::sadds_direct(const redis_key& rk, std::vector<sstring>& members)
 {
+    ++_stat._sadd;
     return with_allocator(allocator(), [this, &rk, &members] {
         return current_store().with_entry_run(rk, [this, &rk, &members] (cache_entry* e) {
             auto o = e;
@@ -948,36 +1076,39 @@ bool database::sadds_direct(const redis_key& rk, std::vector<sstring>& members)
 
 future<scattered_message_ptr> database::scard(const redis_key& rk)
 {
-     return current_store().with_entry_run(rk, [] (const cache_entry* e) {
-        if (!e) {
-            return reply_builder::build(msg_zero);
-        }
-        if (e->type_of_set() == false) {
-            return reply_builder::build(msg_type_err);
-        }
-        auto& set = e->value_set();
-        return reply_builder::build(set.size());
-     });
+    ++_stat._scard;
+    return current_store().with_entry_run(rk, [] (const cache_entry* e) {
+       if (!e) {
+           return reply_builder::build(msg_zero);
+       }
+       if (e->type_of_set() == false) {
+           return reply_builder::build(msg_type_err);
+       }
+       auto& set = e->value_set();
+       return reply_builder::build(set.size());
+    });
 }
 
 future<scattered_message_ptr> database::sismember(const redis_key& rk, sstring& member)
 {
-     return current_store().with_entry_run(rk, [&member] (const cache_entry* e) {
-        if (!e) {
-            return reply_builder::build(msg_zero);
-        }
-        if (e->type_of_set() == false) {
-            return reply_builder::build(msg_type_err);
-        }
-        auto& set = e->value_set();
-        auto result = set.exists(member);
-        return reply_builder::build(result ? msg_one : msg_zero);
-     });
+    ++_stat._sismember;
+    return current_store().with_entry_run(rk, [&member] (const cache_entry* e) {
+       if (!e) {
+           return reply_builder::build(msg_zero);
+       }
+       if (e->type_of_set() == false) {
+           return reply_builder::build(msg_type_err);
+       }
+       auto& set = e->value_set();
+       auto result = set.exists(member);
+       return reply_builder::build(result ? msg_one : msg_zero);
+    });
 }
 
 future<scattered_message_ptr> database::smembers(const redis_key& rk)
 {
     ++_stat._read;
+    ++_stat._smembers;
     return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_nil);
@@ -995,7 +1126,6 @@ future<scattered_message_ptr> database::smembers(const redis_key& rk)
 
 future<foreign_ptr<lw_shared_ptr<sstring>>> database::get_hll_direct(const redis_key& rk)
 {
-    ++_stat._read;
     using return_type = foreign_ptr<lw_shared_ptr<sstring>>;
     return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
         if (!e || e->type_of_hll() == false) {
@@ -1011,6 +1141,7 @@ future<foreign_ptr<lw_shared_ptr<sstring>>> database::get_hll_direct(const redis
 future<foreign_ptr<lw_shared_ptr<sstring>>> database::get_direct(const redis_key& rk)
 {
     ++_stat._read;
+    ++_stat._get;
     using return_type = foreign_ptr<lw_shared_ptr<sstring>>;
     return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
         if (!e || e->type_of_bytes() == false) {
@@ -1026,6 +1157,7 @@ future<foreign_ptr<lw_shared_ptr<sstring>>> database::get_direct(const redis_key
 future<foreign_ptr<lw_shared_ptr<std::vector<sstring>>>> database::smembers_direct(const redis_key& rk)
 {
     ++_stat._read;
+    ++_stat._smembers;
     using result_type = std::vector<sstring>;
     using return_type = foreign_ptr<lw_shared_ptr<result_type>>;
     return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
@@ -1042,6 +1174,8 @@ future<foreign_ptr<lw_shared_ptr<std::vector<sstring>>>> database::smembers_dire
 
 future<scattered_message_ptr> database::spop(const redis_key& rk, size_t count)
 {
+    ++_stat._read;
+    ++_stat._spop;
     return with_allocator(allocator(), [this, &rk, &count] {
         return current_store().with_entry_run(rk, [this, &rk, &count] (cache_entry* e) {
             if (!e) {
@@ -1077,6 +1211,7 @@ future<scattered_message_ptr> database::spop(const redis_key& rk, size_t count)
 
 future<scattered_message_ptr> database::srem(const redis_key& rk, sstring& member)
 {
+    ++_stat._srem;
     return with_allocator(allocator(), [this, &rk, &member] {
         return current_store().with_entry_run(rk, [this, &rk, &member] (cache_entry* e) {
             if (!e) {
@@ -1097,6 +1232,7 @@ future<scattered_message_ptr> database::srem(const redis_key& rk, sstring& membe
 }
 bool database::srem_direct(const redis_key& rk, sstring& member)
 {
+    ++_stat._srem;
     return with_allocator(allocator(), [this, &rk, &member] {
         return current_store().with_entry_run(rk, [this, &rk, &member] (cache_entry* e) {
             if (!e) {
@@ -1118,6 +1254,7 @@ bool database::srem_direct(const redis_key& rk, sstring& member)
 
 future<scattered_message_ptr> database::srems(const redis_key& rk, std::vector<sstring>& members)
 {
+    ++_stat._srem;
     return with_allocator(allocator(), [this, &rk, &members] {
         return current_store().with_entry_run(rk, [this, &rk, &members] (cache_entry* e) {
             if (!e) {
@@ -1144,6 +1281,7 @@ future<scattered_message_ptr> database::srems(const redis_key& rk, std::vector<s
 
 future<scattered_message_ptr> database::pttl(const redis_key& rk)
 {
+    ++_stat._pttl;
     return current_store().with_entry_run(rk, [this, &rk] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_neg_two);
@@ -1157,6 +1295,7 @@ future<scattered_message_ptr> database::pttl(const redis_key& rk)
 
 future<scattered_message_ptr> database::ttl(const redis_key& rk)
 {
+    ++_stat._ttl;
     return current_store().with_entry_run(rk, [this, &rk] (const cache_entry* e) {
         if (!e) {
             return reply_builder::build(msg_neg_two);
@@ -1170,6 +1309,7 @@ future<scattered_message_ptr> database::ttl(const redis_key& rk)
 
 future<scattered_message_ptr> database::zadds(const redis_key& rk, std::unordered_map<sstring, double>& members, int flags)
 {
+    ++_stat._zadd;
     return with_allocator(allocator(), [this, &rk, &members, flags] {
         return current_store().with_entry_run(rk, [this, &rk, &members, flags] (cache_entry* e) {
             auto o = e;
@@ -1203,6 +1343,7 @@ future<scattered_message_ptr> database::zadds(const redis_key& rk, std::unordere
 
 bool database::zadds_direct(const redis_key& rk, std::unordered_map<sstring, double>& members, int flags)
 {
+    ++_stat._zadd;
     return with_allocator(allocator(), [this, &rk, &members, flags] {
         return current_store().with_entry_run(rk, [this, &rk, &members, flags] (cache_entry* e) {
             auto o = e;
@@ -1237,6 +1378,7 @@ bool database::zadds_direct(const redis_key& rk, std::unordered_map<sstring, dou
 
 future<scattered_message_ptr> database::zcard(const redis_key& rk)
 {
+    ++_stat._zcard;
     return current_store().with_entry_run(rk, [] (const cache_entry* e) {
         if (e == nullptr) {
             return reply_builder::build(msg_zero);
@@ -1252,6 +1394,7 @@ future<scattered_message_ptr> database::zcard(const redis_key& rk)
 
 future<scattered_message_ptr> database::zrem(const redis_key& rk, std::vector<sstring>& members)
 {
+    ++_stat._zrem;
     return with_allocator(allocator(), [this, &rk, &members] {
         return current_store().with_entry_run(rk, [this, &rk, &members] (cache_entry* e) {
             if (e == nullptr) {
@@ -1273,6 +1416,7 @@ future<scattered_message_ptr> database::zrem(const redis_key& rk, std::vector<ss
 
 future<scattered_message_ptr> database::zcount(const redis_key& rk, double min, double max)
 {
+    ++_stat._zcount;
     return current_store().with_entry_run(rk, [min, max] (const cache_entry* e) {
         if (e == nullptr) {
             return reply_builder::build(msg_zero);
@@ -1288,6 +1432,7 @@ future<scattered_message_ptr> database::zcount(const redis_key& rk, double min, 
 
 future<scattered_message_ptr> database::zincrby(const redis_key& rk, sstring& member, double delta)
 {
+    ++_stat._zincrby;
     return with_allocator(allocator(), [this, &rk, &member, delta] {
         return current_store().with_entry_run(rk, [this, &rk, &member, delta] (cache_entry* e) {
             auto o = e;
@@ -1310,6 +1455,7 @@ future<scattered_message_ptr> database::zincrby(const redis_key& rk, sstring& me
 future<foreign_ptr<lw_shared_ptr<std::vector<std::pair<sstring, double>>>>> database::zrange_direct(const redis_key& rk, long begin, long end)
 {
     ++_stat._read;
+    ++_stat._zrange;
     using return_type = foreign_ptr<lw_shared_ptr<std::vector<std::pair<sstring, double>>>>;
     using result_type = std::vector<std::pair<sstring, double>>;
     return current_store().with_entry_run(rk, [this, begin, end] (const cache_entry* e) {
@@ -1327,6 +1473,7 @@ future<foreign_ptr<lw_shared_ptr<std::vector<std::pair<sstring, double>>>>> data
 future<scattered_message_ptr> database::zrange(const redis_key& rk, long begin, long end, bool reverse, bool with_score)
 {
     ++_stat._read;
+    ++_stat._zrange;
     return current_store().with_entry_run(rk, [this, begin, end, reverse, with_score] (const cache_entry* e) {
         std::vector<const sset_entry*> entries;
         if (e == nullptr) {
@@ -1348,6 +1495,7 @@ future<scattered_message_ptr> database::zrange(const redis_key& rk, long begin, 
 future<scattered_message_ptr> database::zrangebyscore(const redis_key& rk, double min, double max, bool reverse, bool with_score)
 {
     ++_stat._read;
+    ++_stat._zrangebyscore;
     return current_store().with_entry_run(rk, [this, min, max, reverse, with_score] (const cache_entry* e) {
         std::vector<const sset_entry*> entries;
         if (e == nullptr) {
@@ -1369,6 +1517,7 @@ future<scattered_message_ptr> database::zrangebyscore(const redis_key& rk, doubl
 future<scattered_message_ptr> database::zrank(const redis_key& rk, sstring& member, bool reverse)
 {
     ++_stat._read;
+    ++_stat._zrank;
     return current_store().with_entry_run(rk, [this, &member, reverse] (const cache_entry* e) {
         if (e == nullptr) {
             return reply_builder::build(msg_nil);
@@ -1393,6 +1542,7 @@ future<scattered_message_ptr> database::zrank(const redis_key& rk, sstring& memb
 future<scattered_message_ptr> database::zscore(const redis_key& rk, sstring& member)
 {
     ++_stat._read;
+    ++_stat._zscore;
     return current_store().with_entry_run(rk, [this, &member] (const cache_entry* e) {
         if (e == nullptr) {
             return reply_builder::build(msg_zero);
@@ -1412,6 +1562,7 @@ future<scattered_message_ptr> database::zscore(const redis_key& rk, sstring& mem
 
 future<scattered_message_ptr> database::zremrangebyscore(const redis_key& rk, double min, double max)
 {
+    ++_stat._zremrangebyscore;
     return with_allocator(allocator(), [this, &rk, min, max] {
         return current_store().with_entry_run(rk, [this, &rk, min, max] (cache_entry* e) {
             if (e == nullptr) {
@@ -1435,6 +1586,7 @@ future<scattered_message_ptr> database::zremrangebyscore(const redis_key& rk, do
 
 future<scattered_message_ptr> database::zremrangebyrank(const redis_key& rk, size_t begin, size_t end)
 {
+    ++_stat._zremrangebyrank;
     return with_allocator(allocator(), [this, &rk, begin, end] {
         return current_store().with_entry_run(rk, [this, &rk, begin, end] (cache_entry* e) {
             if (e == nullptr) {
@@ -1458,6 +1610,7 @@ future<scattered_message_ptr> database::zremrangebyrank(const redis_key& rk, siz
 
 bool database::select(size_t index)
 {
+    ++_stat._select;
     if (index > DEFAULT_DB_COUNT) {
         return false;
     }
@@ -1469,6 +1622,7 @@ bool database::select(size_t index)
 future<scattered_message_ptr> database::geodist(const redis_key& rk, sstring& lpos, sstring& rpos, int flag)
 {
     ++_stat._read;
+    ++_stat._geodist;
     double factor = 1;
     if (flag & GEODIST_UNIT_M) {
         factor = 1;
@@ -1509,6 +1663,7 @@ future<scattered_message_ptr> database::geodist(const redis_key& rk, sstring& lp
 future<scattered_message_ptr> database::geohash(const redis_key& rk, std::vector<sstring>& members)
 {
     ++_stat._read;
+    ++_stat._geohash;
     return current_store().with_entry_run(rk, [this, members] (const cache_entry* e) {
         if (e == nullptr) {
            return reply_builder::build(msg_err);
@@ -1536,6 +1691,7 @@ future<scattered_message_ptr> database::geohash(const redis_key& rk, std::vector
 future<scattered_message_ptr> database::geopos(const redis_key& rk, std::vector<sstring>& members)
 {
     ++_stat._read;
+    ++_stat._geopos;
     return current_store().with_entry_run(rk, [this, members] (const cache_entry* e) {
         if (e == nullptr) {
            return reply_builder::build(msg_err);
@@ -1602,6 +1758,7 @@ future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius_me
 future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius(const sset_lsa& sset, double longitude, double latitude, double radius, size_t count, int flag)
 {
     ++_stat._read;
+    ++_stat._georadius;
     using return_type = foreign_ptr<lw_shared_ptr<georadius_result_type>>;
     using data_type = std::vector<std::tuple<sstring, double, double, double, double>>;
     data_type points;
@@ -1641,6 +1798,7 @@ future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> database::georadius(co
 
 future<scattered_message_ptr> database::setbit(const redis_key& rk, size_t offset, bool value)
 {
+    ++_stat._setbit;
     return with_allocator(allocator(), [this, &rk, offset, value] {
         return current_store().with_entry_run(rk, [this, &rk, offset, value] (cache_entry* e) {
             auto o = e;
@@ -1673,6 +1831,7 @@ future<scattered_message_ptr> database::setbit(const redis_key& rk, size_t offse
 future<scattered_message_ptr> database::getbit(const redis_key& rk, size_t offset)
 {
     ++_stat._read;
+    ++_stat._getbit;
     return current_store().with_entry_run(rk, [this, offset] (const cache_entry* e) {
         if (e == nullptr) {
             return reply_builder::build(msg_zero);
@@ -1690,6 +1849,7 @@ future<scattered_message_ptr> database::getbit(const redis_key& rk, size_t offse
 future<scattered_message_ptr> database::bitcount(const redis_key& rk, long start, long end)
 {
     ++_stat._read;
+    ++_stat._bitcount;
     return current_store().with_entry_run(rk, [this, start, end] (const cache_entry* e) {
         if (e == nullptr) {
             return reply_builder::build(msg_zero);
@@ -1711,6 +1871,7 @@ future<scattered_message_ptr> database::bitpos(const redis_key& rk, bool bit, lo
 
 future<scattered_message_ptr> database::pfadd(const redis_key& rk, std::vector<sstring>& elements)
 {
+    ++_stat._pfadd;
     return with_allocator(allocator(), [this, &rk, &elements] {
         return current_store().with_entry_run(rk, [this, &rk, &elements] (cache_entry* e) {
             if (e == nullptr) {
@@ -1732,6 +1893,7 @@ future<scattered_message_ptr> database::pfadd(const redis_key& rk, std::vector<s
 future<scattered_message_ptr> database::pfcount(const redis_key& rk)
 {
     ++_stat._read;
+    ++_stat._pfcount;
     return current_store().with_entry_run(rk, [this] (cache_entry* e) {
         if (e == nullptr) {
             return reply_builder::build(msg_zero);
@@ -1748,6 +1910,7 @@ future<scattered_message_ptr> database::pfcount(const redis_key& rk)
 
 future<scattered_message_ptr> database::pfmerge(const redis_key& rk, uint8_t* merged_sources, size_t size)
 {
+    ++_stat._pfmerge;
     return with_allocator(allocator(), [this, &rk, merged_sources, size] {
         return current_store().with_entry_run(rk, [this, &rk, merged_sources, size] (cache_entry* e) {
             if (e == nullptr) {

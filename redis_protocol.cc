@@ -20,12 +20,8 @@
 */
 #include "redis_protocol.hh"
 #include "redis.hh"
-#include "util/log.hh"
 #include "common.hh"
 #include <algorithm>
-
-using logger =  seastar::logger;
-static logger protocol_log ("protocol");
 
 namespace redis {
 
@@ -43,12 +39,13 @@ void redis_protocol::prepare_request()
     _command_args._tmp_key_value_pairs.clear();
 }
 
-future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out)
+future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out, request_latency_tracer& tracer)
 {
     _parser.init();
     // NOTE: The command is handled sequentially. The parser will control the lifetime
     // of every parameters for command.
-    return in.consume(_parser).then([this, &in, &out] () -> future<> {
+    return in.consume(_parser).then([this, &in, &out, &tracer] () -> future<> {
+        tracer.begin_trace_latency();
         switch (_parser._state) {
             case redis_protocol_parser::state::eof:
             case redis_protocol_parser::state::error:
@@ -248,19 +245,24 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                 case redis_protocol_parser::command::pfmerge:
                     return _redis.pfmerge(_command_args, std::ref(out));
                 default:
+                    tracer.incr_number_exceptions();
                     return out.write("+Not Implemented");
                 };
             }
             default:
+                tracer.incr_number_exceptions();
                 return out.write("+Error\r\n");
         };
         std::abort();
-    }).then_wrapped([this, &in, &out] (auto&& f) -> future<> {
+    }).then_wrapped([this, &in, &out, &tracer] (auto&& f) -> future<> {
         try {
             f.get();
         } catch (std::bad_alloc& e) {
+            tracer.incr_number_exceptions();
+            tracer.end_trace_latency();
             return out.write(msg_err);
         }
+        tracer.end_trace_latency();
         return make_ready_future<>();
     });
 }

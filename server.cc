@@ -23,9 +23,16 @@ namespace redis {
 void server::setup_metrics()
 {
     namespace sm = seastar::metrics;
-    _metrics.add_group("connection", {
-        sm::make_gauge("new", [this] { return _stats._new_connection_count; }, sm::description("New connections")),
-        sm::make_gauge("alived", [this] { return _stats._alived_connection_count; }, sm::description("Alived connections")),
+    _metrics.add_group("connections", {
+        sm::make_counter("opened_total", [this] { return _stats._connections_total; }, sm::description("Total number of connections opened.")),
+        sm::make_counter("current_total", [this] { return _stats._connections_current; }, sm::description("Total number of connections current opened.")),
+    });
+
+    _metrics.add_group("reqests", {
+        sm::make_counter("served_total", [this] { return _latency_tracer.served(); }, sm::description("Total number of served requests.")),
+        sm::make_counter("serving_total", [this] { return _latency_tracer.serving(); }, sm::description("Total number of requests being serving.")),
+        sm::make_counter("exception_total", [this] { return _latency_tracer.number_exceptions(); }, sm::description("Total number of bad requests.")),
+        sm::make_gauge("latency", [this] { return _latency_tracer.latency(); }, sm::description("Request latency (us).")),
     });
 }
 }
