@@ -33,6 +33,21 @@ See building instructions for [Fedora](docs/building-fedora.md), [CentOS](docs/b
 
 ```
 
+## Current Roadmap
+
+We want to build next generation redis cluster.
+
+### Short-term
+
+* Implement the redis commands.
+* Output the necessary metrics.
+
+### Long-term
+
+* Build the redis cluster, using GOSSIP protocol to broadcast redis node's status.
+* Build the data replication mechanism between redis cluster.
+* Persist the data to disk based on Structured-logs-merged tree.
+
 ## Benchmark
 
 The following describe the details of the Pedis benchmark making it reproducible.
