@@ -23,7 +23,7 @@
 #include "utils/allocation_strategy.hh"
 #include "utils/managed_ref.hh"
 #include "utils/managed_bytes.hh"
-#include "utils/bytes.hh"
+#include "bytes.hh"
 #include "utils/allocation_strategy.hh"
 #include "utils/logalloc.hh"
 #include "common.hh"

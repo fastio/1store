@@ -1,0 +1,1 @@
+This project includes code developed by the ScyllaDB (http://www.scylladb.com/), especially Scylla.

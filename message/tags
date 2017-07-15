@@ -1,0 +1,205 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.8	//
+CLIENT_ID	messaging_service.hh	/^    CLIENT_ID = 0,$/;"	m	class:net::messaging_verb
+COMPLETE_MESSAGE	messaging_service.hh	/^    COMPLETE_MESSAGE = 19,$/;"	m	class:net::messaging_verb
+COUNTER_MUTATION	messaging_service.hh	/^    COUNTER_MUTATION = 23,$/;"	m	class:net::messaging_verb
+DEFINITIONS_UPDATE	messaging_service.hh	/^    DEFINITIONS_UPDATE = 11,$/;"	m	class:net::messaging_verb
+GET_SCHEMA_VERSION	messaging_service.hh	/^    GET_SCHEMA_VERSION = 21,$/;"	m	class:net::messaging_verb
+GOSSIP_DIGEST_ACK	messaging_service.hh	/^    GOSSIP_DIGEST_ACK = 7,$/;"	m	class:net::messaging_verb
+GOSSIP_DIGEST_ACK2	messaging_service.hh	/^    GOSSIP_DIGEST_ACK2 = 8,$/;"	m	class:net::messaging_verb
+GOSSIP_DIGEST_SYN	messaging_service.hh	/^    GOSSIP_DIGEST_SYN = 6,$/;"	m	class:net::messaging_verb
+GOSSIP_ECHO	messaging_service.hh	/^    GOSSIP_ECHO = 9,$/;"	m	class:net::messaging_verb
+GOSSIP_SHUTDOWN	messaging_service.hh	/^    GOSSIP_SHUTDOWN = 10,$/;"	m	class:net::messaging_verb
+LAST	messaging_service.hh	/^    LAST = 24,$/;"	m	class:net::messaging_verb
+MIGRATION_REQUEST	messaging_service.hh	/^    MIGRATION_REQUEST = 14,$/;"	m	class:net::messaging_verb
+MUTATION	messaging_service.hh	/^    MUTATION = 1,$/;"	m	class:net::messaging_verb
+MUTATION_DONE	messaging_service.hh	/^    MUTATION_DONE = 2,$/;"	m	class:net::messaging_verb
+PREPARE_DONE_MESSAGE	messaging_service.hh	/^    PREPARE_DONE_MESSAGE = 16,$/;"	m	class:net::messaging_verb
+PREPARE_MESSAGE	messaging_service.hh	/^    PREPARE_MESSAGE = 15,$/;"	m	class:net::messaging_verb
+READ_DATA	messaging_service.hh	/^    READ_DATA = 3,$/;"	m	class:net::messaging_verb
+READ_DIGEST	messaging_service.hh	/^    READ_DIGEST = 5,$/;"	m	class:net::messaging_verb
+READ_MUTATION_DATA	messaging_service.hh	/^    READ_MUTATION_DATA = 4,$/;"	m	class:net::messaging_verb
+REPAIR_CHECKSUM_RANGE	messaging_service.hh	/^    REPAIR_CHECKSUM_RANGE = 20,$/;"	m	class:net::messaging_verb
+REPLICATION_FINISHED	messaging_service.hh	/^    REPLICATION_FINISHED = 13,$/;"	m	class:net::messaging_verb
+SCHEMA_CHECK	messaging_service.hh	/^    SCHEMA_CHECK = 22,$/;"	m	class:net::messaging_verb
+STREAM_MUTATION	messaging_service.hh	/^    STREAM_MUTATION = 17,$/;"	m	class:net::messaging_verb
+STREAM_MUTATION_DONE	messaging_service.hh	/^    STREAM_MUTATION_DONE = 18,$/;"	m	class:net::messaging_verb
+TRUNCATE	messaging_service.hh	/^    TRUNCATE = 12,$/;"	m	class:net::messaging_verb
+_clients	messaging_service.hh	/^    std::array<clients_map, 4> _clients;$/;"	m	class:net::messaging_service
+_compress_what	messaging_service.hh	/^    compress_what _compress_what;$/;"	m	class:net::messaging_service
+_credentials	messaging_service.hh	/^    ::shared_ptr<seastar::tls::server_credentials> _credentials;$/;"	m	class:net::messaging_service
+_dropped_messages	messaging_service.hh	/^    uint64_t _dropped_messages[static_cast<int32_t>(messaging_verb::LAST)] = {};$/;"	m	class:net::messaging_service
+_encrypt_what	messaging_service.hh	/^    encrypt_what _encrypt_what;$/;"	m	class:net::messaging_service
+_listen_address	messaging_service.hh	/^    gms::inet_address _listen_address;$/;"	m	class:net::messaging_service
+_p	messaging_service.cc	/^    std::unique_ptr<rpc_protocol::client> _p;$/;"	m	class:net::messaging_service::rpc_protocol_client_wrapper	file:
+_port	messaging_service.hh	/^    uint16_t _port;$/;"	m	class:net::messaging_service
+_preferred_ip_cache	messaging_service.hh	/^    std::unordered_map<gms::inet_address, gms::inet_address> _preferred_ip_cache;$/;"	m	class:net::messaging_service
+_rpc	messaging_service.hh	/^    std::unique_ptr<rpc_protocol_wrapper> _rpc;$/;"	m	class:net::messaging_service
+_server	messaging_service.hh	/^    std::array<std::unique_ptr<rpc_protocol_server_wrapper>, 2> _server;$/;"	m	class:net::messaging_service
+_server_tls	messaging_service.hh	/^    std::array<std::unique_ptr<rpc_protocol_server_wrapper>, 2> _server_tls;$/;"	m	class:net::messaging_service
+_should_listen_to_broadcast_address	messaging_service.hh	/^    bool _should_listen_to_broadcast_address;$/;"	m	class:net::messaging_service
+_ssl_port	messaging_service.hh	/^    uint16_t _ssl_port;$/;"	m	class:net::messaging_service
+_stopping	messaging_service.hh	/^    bool _stopping = false;$/;"	m	class:net::messaging_service
+_the_messaging_service	messaging_service.cc	/^distributed<messaging_service> _the_messaging_service;$/;"	m	namespace:net	file:
+addr	messaging_service.hh	/^    gms::inet_address addr;$/;"	m	struct:net::msg_addr
+all	messaging_service.hh	/^        all,$/;"	m	class:net::messaging_service::compress_what
+all	messaging_service.hh	/^        all,$/;"	m	class:net::messaging_service::encrypt_what
+cache_preferred_ip	messaging_service.cc	/^void messaging_service::cache_preferred_ip(gms::inet_address ep, gms::inet_address ip) {$/;"	f	class:net::messaging_service
+compat	messaging_service.hh	/^namespace compat {$/;"	n
+compress_what	messaging_service.hh	/^    enum class compress_what {$/;"	c	class:net::messaging_service
+cpu_id	messaging_service.hh	/^    uint32_t cpu_id;$/;"	m	struct:net::msg_addr
+current_version	messaging_service.cc	/^constexpr int32_t messaging_service::current_version;$/;"	m	class:net::messaging_service	file:
+current_version	messaging_service.hh	/^    static constexpr int32_t current_version = 0;$/;"	m	class:net::messaging_service
+db	messaging_service.hh	/^namespace db {$/;"	n
+dc	messaging_service.hh	/^        dc,$/;"	m	class:net::messaging_service::compress_what
+dc	messaging_service.hh	/^        dc,$/;"	m	class:net::messaging_service::encrypt_what
+dht	messaging_service.hh	/^namespace dht {$/;"	n
+encrypt_what	messaging_service.hh	/^    enum class encrypt_what {$/;"	c	class:net::messaging_service
+error	messaging_service.cc	/^    bool error() {$/;"	f	class:net::messaging_service::rpc_protocol_client_wrapper
+foreach_client	messaging_service.cc	/^void messaging_service::foreach_client(std::function<void(const msg_addr& id, const shard_info& info)> f) const {$/;"	f	class:net::messaging_service
+foreach_server_connection_stats	messaging_service.cc	/^void messaging_service::foreach_server_connection_stats(std::function<void(const rpc::client_info&, const rpc::stats&)>&& f) const {$/;"	f	class:net::messaging_service
+get_dropped_messages	messaging_service.cc	/^const uint64_t* messaging_service::get_dropped_messages() const {$/;"	f	class:net::messaging_service
+get_dropped_messages	messaging_service.cc	/^uint64_t messaging_service::get_dropped_messages(messaging_verb verb) const {$/;"	f	class:net::messaging_service
+get_local_messaging_service	messaging_service.hh	/^inline messaging_service& get_local_messaging_service() {$/;"	f	namespace:net
+get_messaging_service	messaging_service.hh	/^inline distributed<messaging_service>& get_messaging_service() {$/;"	f	namespace:net
+get_preferred_ip	messaging_service.cc	/^gms::inet_address messaging_service::get_preferred_ip(gms::inet_address ep) {$/;"	f	class:net::messaging_service
+get_raw_version	messaging_service.cc	/^int32_t messaging_service::get_raw_version(const gms::inet_address& endpoint) const {$/;"	f	class:net::messaging_service
+get_rpc_client	messaging_service.cc	/^shared_ptr<messaging_service::rpc_protocol_client_wrapper> messaging_service::get_rpc_client(messaging_verb verb, msg_addr id) {$/;"	f	class:net::messaging_service
+get_rpc_client_idx	messaging_service.cc	/^static unsigned get_rpc_client_idx(messaging_verb verb) {$/;"	f	namespace:net
+get_source	messaging_service.cc	/^msg_addr messaging_service::get_source(const rpc::client_info& cinfo) {$/;"	f	class:net::messaging_service
+get_stats	messaging_service.cc	/^    auto get_stats() const { return _p->get_stats(); }$/;"	f	class:net::messaging_service::rpc_protocol_client_wrapper
+get_stats	messaging_service.cc	/^rpc::stats messaging_service::shard_info::get_stats() const {$/;"	f	class:net::messaging_service::shard_info
+gms	messaging_service.hh	/^namespace gms {$/;"	n
+hash	messaging_service.hh	/^    struct hash {$/;"	s	struct:net::msg_addr
+hash	messaging_service.hh	/^class hash<net::messaging_verb> {$/;"	c	namespace:std
+increment_dropped_messages	messaging_service.cc	/^void messaging_service::increment_dropped_messages(messaging_verb verb) {$/;"	f	class:net::messaging_service
+init_local_preferred_ip_cache	messaging_service.cc	/^future<> messaging_service::init_local_preferred_ip_cache() {$/;"	f	class:net::messaging_service
+is_stopping	messaging_service.hh	/^    bool is_stopping() { return _stopping; }$/;"	f	class:net::messaging_service
+knows_version	messaging_service.cc	/^bool messaging_service::knows_version(const gms::inet_address& endpoint) const {$/;"	f	class:net::messaging_service
+listen_address	messaging_service.cc	/^gms::inet_address messaging_service::listen_address() {$/;"	f	class:net::messaging_service
+lz4_compressor_factory	messaging_service.cc	/^static rpc::lz4_compressor::factory lz4_compressor_factory;$/;"	m	namespace:net	file:
+lz4_compressor_factory	messaging_service.cc	/^static rpc::multi_algo_compressor_factory compressor_factory(&lz4_compressor_factory);$/;"	m	namespace:net	file:
+messaging_service	messaging_service.cc	/^messaging_service::messaging_service(gms::inet_address ip$/;"	f	class:net::messaging_service
+messaging_service	messaging_service.cc	/^messaging_service::messaging_service(gms::inet_address ip, uint16_t port, bool listen_now)$/;"	f	class:net::messaging_service
+messaging_service	messaging_service.hh	/^class messaging_service : public seastar::async_sharded_service<messaging_service> {$/;"	c	namespace:net
+messaging_verb	messaging_service.hh	/^enum class messaging_verb : int32_t {$/;"	c	namespace:net
+msg_addr	messaging_service.hh	/^struct msg_addr {$/;"	s	namespace:net
+net	messaging_service.cc	/^namespace net {$/;"	n	file:
+net	messaging_service.hh	/^namespace net {$/;"	n
+net	messaging_service_fwd.hh	/^namespace net {$/;"	n
+no_wait	messaging_service.cc	/^rpc::no_wait_type messaging_service::no_wait() {$/;"	f	class:net::messaging_service
+none	messaging_service.hh	/^        none,$/;"	m	class:net::messaging_service::compress_what
+none	messaging_service.hh	/^        none,$/;"	m	class:net::messaging_service::encrypt_what
+operator ()	messaging_service.cc	/^size_t msg_addr::hash::operator()(const msg_addr& id) const {$/;"	f	class:net::msg_addr::hash
+operator ()	messaging_service.hh	/^    size_t operator()(const net::messaging_verb& x) const {$/;"	f	class:std::hash
+operator <	messaging_service.cc	/^bool operator<(const msg_addr& x, const msg_addr& y) {$/;"	f	namespace:net
+operator <<	messaging_service.cc	/^std::ostream& operator<<(std::ostream& os, const msg_addr& x) {$/;"	f	namespace:net
+operator ==	messaging_service.cc	/^bool operator==(const msg_addr& x, const msg_addr& y) {$/;"	f	namespace:net
+operator rpc_protocol::client&	messaging_service.cc	/^    operator rpc_protocol::client&() { return *_p; }$/;"	f	class:net::messaging_service::rpc_protocol_client_wrapper
+port	messaging_service.cc	/^uint16_t messaging_service::port() {$/;"	f	class:net::messaging_service
+query	messaging_service.hh	/^namespace query {$/;"	n
+rack	messaging_service.hh	/^        rack,$/;"	m	class:net::messaging_service::encrypt_what
+read	messaging_service.cc	/^T read(serializer, Input& in, boost::type<T> type) {$/;"	f	namespace:net
+read	messaging_service.cc	/^foreign_ptr<T> read(serializer s, Input& in, boost::type<foreign_ptr<T>>) {$/;"	f	namespace:net
+read	messaging_service.cc	/^lw_shared_ptr<T> read(serializer s, Input& in, boost::type<lw_shared_ptr<T>>) {$/;"	f	namespace:net
+register_complete_message	messaging_service.cc	/^void messaging_service::register_complete_message(std::function<future<> (const rpc::client_info& cinfo, UUID plan_id, unsigned dst_cpu_id)>&& func) {$/;"	f	class:net::messaging_service
+register_counter_mutation	messaging_service.cc	/^void messaging_service::register_counter_mutation(std::function<future<> (const rpc::client_info&, rpc::opt_time_point, std::vector<frozen_mutation> fms, db::consistency_level cl, stdx::optional<tracing::trace_info> trace_info)>&& func) {$/;"	f	class:net::messaging_service
+register_definitions_update	messaging_service.cc	/^void messaging_service::register_definitions_update(std::function<rpc::no_wait_type (const rpc::client_info& cinfo, std::vector<frozen_mutation> fm)>&& func) {$/;"	f	class:net::messaging_service
+register_get_schema_version	messaging_service.cc	/^void messaging_service::register_get_schema_version(std::function<future<frozen_schema>(unsigned, table_schema_version)>&& func) {$/;"	f	class:net::messaging_service
+register_gossip_digest_ack	messaging_service.cc	/^void messaging_service::register_gossip_digest_ack(std::function<rpc::no_wait_type (const rpc::client_info& cinfo, gossip_digest_ack)>&& func) {$/;"	f	class:net::messaging_service
+register_gossip_digest_ack2	messaging_service.cc	/^void messaging_service::register_gossip_digest_ack2(std::function<rpc::no_wait_type (gossip_digest_ack2)>&& func) {$/;"	f	class:net::messaging_service
+register_gossip_digest_syn	messaging_service.cc	/^void messaging_service::register_gossip_digest_syn(std::function<rpc::no_wait_type (const rpc::client_info& cinfo, gossip_digest_syn)>&& func) {$/;"	f	class:net::messaging_service
+register_gossip_echo	messaging_service.cc	/^void messaging_service::register_gossip_echo(std::function<future<> ()>&& func) {$/;"	f	class:net::messaging_service
+register_gossip_shutdown	messaging_service.cc	/^void messaging_service::register_gossip_shutdown(std::function<rpc::no_wait_type (inet_address from)>&& func) {$/;"	f	class:net::messaging_service
+register_handler	messaging_service.cc	/^void register_handler(messaging_service* ms, messaging_verb verb, Func&& func) {$/;"	f	namespace:net
+register_migration_request	messaging_service.cc	/^void messaging_service::register_migration_request(std::function<future<std::vector<frozen_mutation>> ()>&& func) {$/;"	f	class:net::messaging_service
+register_mutation	messaging_service.cc	/^void messaging_service::register_mutation(std::function<future<rpc::no_wait_type> (const rpc::client_info&, rpc::opt_time_point, frozen_mutation fm, std::vector<inet_address> forward,$/;"	f	class:net::messaging_service
+register_mutation_done	messaging_service.cc	/^void messaging_service::register_mutation_done(std::function<future<rpc::no_wait_type> (const rpc::client_info& cinfo, unsigned shard, response_id_type response_id)>&& func) {$/;"	f	class:net::messaging_service
+register_prepare_done_message	messaging_service.cc	/^void messaging_service::register_prepare_done_message(std::function<future<> (const rpc::client_info& cinfo, UUID plan_id, unsigned dst_cpu_id)>&& func) {$/;"	f	class:net::messaging_service
+register_prepare_message	messaging_service.cc	/^void messaging_service::register_prepare_message(std::function<future<streaming::prepare_message> (const rpc::client_info& cinfo,$/;"	f	class:net::messaging_service
+register_read_data	messaging_service.cc	/^void messaging_service::register_read_data(std::function<future<foreign_ptr<lw_shared_ptr<query::result>>> (const rpc::client_info&, query::read_command cmd, compat::wrapping_partition_range pr, rpc::optional<query::digest_algorithm> oda)>&& func) {$/;"	f	class:net::messaging_service
+register_read_digest	messaging_service.cc	/^void messaging_service::register_read_digest(std::function<future<query::result_digest, api::timestamp_type> (const rpc::client_info&, query::read_command cmd, compat::wrapping_partition_range pr)>&& func) {$/;"	f	class:net::messaging_service
+register_read_mutation_data	messaging_service.cc	/^void messaging_service::register_read_mutation_data(std::function<future<foreign_ptr<lw_shared_ptr<reconcilable_result>>> (const rpc::client_info&, query::read_command cmd, compat::wrapping_partition_range pr)>&& func) {$/;"	f	class:net::messaging_service
+register_repair_checksum_range	messaging_service.cc	/^void messaging_service::register_repair_checksum_range($/;"	f	class:net::messaging_service
+register_replication_finished	messaging_service.cc	/^void messaging_service::register_replication_finished(std::function<future<> (inet_address)>&& func) {$/;"	f	class:net::messaging_service
+register_schema_check	messaging_service.cc	/^void messaging_service::register_schema_check(std::function<future<utils::UUID>()>&& func) {$/;"	f	class:net::messaging_service
+register_stream_mutation	messaging_service.cc	/^void messaging_service::register_stream_mutation(std::function<future<> (const rpc::client_info& cinfo, UUID plan_id, frozen_mutation fm, unsigned dst_cpu_id, rpc::optional<bool> fragmented)>&& func) {$/;"	f	class:net::messaging_service
+register_stream_mutation_done	messaging_service.cc	/^void messaging_service::register_stream_mutation_done(std::function<future<> (const rpc::client_info& cinfo,$/;"	f	class:net::messaging_service
+register_truncate	messaging_service.cc	/^void messaging_service::register_truncate(std::function<future<> (sstring, sstring)>&& func) {$/;"	f	class:net::messaging_service
+remove_error_rpc_client	messaging_service.cc	/^void messaging_service::remove_error_rpc_client(messaging_verb verb, msg_addr id) {$/;"	f	class:net::messaging_service
+remove_rpc_client	messaging_service.cc	/^void messaging_service::remove_rpc_client(msg_addr id) {$/;"	f	class:net::messaging_service
+remove_rpc_client_one	messaging_service.cc	/^void messaging_service::remove_rpc_client_one(clients_map& clients, msg_addr id, bool dead_only) {$/;"	f	class:net::messaging_service
+rpc	messaging_service.cc	/^std::unique_ptr<messaging_service::rpc_protocol_wrapper>& messaging_service::rpc() {$/;"	f	class:net::messaging_service
+rpc_client	messaging_service.hh	/^        shared_ptr<rpc_protocol_client_wrapper> rpc_client;$/;"	m	struct:net::messaging_service::shard_info
+rpc_protocol_client_wrapper	messaging_service.cc	/^    rpc_protocol_client_wrapper(rpc_protocol& proto, rpc::client_options opts, ipv4_addr addr, ipv4_addr local = ipv4_addr())$/;"	f	class:net::messaging_service::rpc_protocol_client_wrapper
+rpc_protocol_client_wrapper	messaging_service.cc	/^    rpc_protocol_client_wrapper(rpc_protocol& proto, rpc::client_options opts, ipv4_addr addr, ipv4_addr local, ::shared_ptr<seastar::tls::server_credentials> c)$/;"	f	class:net::messaging_service::rpc_protocol_client_wrapper
+rpc_protocol_client_wrapper	messaging_service.cc	/^class messaging_service::rpc_protocol_client_wrapper {$/;"	c	class:net::messaging_service	file:
+rpc_protocol_server_wrapper	messaging_service.cc	/^struct messaging_service::rpc_protocol_server_wrapper : public rpc_protocol::server { using rpc_protocol::server::server; };$/;"	s	class:net::messaging_service	file:
+rpc_protocol_wrapper	messaging_service.cc	/^struct messaging_service::rpc_protocol_wrapper : public rpc_protocol { using rpc_protocol::rpc_protocol; };$/;"	s	class:net::messaging_service	file:
+rpc_resource_limits	messaging_service.cc	/^rpc_resource_limits() {$/;"	f	namespace:net
+send_complete_message	messaging_service.cc	/^future<> messaging_service::send_complete_message(msg_addr id, UUID plan_id, unsigned dst_cpu_id) {$/;"	f	class:net::messaging_service
+send_counter_mutation	messaging_service.cc	/^future<> messaging_service::send_counter_mutation(msg_addr id, clock_type::time_point timeout, std::vector<frozen_mutation> fms, db::consistency_level cl, stdx::optional<tracing::trace_info> trace_info) {$/;"	f	class:net::messaging_service
+send_definitions_update	messaging_service.cc	/^future<> messaging_service::send_definitions_update(msg_addr id, std::vector<frozen_mutation> fm) {$/;"	f	class:net::messaging_service
+send_get_schema_version	messaging_service.cc	/^future<frozen_schema> messaging_service::send_get_schema_version(msg_addr dst, table_schema_version v) {$/;"	f	class:net::messaging_service
+send_gossip_digest_ack	messaging_service.cc	/^future<> messaging_service::send_gossip_digest_ack(msg_addr id, gossip_digest_ack msg) {$/;"	f	class:net::messaging_service
+send_gossip_digest_ack2	messaging_service.cc	/^future<> messaging_service::send_gossip_digest_ack2(msg_addr id, gossip_digest_ack2 msg) {$/;"	f	class:net::messaging_service
+send_gossip_digest_syn	messaging_service.cc	/^future<> messaging_service::send_gossip_digest_syn(msg_addr id, gossip_digest_syn msg) {$/;"	f	class:net::messaging_service
+send_gossip_echo	messaging_service.cc	/^future<> messaging_service::send_gossip_echo(msg_addr id) {$/;"	f	class:net::messaging_service
+send_gossip_shutdown	messaging_service.cc	/^future<> messaging_service::send_gossip_shutdown(msg_addr id, inet_address from) {$/;"	f	class:net::messaging_service
+send_message	messaging_service.cc	/^auto send_message(messaging_service* ms, messaging_verb verb, msg_addr id, MsgOut&&... msg) {$/;"	f	namespace:net
+send_message_oneway	messaging_service.cc	/^auto send_message_oneway(messaging_service* ms, messaging_verb verb, msg_addr id, MsgOut&&... msg) {$/;"	f	namespace:net
+send_message_oneway_timeout	messaging_service.cc	/^auto send_message_oneway_timeout(messaging_service* ms, Timeout timeout, messaging_verb verb, msg_addr id, MsgOut&&... msg) {$/;"	f	namespace:net
+send_message_timeout	messaging_service.cc	/^auto send_message_timeout(messaging_service* ms, messaging_verb verb, msg_addr id, Timeout timeout, MsgOut&&... msg) {$/;"	f	namespace:net
+send_message_timeout_and_retry	messaging_service.cc	/^auto send_message_timeout_and_retry(messaging_service* ms, messaging_verb verb, msg_addr id,$/;"	f	namespace:net
+send_migration_request	messaging_service.cc	/^future<std::vector<frozen_mutation>> messaging_service::send_migration_request(msg_addr id) {$/;"	f	class:net::messaging_service
+send_mutation	messaging_service.cc	/^future<> messaging_service::send_mutation(msg_addr id, clock_type::time_point timeout, const frozen_mutation& fm, std::vector<inet_address> forward,$/;"	f	class:net::messaging_service
+send_mutation_done	messaging_service.cc	/^future<> messaging_service::send_mutation_done(msg_addr id, unsigned shard, response_id_type response_id) {$/;"	f	class:net::messaging_service
+send_prepare_done_message	messaging_service.cc	/^future<> messaging_service::send_prepare_done_message(msg_addr id, UUID plan_id, unsigned dst_cpu_id) {$/;"	f	class:net::messaging_service
+send_prepare_message	messaging_service.cc	/^future<streaming::prepare_message> messaging_service::send_prepare_message(msg_addr id, streaming::prepare_message msg, UUID plan_id,$/;"	f	class:net::messaging_service
+send_read_data	messaging_service.cc	/^future<query::result> messaging_service::send_read_data(msg_addr id, clock_type::time_point timeout, const query::read_command& cmd, const dht::partition_range& pr, query::digest_algorithm da) {$/;"	f	class:net::messaging_service
+send_read_digest	messaging_service.cc	/^future<query::result_digest, rpc::optional<api::timestamp_type>> messaging_service::send_read_digest(msg_addr id, clock_type::time_point timeout, const query::read_command& cmd, const dht::partition_range& pr) {$/;"	f	class:net::messaging_service
+send_read_mutation_data	messaging_service.cc	/^future<reconcilable_result> messaging_service::send_read_mutation_data(msg_addr id, clock_type::time_point timeout, const query::read_command& cmd, const dht::partition_range& pr) {$/;"	f	class:net::messaging_service
+send_repair_checksum_range	messaging_service.cc	/^future<partition_checksum> messaging_service::send_repair_checksum_range($/;"	f	class:net::messaging_service
+send_replication_finished	messaging_service.cc	/^future<> messaging_service::send_replication_finished(msg_addr id, inet_address from) {$/;"	f	class:net::messaging_service
+send_schema_check	messaging_service.cc	/^future<utils::UUID> messaging_service::send_schema_check(msg_addr dst) {$/;"	f	class:net::messaging_service
+send_stream_mutation	messaging_service.cc	/^future<> messaging_service::send_stream_mutation(msg_addr id, UUID plan_id, frozen_mutation fm, unsigned dst_cpu_id, bool fragmented) {$/;"	f	class:net::messaging_service
+send_stream_mutation_done	messaging_service.cc	/^future<> messaging_service::send_stream_mutation_done(msg_addr id, UUID plan_id, dht::token_range_vector ranges, UUID cf_id, unsigned dst_cpu_id) {$/;"	f	class:net::messaging_service
+send_truncate	messaging_service.cc	/^future<> messaging_service::send_truncate(msg_addr id, std::chrono::milliseconds timeout, sstring ks, sstring cf) {$/;"	f	class:net::messaging_service
+serializer	messaging_service.hh	/^struct serializer {};$/;"	s	namespace:net
+shard_info	messaging_service.cc	/^messaging_service::shard_info::shard_info(shared_ptr<rpc_protocol_client_wrapper>&& client)$/;"	f	class:net::messaging_service::shard_info
+shard_info	messaging_service.hh	/^    struct shard_info {$/;"	s	class:net::messaging_service
+start_listen	messaging_service.cc	/^void messaging_service::start_listen() {$/;"	f	class:net::messaging_service
+std	messaging_service.hh	/^namespace std {$/;"	n
+stop	messaging_service.cc	/^    future<> stop() { return _p->stop(); }$/;"	f	class:net::messaging_service::rpc_protocol_client_wrapper
+stop	messaging_service.cc	/^future<> messaging_service::stop() {$/;"	f	class:net::messaging_service
+stop_client	messaging_service.cc	/^future<> messaging_service::stop_client() {$/;"	f	class:net::messaging_service
+stop_nontls_server	messaging_service.cc	/^future<> messaging_service::stop_nontls_server() {$/;"	f	class:net::messaging_service
+stop_tls_server	messaging_service.cc	/^future<> messaging_service::stop_tls_server() {$/;"	f	class:net::messaging_service
+streaming	messaging_service.hh	/^namespace streaming {$/;"	n
+streaming_nr_retry	messaging_service.cc	/^static constexpr int streaming_nr_retry = 10;$/;"	m	namespace:net	file:
+unregister_counter_mutation	messaging_service.cc	/^void messaging_service::unregister_counter_mutation() {$/;"	f	class:net::messaging_service
+unregister_definitions_update	messaging_service.cc	/^void messaging_service::unregister_definitions_update() {$/;"	f	class:net::messaging_service
+unregister_get_schema_version	messaging_service.cc	/^void messaging_service::unregister_get_schema_version() {$/;"	f	class:net::messaging_service
+unregister_gossip_digest_ack	messaging_service.cc	/^void messaging_service::unregister_gossip_digest_ack() {$/;"	f	class:net::messaging_service
+unregister_gossip_digest_ack2	messaging_service.cc	/^void messaging_service::unregister_gossip_digest_ack2() {$/;"	f	class:net::messaging_service
+unregister_gossip_digest_syn	messaging_service.cc	/^void messaging_service::unregister_gossip_digest_syn() {$/;"	f	class:net::messaging_service
+unregister_gossip_echo	messaging_service.cc	/^void messaging_service::unregister_gossip_echo() {$/;"	f	class:net::messaging_service
+unregister_gossip_shutdown	messaging_service.cc	/^void messaging_service::unregister_gossip_shutdown() {$/;"	f	class:net::messaging_service
+unregister_migration_request	messaging_service.cc	/^void messaging_service::unregister_migration_request() {$/;"	f	class:net::messaging_service
+unregister_mutation	messaging_service.cc	/^void messaging_service::unregister_mutation() {$/;"	f	class:net::messaging_service
+unregister_mutation_done	messaging_service.cc	/^void messaging_service::unregister_mutation_done() {$/;"	f	class:net::messaging_service
+unregister_read_data	messaging_service.cc	/^void messaging_service::unregister_read_data() {$/;"	f	class:net::messaging_service
+unregister_read_digest	messaging_service.cc	/^void messaging_service::unregister_read_digest() {$/;"	f	class:net::messaging_service
+unregister_read_mutation_data	messaging_service.cc	/^void messaging_service::unregister_read_mutation_data() {$/;"	f	class:net::messaging_service
+unregister_repair_checksum_range	messaging_service.cc	/^void messaging_service::unregister_repair_checksum_range() {$/;"	f	class:net::messaging_service
+unregister_replication_finished	messaging_service.cc	/^void messaging_service::unregister_replication_finished() {$/;"	f	class:net::messaging_service
+unregister_schema_check	messaging_service.cc	/^void messaging_service::unregister_schema_check() {$/;"	f	class:net::messaging_service
+unregister_truncate	messaging_service.cc	/^void messaging_service::unregister_truncate() {$/;"	f	class:net::messaging_service
+utils	messaging_service.hh	/^namespace utils {$/;"	n
+write	messaging_service.cc	/^void write(serializer s, Output& out, const foreign_ptr<T>& v) {$/;"	f	namespace:net
+write	messaging_service.cc	/^void write(serializer s, Output& out, const lw_shared_ptr<T>& v) {$/;"	f	namespace:net
+write	messaging_service.cc	/^void write(serializer, Output& out, const T& data) {$/;"	f	namespace:net

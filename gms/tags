@@ -1,0 +1,436 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.8	//
+A_VERY_LONG_TIME	gossiper.cc	/^constexpr std::chrono::hours gossiper::A_VERY_LONG_TIME;$/;"	m	class:gms::gossiper	file:
+DC	application_state.hh	/^    DC,$/;"	m	class:gms::application_state
+DEAD_STATES	gossiper.hh	/^    const std::vector<sstring> DEAD_STATES = {$/;"	m	class:gms::gossiper
+DEFAULT_MAX_PAUSE	failure_detector.cc	/^constexpr std::chrono::milliseconds failure_detector::DEFAULT_MAX_PAUSE;$/;"	m	class:gms::failure_detector	file:
+DELIMITER	versioned_value.cc	/^constexpr char versioned_value::DELIMITER;$/;"	m	class:gms::versioned_value	file:
+DELIMITER	versioned_value.hh	/^    static constexpr char DELIMITER = ',';$/;"	m	class:gms::versioned_value
+DELIMITER_STR	versioned_value.cc	/^constexpr const char versioned_value::DELIMITER_STR[];$/;"	m	class:gms::versioned_value	file:
+DELIMITER_STR	versioned_value.hh	/^    static constexpr const char DELIMITER_STR[] = { DELIMITER, 0 };$/;"	m	class:gms::versioned_value
+HIBERNATE	versioned_value.cc	/^constexpr const char* versioned_value::HIBERNATE;$/;"	m	class:gms::versioned_value	file:
+HIBERNATE	versioned_value.hh	/^    static constexpr const char* HIBERNATE = "hibernate";$/;"	m	class:gms::versioned_value
+HOST_ID	application_state.hh	/^    HOST_ID,$/;"	m	class:gms::application_state
+INTERNAL_IP	application_state.hh	/^    INTERNAL_IP,$/;"	m	class:gms::application_state
+INTERVAL	gossiper.cc	/^constexpr std::chrono::milliseconds gossiper::INTERVAL;$/;"	m	class:gms::gossiper	file:
+LOAD	application_state.hh	/^    LOAD,$/;"	m	class:gms::application_state
+MAX_GENERATION_DIFFERENCE	gossiper.cc	/^constexpr int64_t gossiper::MAX_GENERATION_DIFFERENCE;$/;"	m	class:gms::gossiper	file:
+MAX_GENERATION_DIFFERENCE	gossiper.hh	/^    static constexpr int64_t MAX_GENERATION_DIFFERENCE = 86400 * 365;$/;"	m	class:gms::gossiper
+NET_VERSION	application_state.hh	/^    NET_VERSION,$/;"	m	class:gms::application_state
+RACK	application_state.hh	/^    RACK,$/;"	m	class:gms::application_state
+RELEASE_VERSION	application_state.hh	/^    RELEASE_VERSION,$/;"	m	class:gms::application_state
+REMOVAL_COORDINATOR	application_state.hh	/^    REMOVAL_COORDINATOR,$/;"	m	class:gms::application_state
+REMOVAL_COORDINATOR	versioned_value.cc	/^constexpr const char* versioned_value::REMOVAL_COORDINATOR;$/;"	m	class:gms::versioned_value	file:
+REMOVAL_COORDINATOR	versioned_value.hh	/^    static constexpr const char* REMOVAL_COORDINATOR = "REMOVER";$/;"	m	class:gms::versioned_value
+REMOVED_TOKEN	versioned_value.cc	/^constexpr const char* versioned_value::REMOVED_TOKEN;$/;"	m	class:gms::versioned_value	file:
+REMOVED_TOKEN	versioned_value.hh	/^    static constexpr const char* REMOVED_TOKEN = "removed";$/;"	m	class:gms::versioned_value
+REMOVING_TOKEN	versioned_value.cc	/^constexpr const char* versioned_value::REMOVING_TOKEN;$/;"	m	class:gms::versioned_value	file:
+REMOVING_TOKEN	versioned_value.hh	/^    static constexpr const char* REMOVING_TOKEN = "removing";$/;"	m	class:gms::versioned_value
+RPC_ADDRESS	application_state.hh	/^    RPC_ADDRESS,$/;"	m	class:gms::application_state
+SAMPLE_SIZE	failure_detector.hh	/^    static constexpr int SAMPLE_SIZE = 1000;$/;"	m	class:gms::failure_detector
+SCHEMA	application_state.hh	/^    SCHEMA,$/;"	m	class:gms::application_state
+SEVERITY	application_state.hh	/^    SEVERITY,$/;"	m	class:gms::application_state
+SHUTDOWN	versioned_value.cc	/^constexpr const char* versioned_value::SHUTDOWN;$/;"	m	class:gms::versioned_value	file:
+SHUTDOWN	versioned_value.hh	/^    static constexpr const char* SHUTDOWN = "shutdown";$/;"	m	class:gms::versioned_value
+SILENT_SHUTDOWN_STATES	gossiper.hh	/^    const std::vector<sstring> SILENT_SHUTDOWN_STATES = {$/;"	m	class:gms::gossiper
+STATUS	application_state.hh	/^    STATUS = 0,$/;"	m	class:gms::application_state
+STATUS_BOOTSTRAPPING	versioned_value.cc	/^constexpr const char* versioned_value::STATUS_BOOTSTRAPPING;$/;"	m	class:gms::versioned_value	file:
+STATUS_BOOTSTRAPPING	versioned_value.hh	/^    static constexpr const char* STATUS_BOOTSTRAPPING = "BOOT";$/;"	m	class:gms::versioned_value
+STATUS_LEAVING	versioned_value.cc	/^constexpr const char* versioned_value::STATUS_LEAVING;$/;"	m	class:gms::versioned_value	file:
+STATUS_LEAVING	versioned_value.hh	/^    static constexpr const char* STATUS_LEAVING = "LEAVING";$/;"	m	class:gms::versioned_value
+STATUS_LEFT	versioned_value.cc	/^constexpr const char* versioned_value::STATUS_LEFT;$/;"	m	class:gms::versioned_value	file:
+STATUS_LEFT	versioned_value.hh	/^    static constexpr const char* STATUS_LEFT = "LEFT";$/;"	m	class:gms::versioned_value
+STATUS_MOVING	versioned_value.cc	/^constexpr const char* versioned_value::STATUS_MOVING;$/;"	m	class:gms::versioned_value	file:
+STATUS_MOVING	versioned_value.hh	/^    static constexpr const char* STATUS_MOVING = "MOVING";$/;"	m	class:gms::versioned_value
+STATUS_NORMAL	versioned_value.cc	/^constexpr const char* versioned_value::STATUS_NORMAL;$/;"	m	class:gms::versioned_value	file:
+STATUS_NORMAL	versioned_value.hh	/^    static constexpr const char* STATUS_NORMAL = "NORMAL";$/;"	m	class:gms::versioned_value
+SUPPORTED_FEATURES	application_state.hh	/^    SUPPORTED_FEATURES,$/;"	m	class:gms::application_state
+TOKENS	application_state.hh	/^    TOKENS,$/;"	m	class:gms::application_state
+X10	application_state.hh	/^    X10,$/;"	m	class:gms::application_state
+X2	application_state.hh	/^    X2,$/;"	m	class:gms::application_state
+X3	application_state.hh	/^    X3,$/;"	m	class:gms::application_state
+X4	application_state.hh	/^    X4,$/;"	m	class:gms::application_state
+X5	application_state.hh	/^    X5,$/;"	m	class:gms::application_state
+X6	application_state.hh	/^    X6,$/;"	m	class:gms::application_state
+X7	application_state.hh	/^    X7,$/;"	m	class:gms::application_state
+X8	application_state.hh	/^    X8,$/;"	m	class:gms::application_state
+X9	application_state.hh	/^    X9,$/;"	m	class:gms::application_state
+X_11_PADDING	application_state.hh	/^    X_11_PADDING, \/\/ padding specifically for 1.1$/;"	m	class:gms::application_state
+_addr	inet_address.hh	/^    net::ipv4_address _addr;$/;"	m	class:gms::inet_address
+_application_state	endpoint_state.hh	/^    std::map<application_state, versioned_value> _application_state;$/;"	m	class:gms::endpoint_state
+_arrival_intervals	failure_detector.hh	/^    utils::bounded_stats_deque _arrival_intervals;$/;"	m	class:gms::arrival_window
+_arrival_samples	failure_detector.hh	/^    std::map<inet_address, arrival_window> _arrival_samples;$/;"	m	class:gms::failure_detector
+_cluster_id	gossip_digest_syn.hh	/^    sstring _cluster_id;$/;"	m	class:gms::gossip_digest_syn
+_cluster_name	gossiper.hh	/^    sstring _cluster_name;$/;"	m	class:gms::gossiper
+_default_cpuid	gossiper.hh	/^    static constexpr uint32_t _default_cpuid = 0;$/;"	m	class:gms::gossiper
+_digests	gossip_digest_syn.hh	/^    std::vector<gossip_digest> _digests;$/;"	m	class:gms::gossip_digest_syn
+_enabled	feature.hh	/^    bool _enabled;$/;"	m	class:gms::final
+_enabled	gossiper.hh	/^    bool _enabled = false;$/;"	m	class:gms::gossiper
+_expire_time_endpoint_map	gossiper.hh	/^    std::map<inet_address, clk::time_point> _expire_time_endpoint_map;$/;"	m	class:gms::gossiper
+_fd_evnt_listeners	failure_detector.hh	/^    std::list<i_failure_detection_event_listener*> _fd_evnt_listeners;$/;"	m	class:gms::failure_detector
+_features_condvar	gossiper.hh	/^    condition_variable _features_condvar;$/;"	m	class:gms::gossiper
+_generation	gossip_digest.hh	/^    int32_t _generation;$/;"	m	class:gms::gossip_digest
+_generation	heart_beat_state.hh	/^    int32_t _generation;$/;"	m	class:gms::heart_beat_state
+_gossiped_to_seed	gossiper.hh	/^    bool _gossiped_to_seed = false;$/;"	m	class:gms::gossiper
+_heart_beat_state	endpoint_state.hh	/^    heart_beat_state _heart_beat_state;$/;"	m	class:gms::endpoint_state
+_in_shadow_round	gossiper.hh	/^    bool _in_shadow_round = false;$/;"	m	class:gms::gossiper
+_is_alive	endpoint_state.hh	/^    bool _is_alive;$/;"	m	class:gms::endpoint_state
+_just_removed_endpoints	gossiper.hh	/^    std::map<inet_address, clk::time_point> _just_removed_endpoints;$/;"	m	class:gms::gossiper
+_l	gossiper.hh	/^        std::list<shared_ptr<i_endpoint_state_change_subscriber>> _l;$/;"	m	class:gms::gossiper::subscribers_list
+_last_interpret	failure_detector.hh	/^    std::experimental::optional<arrival_window::clk::time_point> _last_interpret;$/;"	m	class:gms::failure_detector
+_last_paused	failure_detector.hh	/^    arrival_window::clk::time_point _last_paused;$/;"	m	class:gms::failure_detector
+_last_processed_message_at	gossiper.hh	/^    clk::time_point _last_processed_message_at = now();$/;"	m	class:gms::gossiper
+_live_endpoints	gossiper.hh	/^    std::set<inet_address> _live_endpoints;$/;"	m	class:gms::gossiper
+_live_endpoints_just_added	gossiper.hh	/^    std::list<inet_address> _live_endpoints_just_added;$/;"	m	class:gms::gossiper
+_map	gossip_digest_ack.hh	/^    std::map<inet_address, endpoint_state> _map;$/;"	m	class:gms::gossip_digest_ack
+_max_version	gossip_digest.hh	/^    int32_t _max_version;$/;"	m	class:gms::gossip_digest
+_metrics	gossiper.hh	/^    seastar::metrics::metric_groups _metrics;$/;"	m	class:gms::gossiper
+_ms_registered	gossiper.hh	/^    bool _ms_registered = false;$/;"	m	class:gms::gossiper
+_name	feature.hh	/^    sstring _name;$/;"	m	class:gms::final
+_nr_run	gossiper.hh	/^    uint64_t _nr_run = 0;$/;"	m	class:gms::gossiper
+_partioner	gossip_digest_syn.hh	/^    sstring _partioner;$/;"	m	class:gms::gossip_digest_syn
+_pending_mark_alive_endpoints	gossiper.hh	/^    std::unordered_set<inet_address> _pending_mark_alive_endpoints;$/;"	m	class:gms::gossiper
+_phi	failure_detector.hh	/^    double _phi = 8;$/;"	m	class:gms::failure_detector
+_random	gossiper.hh	/^    std::random_device _random;$/;"	m	class:gms::gossiper
+_registered_features	gossiper.hh	/^    std::unordered_map<sstring, std::vector<feature*>> _registered_features;$/;"	m	class:gms::gossiper
+_scheduled_gossip_task	gossiper.hh	/^    timer<lowres_clock> _scheduled_gossip_task;$/;"	m	class:gms::gossiper
+_seeds	gossiper.hh	/^    std::set<inet_address> _seeds;$/;"	m	class:gms::gossiper
+_seeds_from_config	gossiper.hh	/^    std::set<inet_address> _seeds_from_config;$/;"	m	class:gms::gossiper
+_shadow_live_endpoints	gossiper.hh	/^    std::set<inet_address> _shadow_live_endpoints;$/;"	m	class:gms::gossiper
+_shadow_unreachable_endpoints	gossiper.hh	/^    std::map<inet_address, clk::time_point> _shadow_unreachable_endpoints;$/;"	m	class:gms::gossiper
+_subscribers	gossiper.hh	/^    } _subscribers;$/;"	m	class:gms::gossiper	typeref:class:gms::gossiper::subscribers_list
+_the_failure_detector	failure_detector.cc	/^distributed<failure_detector> _the_failure_detector;$/;"	m	namespace:gms	file:
+_the_gossiper	gossiper.cc	/^distributed<gossiper> _the_gossiper;$/;"	m	namespace:gms	file:
+_unreachable_endpoints	gossiper.hh	/^    std::map<inet_address, clk::time_point> _unreachable_endpoints;$/;"	m	class:gms::gossiper
+_update_timestamp	endpoint_state.hh	/^    clk::time_point _update_timestamp;$/;"	m	class:gms::endpoint_state
+_version	heart_beat_state.hh	/^    int32_t _version;$/;"	m	class:gms::heart_beat_state
+add	failure_detector.cc	/^void arrival_window::add(clk::time_point value, const gms::inet_address& ep) {$/;"	f	class:gms::arrival_window
+add_application_state	endpoint_state.hh	/^    void add_application_state(application_state key, versioned_value value) {$/;"	f	class:gms::endpoint_state
+add_expire_time_for_endpoint	gossiper.cc	/^void gossiper::add_expire_time_for_endpoint(inet_address endpoint, clk::time_point expire_time) {$/;"	f	class:gms::gossiper
+add_local_application_state	gossiper.cc	/^future<> gossiper::add_local_application_state(application_state state, versioned_value value) {$/;"	f	class:gms::gossiper
+add_saved_endpoint	gossiper.cc	/^void gossiper::add_saved_endpoint(inet_address ep) {$/;"	f	class:gms::gossiper
+addr	inet_address.hh	/^    const net::ipv4_address& addr() const {$/;"	f	class:gms::inet_address
+advertise_removing	gossiper.cc	/^future<> gossiper::advertise_removing(inet_address endpoint, utils::UUID host_id, utils::UUID local_host_id) {$/;"	f	class:gms::gossiper
+advertise_token_removed	gossiper.cc	/^future<> gossiper::advertise_token_removed(inet_address endpoint, utils::UUID host_id) {$/;"	f	class:gms::gossiper
+append_endpoint_state	failure_detector.cc	/^void failure_detector::append_endpoint_state(std::stringstream& ss, endpoint_state& state) {$/;"	f	class:gms::failure_detector
+application_state	application_state.hh	/^enum class application_state {$/;"	c	namespace:gms
+application_state_names	application_state.cc	/^static const std::map<application_state, sstring> application_state_names = {$/;"	m	namespace:gms	file:
+apply_new_states	gossiper.cc	/^void gossiper::apply_new_states(inet_address addr, endpoint_state& local_state, const endpoint_state& remote_state) {$/;"	f	class:gms::gossiper
+apply_state_locally	gossiper.cc	/^future<> gossiper::apply_state_locally(const std::map<inet_address, endpoint_state>& map) {$/;"	f	class:gms::gossiper
+arrival_samples	failure_detector.hh	/^    std::map<inet_address, arrival_window> arrival_samples() const {$/;"	f	class:gms::failure_detector
+arrival_window	failure_detector.hh	/^    arrival_window(int size)$/;"	f	class:gms::arrival_window
+arrival_window	failure_detector.hh	/^class arrival_window {$/;"	c	namespace:gms
+assassinate_endpoint	gossiper.cc	/^future<> gossiper::assassinate_endpoint(sstring address) {$/;"	f	class:gms::gossiper
+bootstrapping	versioned_value.hh	/^        versioned_value bootstrapping(const std::unordered_set<token>& tokens) {$/;"	f	class:gms::versioned_value::factory
+build_seeds_list	gossiper.cc	/^void gossiper::build_seeds_list() {$/;"	f	class:gms::gossiper
+check_features	gossiper.cc	/^static bool check_features(std::set<sstring> features, std::set<sstring> need_features) {$/;"	f	namespace:gms
+check_knows_remote_features	gossiper.cc	/^void gossiper::check_knows_remote_features(sstring local_features_string) const {$/;"	f	class:gms::gossiper
+check_knows_remote_features	gossiper.cc	/^void gossiper::check_knows_remote_features(sstring local_features_string, std::unordered_map<inet_address, sstring> peer_features_string) const {$/;"	f	class:gms::gossiper
+clone_with_higher_version	versioned_value.hh	/^        versioned_value clone_with_higher_version(const versioned_value& value) {$/;"	f	class:gms::versioned_value::factory
+cluster_id	gossip_digest_syn.hh	/^    sstring cluster_id() const {$/;"	f	class:gms::gossip_digest_syn
+compare_endpoint_startup	gossiper.cc	/^int gossiper::compare_endpoint_startup(inet_address addr1, inet_address addr2) {$/;"	f	class:gms::gossiper
+compare_to	gossip_digest.hh	/^    int32_t compare_to(gossip_digest d) const {$/;"	f	class:gms::gossip_digest
+compare_to	versioned_value.hh	/^    int compare_to(const versioned_value &value) {$/;"	f	class:gms::versioned_value
+compute_expire_time	gossiper.cc	/^clk::time_point gossiper::compute_expire_time() {$/;"	f	class:gms::gossiper
+convict	gossiper.cc	/^void gossiper::convict(inet_address endpoint, double phi) {$/;"	f	class:gms::gossiper
+datacenter	versioned_value.hh	/^        versioned_value datacenter(const sstring& dc_id) {$/;"	f	class:gms::versioned_value::factory
+debug_show	gossiper.cc	/^void gossiper::debug_show() {$/;"	f	class:gms::gossiper
+do_before_change_notifications	gossiper.cc	/^void gossiper::do_before_change_notifications(inet_address addr, const endpoint_state& ep_state, const application_state& ap_state, const versioned_value& new_value) {$/;"	f	class:gms::gossiper
+do_gossip_to_live_member	gossiper.cc	/^future<> gossiper::do_gossip_to_live_member(gossip_digest_syn message) {$/;"	f	class:gms::gossiper
+do_gossip_to_seed	gossiper.cc	/^future<> gossiper::do_gossip_to_seed(gossip_digest_syn prod) {$/;"	f	class:gms::gossiper
+do_gossip_to_unreachable_member	gossiper.cc	/^future<> gossiper::do_gossip_to_unreachable_member(gossip_digest_syn message) {$/;"	f	class:gms::gossiper
+do_on_change_notifications	gossiper.cc	/^void gossiper::do_on_change_notifications(inet_address addr, const application_state& state, const versioned_value& value) {$/;"	f	class:gms::gossiper
+do_shadow_round	gossiper.cc	/^future<> gossiper::do_shadow_round() {$/;"	f	class:gms::gossiper
+do_sort	gossiper.cc	/^void gossiper::do_sort(std::vector<gossip_digest>& g_digest_list) {$/;"	f	class:gms::gossiper
+do_status_check	gossiper.cc	/^void gossiper::do_status_check() {$/;"	f	class:gms::gossiper
+do_stop_gossiping	gossiper.cc	/^future<> gossiper::do_stop_gossiping() {$/;"	f	class:gms::gossiper
+dump_endpoint_state_map	gossiper.cc	/^void gossiper::dump_endpoint_state_map() {$/;"	f	class:gms::gossiper
+enable	gossiper.cc	/^void feature::enable() {$/;"	f	class:gms::feature
+endpoint_state	endpoint_state.hh	/^    endpoint_state()$/;"	f	class:gms::endpoint_state
+endpoint_state	endpoint_state.hh	/^    endpoint_state(heart_beat_state initial_hb_state)$/;"	f	class:gms::endpoint_state
+endpoint_state	endpoint_state.hh	/^    endpoint_state(heart_beat_state&& initial_hb_state,$/;"	f	class:gms::endpoint_state
+endpoint_state	endpoint_state.hh	/^class endpoint_state {$/;"	c	namespace:gms
+endpoint_state_map	gossiper.hh	/^    std::unordered_map<inet_address, endpoint_state> endpoint_state_map;$/;"	m	class:gms::gossiper
+evict_from_membership	gossiper.cc	/^void gossiper::evict_from_membership(inet_address endpoint) {$/;"	f	class:gms::gossiper
+examine_gossiper	gossiper.cc	/^void gossiper::examine_gossiper(std::vector<gossip_digest>& g_digest_list,$/;"	f	class:gms::gossiper
+factory	versioned_value.hh	/^    class factory {$/;"	c	class:gms::versioned_value
+failure_detector	failure_detector.hh	/^    failure_detector(double phi) : _phi(phi) {$/;"	f	class:gms::failure_detector
+failure_detector	failure_detector.hh	/^class failure_detector : public i_failure_detector, public seastar::async_sharded_service<failure_detector> {$/;"	c	namespace:gms
+fat_client_timeout	gossiper.hh	/^    std::chrono::milliseconds fat_client_timeout;$/;"	m	class:gms::gossiper
+feature	feature.hh	/^    feature()$/;"	f	class:gms::final
+feature	feature.hh	/^    feature(const feature& other)$/;"	f	class:gms::final
+feature	gossiper.cc	/^feature::feature(sstring name, bool enabled)$/;"	f	class:gms::feature
+final	feature.hh	/^class feature final {$/;"	c	namespace:gms
+finish_shadow_round	gossiper.cc	/^void gossiper::finish_shadow_round() {$/;"	f	class:gms::gossiper
+for_each	gossiper.hh	/^        void for_each(Func&& f) {$/;"	f	class:gms::gossiper::subscribers_list
+force_conviction	failure_detector.cc	/^void failure_detector::force_conviction(inet_address ep) {$/;"	f	class:gms::failure_detector
+force_highest_possible_version_unsafe	heart_beat_state.hh	/^    void force_highest_possible_version_unsafe() {$/;"	f	class:gms::heart_beat_state
+force_newer_generation	gossiper.cc	/^void gossiper::force_newer_generation() {$/;"	f	class:gms::gossiper
+force_newer_generation_unsafe	heart_beat_state.hh	/^    void force_newer_generation_unsafe() {$/;"	f	class:gms::heart_beat_state
+get_all_endpoint_states	failure_detector.cc	/^sstring failure_detector::get_all_endpoint_states() {$/;"	f	class:gms::failure_detector
+get_all_endpoint_states	failure_detector.hh	/^inline future<sstring> get_all_endpoint_states() {$/;"	f	namespace:gms
+get_application_state	endpoint_state.cc	/^std::experimental::optional<versioned_value> endpoint_state::get_application_state(application_state key) const {$/;"	f	class:gms::endpoint_state
+get_application_state_map	endpoint_state.hh	/^    const std::map<application_state, versioned_value>& get_application_state_map() const {$/;"	f	class:gms::endpoint_state
+get_application_state_map	endpoint_state.hh	/^    std::map<application_state, versioned_value>& get_application_state_map() {$/;"	f	class:gms::endpoint_state
+get_arrival_samples	failure_detector.hh	/^inline future<std::map<inet_address, arrival_window>> get_arrival_samples() {$/;"	f	namespace:gms
+get_broadcast_address	gossiper.hh	/^    inet_address get_broadcast_address() const {$/;"	f	class:gms::gossiper
+get_cluster_id	gossip_digest_syn.hh	/^    sstring get_cluster_id() const {$/;"	f	class:gms::gossip_digest_syn
+get_cluster_name	gossiper.cc	/^sstring gossiper::get_cluster_name() {$/;"	f	class:gms::gossiper
+get_current_generation_number	gossiper.cc	/^future<int> gossiper::get_current_generation_number(inet_address endpoint) {$/;"	f	class:gms::gossiper
+get_current_heart_beat_version	gossiper.cc	/^future<int> gossiper::get_current_heart_beat_version(inet_address endpoint) {$/;"	f	class:gms::gossiper
+get_down_endpoint_count	failure_detector.cc	/^int failure_detector::get_down_endpoint_count() {$/;"	f	class:gms::failure_detector
+get_down_endpoint_count	failure_detector.hh	/^inline future<int> get_down_endpoint_count() {$/;"	f	namespace:gms
+get_endpoint	gossip_digest.hh	/^    inet_address get_endpoint() const {$/;"	f	class:gms::gossip_digest
+get_endpoint_downtime	gossiper.cc	/^int64_t gossiper::get_endpoint_downtime(inet_address ep) {$/;"	f	class:gms::gossiper
+get_endpoint_state	failure_detector.cc	/^sstring failure_detector::get_endpoint_state(sstring address) {$/;"	f	class:gms::failure_detector
+get_endpoint_state	failure_detector.hh	/^inline future<sstring> get_endpoint_state(sstring address) {$/;"	f	namespace:gms
+get_endpoint_state_for_endpoint	gossiper.cc	/^std::experimental::optional<endpoint_state> gossiper::get_endpoint_state_for_endpoint(inet_address ep) const {$/;"	f	class:gms::gossiper
+get_endpoint_state_map	gossip_digest_ack.hh	/^    std::map<inet_address, endpoint_state> get_endpoint_state_map() const {$/;"	f	class:gms::gossip_digest_ack
+get_endpoint_state_map	gossip_digest_ack2.hh	/^    const std::map<inet_address, endpoint_state>& get_endpoint_state_map() const {$/;"	f	class:gms::gossip_digest_ack2
+get_endpoint_state_map	gossip_digest_ack2.hh	/^    std::map<inet_address, endpoint_state>& get_endpoint_state_map() {$/;"	f	class:gms::gossip_digest_ack2
+get_endpoint_states	gossiper.cc	/^std::unordered_map<inet_address, endpoint_state>& gms::gossiper::get_endpoint_states() {$/;"	f	class:gms::gms::gossiper
+get_expire_time_for_endpoint	gossiper.cc	/^clk::time_point gossiper::get_expire_time_for_endpoint(inet_address endpoint) {$/;"	f	class:gms::gossiper
+get_failure_detector	failure_detector.hh	/^inline distributed<failure_detector>& get_failure_detector() {$/;"	f	namespace:gms
+get_generation	gossip_digest.hh	/^    int32_t get_generation() const {$/;"	f	class:gms::gossip_digest
+get_generation	heart_beat_state.hh	/^    int32_t get_generation() const {$/;"	f	class:gms::heart_beat_state
+get_gossip_digest_list	gossip_digest_ack.hh	/^    std::vector<gossip_digest> get_gossip_digest_list() const {$/;"	f	class:gms::gossip_digest_ack
+get_gossip_digests	gossip_digest_syn.hh	/^    std::vector<gossip_digest> get_gossip_digests() const {$/;"	f	class:gms::gossip_digest_syn
+get_gossip_status	gossiper.cc	/^sstring gossiper::get_gossip_status(const endpoint_state& ep_state) const {$/;"	f	class:gms::gossiper
+get_gossip_status	gossiper.cc	/^sstring gossiper::get_gossip_status(const inet_address& endpoint) const {$/;"	f	class:gms::gossiper
+get_gossiper	gossiper.hh	/^inline distributed<gossiper>& get_gossiper() {$/;"	f	namespace:gms
+get_heart_beat_state	endpoint_state.hh	/^    const heart_beat_state& get_heart_beat_state() const {$/;"	f	class:gms::endpoint_state
+get_heart_beat_state	endpoint_state.hh	/^    heart_beat_state& get_heart_beat_state() {$/;"	f	class:gms::endpoint_state
+get_heart_beat_version	heart_beat_state.hh	/^    int32_t get_heart_beat_version() const {$/;"	f	class:gms::heart_beat_state
+get_host_id	gossiper.cc	/^utils::UUID gossiper::get_host_id(inet_address endpoint) {$/;"	f	class:gms::gossiper
+get_initial_value	failure_detector.cc	/^static clk::duration get_initial_value() {$/;"	f	namespace:gms
+get_live_members	gossiper.cc	/^std::set<inet_address> gossiper::get_live_members() {$/;"	f	class:gms::gossiper
+get_live_token_owners	gossiper.cc	/^std::set<inet_address> gossiper::get_live_token_owners() {$/;"	f	class:gms::gossiper
+get_local_failure_detector	failure_detector.hh	/^inline failure_detector& get_local_failure_detector() {$/;"	f	namespace:gms
+get_local_gossiper	gossiper.hh	/^inline gossiper& get_local_gossiper() {$/;"	f	namespace:gms
+get_max_endpoint_state_version	gossiper.cc	/^int gossiper::get_max_endpoint_state_version(endpoint_state state) {$/;"	f	class:gms::gossiper
+get_max_interval	failure_detector.cc	/^clk::duration arrival_window::get_max_interval() {$/;"	f	class:gms::arrival_window
+get_max_local_pause	failure_detector.hh	/^    std::chrono::milliseconds get_max_local_pause() {$/;"	f	class:gms::failure_detector
+get_max_version	gossip_digest.hh	/^    int32_t get_max_version() const {$/;"	f	class:gms::gossip_digest
+get_msg_addr	gossiper.cc	/^net::msg_addr gossiper::get_msg_addr(inet_address to) {$/;"	f	class:gms::gossiper
+get_next_version	version_generator.cc	/^int get_next_version()$/;"	f	namespace:gms::version_generator
+get_partioner	gossip_digest_syn.hh	/^    sstring get_partioner() const {$/;"	f	class:gms::gossip_digest_syn
+get_partitioner_name	gossiper.cc	/^sstring gossiper::get_partitioner_name() {$/;"	f	class:gms::gossiper
+get_phi_convict_threshold	failure_detector.cc	/^double failure_detector::get_phi_convict_threshold() {$/;"	f	class:gms::failure_detector
+get_phi_convict_threshold	failure_detector.hh	/^inline future<double> get_phi_convict_threshold() {$/;"	f	namespace:gms
+get_seeds	gossiper.cc	/^std::set<inet_address> gossiper::get_seeds() {$/;"	f	class:gms::gossiper
+get_simple_states	failure_detector.cc	/^std::map<sstring, sstring> failure_detector::get_simple_states() {$/;"	f	class:gms::failure_detector
+get_simple_states	failure_detector.hh	/^inline future<std::map<sstring, sstring>> get_simple_states() {$/;"	f	namespace:gms
+get_state_for_version_bigger_than	gossiper.cc	/^std::experimental::optional<endpoint_state> gossiper::get_state_for_version_bigger_than(inet_address for_endpoint, int version) {$/;"	f	class:gms::gossiper
+get_supported_features	gossiper.cc	/^std::set<sstring> gossiper::get_supported_features() const {$/;"	f	class:gms::gossiper
+get_supported_features	gossiper.cc	/^std::set<sstring> gossiper::get_supported_features(inet_address endpoint) const {$/;"	f	class:gms::gossiper
+get_supported_features	gossiper.cc	/^std::set<sstring> gossiper::get_supported_features(std::unordered_map<gms::inet_address, sstring> peer_features_string) {$/;"	f	class:gms::gossiper
+get_unreachable_members	gossiper.cc	/^std::set<inet_address> gossiper::get_unreachable_members() {$/;"	f	class:gms::gossiper
+get_unreachable_token_owners	gossiper.cc	/^std::set<inet_address> gossiper::get_unreachable_token_owners() {$/;"	f	class:gms::gossiper
+get_up_endpoint_count	failure_detector.cc	/^int failure_detector::get_up_endpoint_count() {$/;"	f	class:gms::failure_detector
+get_up_endpoint_count	failure_detector.hh	/^inline future<int> get_up_endpoint_count() {$/;"	f	namespace:gms
+get_update_timestamp	endpoint_state.hh	/^    clk::time_point get_update_timestamp() {$/;"	f	class:gms::endpoint_state
+gms	application_state.cc	/^namespace gms {$/;"	n	file:
+gms	application_state.hh	/^namespace gms {$/;"	n
+gms	endpoint_state.cc	/^namespace gms {$/;"	n	file:
+gms	endpoint_state.hh	/^namespace gms {$/;"	n
+gms	failure_detector.cc	/^namespace gms {$/;"	n	file:
+gms	failure_detector.hh	/^namespace gms {$/;"	n
+gms	feature.hh	/^namespace gms {$/;"	n
+gms	gossip_digest.hh	/^namespace gms {$/;"	n
+gms	gossip_digest_ack.cc	/^namespace gms {$/;"	n	file:
+gms	gossip_digest_ack.hh	/^namespace gms {$/;"	n
+gms	gossip_digest_ack2.cc	/^namespace gms {$/;"	n	file:
+gms	gossip_digest_ack2.hh	/^namespace gms {$/;"	n
+gms	gossip_digest_syn.cc	/^namespace gms {$/;"	n	file:
+gms	gossip_digest_syn.hh	/^namespace gms {$/;"	n
+gms	gossiper.cc	/^namespace gms {$/;"	n	file:
+gms	gossiper.hh	/^namespace gms {$/;"	n
+gms	heart_beat_state.hh	/^namespace gms {$/;"	n
+gms	i_endpoint_state_change_subscriber.hh	/^namespace gms {$/;"	n
+gms	i_failure_detection_event_listener.hh	/^namespace gms {$/;"	n
+gms	i_failure_detector.hh	/^namespace gms {$/;"	n
+gms	inet_address.hh	/^namespace gms {$/;"	n
+gms	version_generator.cc	/^namespace gms {$/;"	n	file:
+gms	version_generator.hh	/^namespace gms {$/;"	n
+gms	versioned_value.cc	/^namespace gms {$/;"	n	file:
+gms	versioned_value.hh	/^namespace gms {$/;"	n
+gossip_digest	gossip_digest.hh	/^    gossip_digest()$/;"	f	class:gms::gossip_digest
+gossip_digest	gossip_digest.hh	/^    gossip_digest(inet_address ep, int32_t gen, int32_t version)$/;"	f	class:gms::gossip_digest
+gossip_digest	gossip_digest.hh	/^class gossip_digest { \/\/ implements Comparable<GossipDigest>$/;"	c	namespace:gms
+gossip_digest_ack	gossip_digest_ack.hh	/^    gossip_digest_ack() {$/;"	f	class:gms::gossip_digest_ack
+gossip_digest_ack	gossip_digest_ack.hh	/^    gossip_digest_ack(std::vector<gossip_digest> d, std::map<inet_address, endpoint_state> m)$/;"	f	class:gms::gossip_digest_ack
+gossip_digest_ack	gossip_digest_ack.hh	/^class gossip_digest_ack {$/;"	c	namespace:gms
+gossip_digest_ack2	gossip_digest_ack2.hh	/^    gossip_digest_ack2() {$/;"	f	class:gms::gossip_digest_ack2
+gossip_digest_ack2	gossip_digest_ack2.hh	/^    gossip_digest_ack2(std::map<inet_address, endpoint_state> m)$/;"	f	class:gms::gossip_digest_ack2
+gossip_digest_ack2	gossip_digest_ack2.hh	/^class gossip_digest_ack2 {$/;"	c	namespace:gms
+gossip_digest_syn	gossip_digest_syn.hh	/^    gossip_digest_syn() {$/;"	f	class:gms::gossip_digest_syn
+gossip_digest_syn	gossip_digest_syn.hh	/^    gossip_digest_syn(sstring id, sstring p, std::vector<gossip_digest> digests)$/;"	f	class:gms::gossip_digest_syn
+gossip_digest_syn	gossip_digest_syn.hh	/^class gossip_digest_syn {$/;"	c	namespace:gms
+gossiper	gossiper.cc	/^gossiper::gossiper() {$/;"	f	class:gms::gossiper
+gossiper	gossiper.hh	/^class gossiper : public i_failure_detection_event_listener, public seastar::async_sharded_service<gossiper> {$/;"	c	namespace:gms
+goto_shadow_round	gossiper.cc	/^void gossiper::goto_shadow_round() {$/;"	f	class:gms::gossiper
+handle_ack2_msg	gossiper.cc	/^future<> gossiper::handle_ack2_msg(gossip_digest_ack2 msg) {$/;"	f	class:gms::gossiper
+handle_ack_msg	gossiper.cc	/^future<> gossiper::handle_ack_msg(msg_addr id, gossip_digest_ack ack_msg) {$/;"	f	class:gms::gossiper
+handle_echo_msg	gossiper.cc	/^future<> gossiper::handle_echo_msg() {$/;"	f	class:gms::gossiper
+handle_major_state_change	gossiper.cc	/^void gossiper::handle_major_state_change(inet_address ep, const endpoint_state& eps) {$/;"	f	class:gms::gossiper
+handle_shutdown_msg	gossiper.cc	/^future<> gossiper::handle_shutdown_msg(inet_address from) {$/;"	f	class:gms::gossiper
+handle_syn_msg	gossiper.cc	/^future<> gossiper::handle_syn_msg(msg_addr from, gossip_digest_syn syn_msg) {$/;"	f	class:gms::gossiper
+hash	inet_address.hh	/^struct hash<gms::inet_address> {$/;"	s	namespace:std
+heart_beat_state	heart_beat_state.hh	/^    heart_beat_state(int32_t gen)$/;"	f	class:gms::heart_beat_state
+heart_beat_state	heart_beat_state.hh	/^    heart_beat_state(int32_t gen, int32_t ver)$/;"	f	class:gms::heart_beat_state
+heart_beat_state	heart_beat_state.hh	/^class heart_beat_state {$/;"	c	namespace:gms
+hibernate	versioned_value.hh	/^        versioned_value hibernate(bool value) {$/;"	f	class:gms::versioned_value::factory
+host_id	versioned_value.hh	/^        versioned_value host_id(const utils::UUID& host_id) {$/;"	f	class:gms::versioned_value::factory
+i_endpoint_state_change_subscriber	i_endpoint_state_change_subscriber.hh	/^class i_endpoint_state_change_subscriber {$/;"	c	namespace:gms
+i_failure_detection_event_listener	i_failure_detection_event_listener.hh	/^class i_failure_detection_event_listener {$/;"	c	namespace:gms
+i_failure_detector	i_failure_detector.hh	/^class i_failure_detector {$/;"	c	namespace:gms
+inet_address	inet_address.hh	/^    explicit inet_address(uint32_t ip)$/;"	f	class:gms::inet_address
+inet_address	inet_address.hh	/^    inet_address(const socket_address& sa) {$/;"	f	class:gms::inet_address
+inet_address	inet_address.hh	/^    inet_address(const sstring& addr) {$/;"	f	class:gms::inet_address
+inet_address	inet_address.hh	/^    inet_address(int32_t ip)$/;"	f	class:gms::inet_address
+inet_address	inet_address.hh	/^    inet_address(net::ipv4_address&& addr) : _addr(std::move(addr)) {}$/;"	f	class:gms::inet_address
+inet_address	inet_address.hh	/^class inet_address {$/;"	c	namespace:gms
+init_messaging_service_handler	gossiper.cc	/^void gossiper::init_messaging_service_handler() {$/;"	f	class:gms::gossiper
+internal_ip	versioned_value.hh	/^        versioned_value internal_ip(const sstring &private_ip) {$/;"	f	class:gms::versioned_value::factory
+interpret	failure_detector.cc	/^void failure_detector::interpret(inet_address ep) {$/;"	f	class:gms::failure_detector
+is_alive	endpoint_state.hh	/^    bool is_alive() {$/;"	f	class:gms::endpoint_state
+is_alive	failure_detector.cc	/^bool failure_detector::is_alive(inet_address ep) {$/;"	f	class:gms::failure_detector
+is_alive	gossiper.cc	/^bool gossiper::is_alive(inet_address ep) {$/;"	f	class:gms::gossiper
+is_broadcast_address	inet_address.hh	/^    bool is_broadcast_address() {$/;"	f	class:gms::inet_address
+is_dead_state	gossiper.cc	/^bool gossiper::is_dead_state(const endpoint_state& eps) const {$/;"	f	class:gms::gossiper
+is_enabled	gossiper.cc	/^bool gossiper::is_enabled() {$/;"	f	class:gms::gossiper
+is_gossip_only_member	gossiper.cc	/^bool gossiper::is_gossip_only_member(inet_address endpoint) {$/;"	f	class:gms::gossiper
+is_in_shadow_round	gossiper.cc	/^bool gossiper::is_in_shadow_round() {$/;"	f	class:gms::gossiper
+is_known_endpoint	gossiper.cc	/^bool gossiper::is_known_endpoint(inet_address endpoint) {$/;"	f	class:gms::gossiper
+is_safe_for_bootstrap	gossiper.cc	/^bool gossiper::is_safe_for_bootstrap(inet_address endpoint) {$/;"	f	class:gms::gossiper
+is_shutdown	gossiper.cc	/^bool gossiper::is_shutdown(const inet_address& endpoint) const {$/;"	f	class:gms::gossiper
+is_silent_shutdown_state	gossiper.cc	/^bool gossiper::is_silent_shutdown_state(const endpoint_state& ep_state) const{$/;"	f	class:gms::gossiper
+leaving	versioned_value.hh	/^        versioned_value leaving(const std::unordered_set<token>& tokens) {$/;"	f	class:gms::versioned_value::factory
+left	versioned_value.hh	/^        versioned_value left(const std::unordered_set<token>& tokens, int64_t expire_time) {$/;"	f	class:gms::versioned_value::factory
+load	versioned_value.hh	/^        versioned_value load(double load) {$/;"	f	class:gms::versioned_value::factory
+make_full_token_string	versioned_value.hh	/^        sstring make_full_token_string(const std::unordered_set<token>& tokens) {$/;"	f	class:gms::versioned_value::factory
+make_random_gossip_digest	gossiper.cc	/^void gossiper::make_random_gossip_digest(std::vector<gossip_digest>& g_digests) {$/;"	f	class:gms::gossiper
+make_token_string	versioned_value.hh	/^        sstring make_token_string(const std::unordered_set<token>& tokens) {$/;"	f	class:gms::versioned_value::factory
+mark_alive	endpoint_state.hh	/^    void mark_alive() {$/;"	f	class:gms::endpoint_state
+mark_alive	gossiper.cc	/^void gossiper::mark_alive(inet_address addr, endpoint_state& local_state) {$/;"	f	class:gms::gossiper
+mark_as_shutdown	gossiper.cc	/^void gossiper::mark_as_shutdown(const inet_address& endpoint) {$/;"	f	class:gms::gossiper
+mark_dead	endpoint_state.hh	/^    void mark_dead() {$/;"	f	class:gms::endpoint_state
+mark_dead	gossiper.cc	/^void gossiper::mark_dead(inet_address addr, endpoint_state& local_state) {$/;"	f	class:gms::gossiper
+maybe_enable_features	gossiper.cc	/^void gossiper::maybe_enable_features() {$/;"	f	class:gms::gossiper
+maybe_initialize_local_state	gossiper.cc	/^void gossiper::maybe_initialize_local_state(int generation_nbr) {$/;"	f	class:gms::gossiper
+mean	failure_detector.cc	/^double arrival_window::mean() {$/;"	f	class:gms::arrival_window
+moving	versioned_value.hh	/^        versioned_value moving(token t) {$/;"	f	class:gms::versioned_value::factory
+ms	gossiper.hh	/^    net::messaging_service& ms() {$/;"	f	class:gms::gossiper
+name	feature.hh	/^    const sstring& name() const {$/;"	f	class:gms::final
+network_version	versioned_value.cc	/^versioned_value versioned_value::factory::network_version() {$/;"	f	class:gms::versioned_value::factory
+normal	versioned_value.hh	/^        versioned_value normal(const std::unordered_set<token>& tokens) {$/;"	f	class:gms::versioned_value::factory
+notify_failure_detector	gossiper.cc	/^void gossiper::notify_failure_detector(inet_address endpoint, endpoint_state remote_endpoint_state) {$/;"	f	class:gms::gossiper
+notify_failure_detector	gossiper.cc	/^void gossiper::notify_failure_detector(std::map<inet_address, endpoint_state> remoteEpStateMap) {$/;"	f	class:gms::gossiper
+now	gossiper.hh	/^    static clk::time_point inline now() { return clk::now(); }$/;"	f	class:gms::gossiper::clk
+operator !=	inet_address.hh	/^    friend inline bool operator!=(const inet_address& x, const inet_address& y) {$/;"	f	class:gms::inet_address
+operator ()	inet_address.hh	/^    size_t operator()(gms::inet_address a) const { return std::hash<net::ipv4_address>()(a._addr); }$/;"	f	struct:std::hash
+operator <	gossip_digest.hh	/^    friend bool operator<(const gossip_digest& x, const gossip_digest& y) {$/;"	f	class:gms::gossip_digest
+operator <	inet_address.hh	/^    friend inline bool operator<(const inet_address& x, const inet_address& y) {$/;"	f	class:gms::inet_address
+operator <<	application_state.cc	/^std::ostream& operator<<(std::ostream& os, const application_state& m) {$/;"	f	namespace:gms
+operator <<	endpoint_state.cc	/^std::ostream& operator<<(std::ostream& os, const endpoint_state& x) {$/;"	f	namespace:gms
+operator <<	failure_detector.cc	/^std::ostream& operator<<(std::ostream& os, const arrival_window& w) {$/;"	f	namespace:gms
+operator <<	failure_detector.cc	/^std::ostream& operator<<(std::ostream& os, const failure_detector& x) {$/;"	f	namespace:gms
+operator <<	feature.hh	/^    friend inline std::ostream& operator<<(std::ostream& os, const feature& f) {$/;"	f	class:gms::final
+operator <<	gossip_digest.hh	/^    friend inline std::ostream& operator<<(std::ostream& os, const gossip_digest& d) {$/;"	f	class:gms::gossip_digest
+operator <<	gossip_digest_ack.cc	/^std::ostream& operator<<(std::ostream& os, const gossip_digest_ack& ack) {$/;"	f	namespace:gms
+operator <<	gossip_digest_ack2.cc	/^std::ostream& operator<<(std::ostream& os, const gossip_digest_ack2& ack2) {$/;"	f	namespace:gms
+operator <<	gossip_digest_syn.cc	/^std::ostream& operator<<(std::ostream& os, const gossip_digest_syn& syn) {$/;"	f	namespace:gms
+operator <<	heart_beat_state.hh	/^    friend inline std::ostream& operator<<(std::ostream& os, const heart_beat_state& h) {$/;"	f	class:gms::heart_beat_state
+operator <<	inet_address.hh	/^    friend inline std::ostream& operator<<(std::ostream& os, const inet_address& x) {$/;"	f	class:gms::inet_address
+operator <<	versioned_value.hh	/^    friend inline std::ostream& operator<<(std::ostream& os, const versioned_value& x) {$/;"	f	class:gms::versioned_value
+operator =	gossiper.cc	/^feature& feature::operator=(feature other) {$/;"	f	class:gms::feature
+operator ==	endpoint_state.hh	/^    bool operator==(const endpoint_state& other) const {$/;"	f	class:gms::endpoint_state
+operator ==	heart_beat_state.hh	/^    bool operator==(const heart_beat_state& other) const {$/;"	f	class:gms::heart_beat_state
+operator ==	inet_address.hh	/^    friend inline bool operator==(const inet_address& x, const inet_address& y) {$/;"	f	class:gms::inet_address
+operator ==	versioned_value.hh	/^    bool operator==(const versioned_value& other) const {$/;"	f	class:gms::versioned_value
+operator bool	feature.hh	/^    explicit operator bool() const {$/;"	f	class:gms::final
+override	gossiper.hh	/^    virtual void convict(inet_address endpoint, double phi) override;$/;"	m	class:gms::gossiper
+partioner	gossip_digest_syn.hh	/^    sstring partioner() const {$/;"	f	class:gms::gossip_digest_syn
+phi	failure_detector.cc	/^double arrival_window::phi(clk::time_point tnow) {$/;"	f	class:gms::arrival_window
+push_back	gossiper.hh	/^        auto push_back(shared_ptr<i_endpoint_state_change_subscriber> s) {$/;"	f	class:gms::gossiper::subscribers_list
+quarantine_delay	gossiper.cc	/^std::chrono::milliseconds gossiper::quarantine_delay() {$/;"	f	class:gms::gossiper
+quarantine_endpoint	gossiper.cc	/^void gossiper::quarantine_endpoint(inet_address endpoint) {$/;"	f	class:gms::gossiper
+quarantine_endpoint	gossiper.cc	/^void gossiper::quarantine_endpoint(inet_address endpoint, clk::time_point quarantine_expiration) {$/;"	f	class:gms::gossiper
+rack	versioned_value.hh	/^        versioned_value rack(const sstring& rack_id) {$/;"	f	class:gms::versioned_value::factory
+raw_addr	inet_address.hh	/^    uint32_t raw_addr() const {$/;"	f	class:gms::inet_address
+real_mark_alive	gossiper.cc	/^void gossiper::real_mark_alive(inet_address addr, endpoint_state& local_state) {$/;"	f	class:gms::gossiper
+register_	gossiper.cc	/^void gossiper::register_(shared_ptr<i_endpoint_state_change_subscriber> subscriber) {$/;"	f	class:gms::gossiper
+register_failure_detection_event_listener	failure_detector.cc	/^void failure_detector::register_failure_detection_event_listener(i_failure_detection_event_listener* listener) {$/;"	f	class:gms::failure_detector
+register_feature	gossiper.cc	/^void gossiper::register_feature(feature* f) {$/;"	f	class:gms::gossiper
+release_version	versioned_value.hh	/^        versioned_value release_version() {$/;"	f	class:gms::versioned_value::factory
+removal_coordinator	versioned_value.hh	/^        versioned_value removal_coordinator(const utils::UUID& host_id) {$/;"	f	class:gms::versioned_value::factory
+remove	failure_detector.cc	/^void failure_detector::remove(inet_address ep) {$/;"	f	class:gms::failure_detector
+remove	gossiper.hh	/^        void remove(shared_ptr<i_endpoint_state_change_subscriber> s) {$/;"	f	class:gms::gossiper::subscribers_list
+remove_endpoint	gossiper.cc	/^void gossiper::remove_endpoint(inet_address endpoint) {$/;"	f	class:gms::gossiper
+removed_nonlocal	versioned_value.hh	/^        versioned_value removed_nonlocal(const utils::UUID& host_id, int64_t expire_time) {$/;"	f	class:gms::versioned_value::factory
+removing_nonlocal	versioned_value.hh	/^        versioned_value removing_nonlocal(const utils::UUID& host_id) {$/;"	f	class:gms::versioned_value::factory
+replaced_endpoint	gossiper.cc	/^void gossiper::replaced_endpoint(inet_address endpoint) {$/;"	f	class:gms::gossiper
+replacement_quarantine	gossiper.cc	/^void gossiper::replacement_quarantine(inet_address endpoint) {$/;"	f	class:gms::gossiper
+report	failure_detector.cc	/^void failure_detector::report(inet_address ep) {$/;"	f	class:gms::failure_detector
+request_all	gossiper.cc	/^void gossiper::request_all(gossip_digest& g_digest,$/;"	f	class:gms::gossiper
+reset_endpoint_state_map	gossiper.cc	/^void gossiper::reset_endpoint_state_map() {$/;"	f	class:gms::gossiper
+rpcaddress	versioned_value.hh	/^        versioned_value rpcaddress(gms::inet_address endpoint) {$/;"	f	class:gms::versioned_value::factory
+run	gossiper.cc	/^void gossiper::run() {$/;"	f	class:gms::gossiper
+schema	versioned_value.hh	/^        versioned_value schema(const utils::UUID &new_version) {$/;"	f	class:gms::versioned_value::factory
+seen_any_seed	gossiper.cc	/^bool gossiper::seen_any_seed() {$/;"	f	class:gms::gossiper
+send_all	gossiper.cc	/^void gossiper::send_all(gossip_digest& g_digest,$/;"	f	class:gms::gossiper
+send_gossip	gossiper.cc	/^future<> gossiper::send_gossip(gossip_digest_syn message, std::set<inet_address> epset) {$/;"	f	class:gms::gossiper
+set_cluster_name	gossiper.cc	/^void gossiper::set_cluster_name(sstring name) {$/;"	f	class:gms::gossiper
+set_heart_beat_state_and_update_timestamp	endpoint_state.hh	/^    void set_heart_beat_state_and_update_timestamp(heart_beat_state hbs) {$/;"	f	class:gms::endpoint_state
+set_last_processed_message_at	gossiper.cc	/^void gossiper::set_last_processed_message_at() {$/;"	f	class:gms::gossiper
+set_last_processed_message_at	gossiper.cc	/^void gossiper::set_last_processed_message_at(clk::time_point tp) {$/;"	f	class:gms::gossiper
+set_phi_convict_threshold	failure_detector.cc	/^void failure_detector::set_phi_convict_threshold(double phi) {$/;"	f	class:gms::failure_detector
+set_phi_convict_threshold	failure_detector.hh	/^inline future<> set_phi_convict_threshold(double phi) {$/;"	f	namespace:gms
+set_seeds	gossiper.cc	/^void gossiper::set_seeds(std::set<inet_address> _seeds) {$/;"	f	class:gms::gossiper
+severity	versioned_value.hh	/^        versioned_value severity(double value) {$/;"	f	class:gms::versioned_value::factory
+shadow_endpoint_state_map	gossiper.hh	/^    std::unordered_map<inet_address, endpoint_state> shadow_endpoint_state_map;$/;"	m	class:gms::gossiper
+shutdown	versioned_value.hh	/^        versioned_value shutdown(bool value) {$/;"	f	class:gms::versioned_value::factory
+start_gossiping	gossiper.cc	/^future<> gossiper::start_gossiping(int generation_nbr, std::map<application_state, versioned_value> preload_local_states) {$/;"	f	class:gms::gossiper
+start_gossiping	gossiper.cc	/^future<> gossiper::start_gossiping(int generation_number) {$/;"	f	class:gms::gossiper
+std	inet_address.hh	/^namespace std {$/;"	n
+stop	failure_detector.hh	/^    future<> stop() {$/;"	f	class:gms::failure_detector
+stop	gossiper.cc	/^future<> gossiper::stop() {$/;"	f	class:gms::gossiper
+stop_gossiping	gossiper.cc	/^future<> stop_gossiping() {$/;"	f	namespace:gms
+storage_service_value_factory	gossiper.cc	/^auto& storage_service_value_factory() {$/;"	f	namespace:gms
+subscribers_list	gossiper.hh	/^    class subscribers_list {$/;"	c	class:gms::gossiper
+supported_features	versioned_value.hh	/^        versioned_value supported_features(const sstring& features) {$/;"	f	class:gms::versioned_value::factory
+timer_callback_lock	gossiper.hh	/^    future<> timer_callback_lock() { return _callback_running.wait(); }$/;"	f	class:gms::gossiper
+timer_callback_unlock	gossiper.hh	/^    void timer_callback_unlock() { _callback_running.signal(); }$/;"	f	class:gms::gossiper
+to_feature_set	gossiper.cc	/^std::set<sstring> to_feature_set(sstring features_string) {$/;"	f	namespace:gms
+to_sstring	inet_address.hh	/^    sstring to_sstring() const {$/;"	f	class:gms::inet_address
+tokens	versioned_value.hh	/^        versioned_value tokens(const std::unordered_set<token>& tokens) {$/;"	f	class:gms::versioned_value::factory
+uninit_messaging_service_handler	gossiper.cc	/^void gossiper::uninit_messaging_service_handler() {$/;"	f	class:gms::gossiper
+unregister_	gossiper.cc	/^void gossiper::unregister_(shared_ptr<i_endpoint_state_change_subscriber> subscriber) {$/;"	f	class:gms::gossiper
+unregister_failure_detection_event_listener	failure_detector.cc	/^void failure_detector::unregister_failure_detection_event_listener(i_failure_detection_event_listener* listener) {$/;"	f	class:gms::failure_detector
+unregister_feature	gossiper.cc	/^void gossiper::unregister_feature(feature* f) {$/;"	f	class:gms::gossiper
+unsafe_assassinate_endpoint	gossiper.cc	/^future<> gossiper::unsafe_assassinate_endpoint(sstring address) {$/;"	f	class:gms::gossiper
+update_heart_beat	heart_beat_state.hh	/^    void update_heart_beat() {$/;"	f	class:gms::heart_beat_state
+update_timestamp	endpoint_state.hh	/^    void update_timestamp() {$/;"	f	class:gms::endpoint_state
+uses_host_id	gossiper.cc	/^bool gossiper::uses_host_id(inet_address endpoint) {$/;"	f	class:gms::gossiper
+uses_vnodes	gossiper.cc	/^bool gossiper::uses_vnodes(inet_address endpoint) {$/;"	f	class:gms::gossiper
+value	versioned_value.hh	/^    sstring value;$/;"	m	class:gms::versioned_value
+version	version_generator.cc	/^static int version = 0;$/;"	m	namespace:gms::version_generator	file:
+version	versioned_value.hh	/^    int version;$/;"	m	class:gms::versioned_value
+version_generator	version_generator.cc	/^namespace version_generator {$/;"	n	namespace:gms	file:
+version_generator	version_generator.hh	/^namespace version_generator$/;"	n	namespace:gms
+version_string	versioned_value.hh	/^    static sstring version_string(const std::initializer_list<sstring>& args) {$/;"	f	class:gms::versioned_value
+versioned_value	versioned_value.hh	/^    versioned_value()$/;"	f	class:gms::versioned_value
+versioned_value	versioned_value.hh	/^    versioned_value(const sstring& value, int version = version_generator::get_next_version())$/;"	f	class:gms::versioned_value
+versioned_value	versioned_value.hh	/^    versioned_value(sstring&& value, int version = version_generator::get_next_version())$/;"	f	class:gms::versioned_value
+versioned_value	versioned_value.hh	/^class versioned_value {$/;"	c	namespace:gms
+wait_for_feature_on_all_node	gossiper.cc	/^future<> gossiper::wait_for_feature_on_all_node(std::set<sstring> features) {$/;"	f	class:gms::gossiper
+wait_for_feature_on_node	gossiper.cc	/^future<> gossiper::wait_for_feature_on_node(std::set<sstring> features, inet_address endpoint) {$/;"	f	class:gms::gossiper
+wait_for_gossip_to_settle	gossiper.cc	/^future<> gossiper::wait_for_gossip_to_settle() {$/;"	f	class:gms::gossiper
+~feature	gossiper.cc	/^feature::~feature() {$/;"	f	class:gms::feature
+~i_endpoint_state_change_subscriber	i_endpoint_state_change_subscriber.hh	/^    virtual ~i_endpoint_state_change_subscriber() {}$/;"	f	class:gms::i_endpoint_state_change_subscriber
+~i_failure_detection_event_listener	i_failure_detection_event_listener.hh	/^    virtual ~i_failure_detection_event_listener() {}$/;"	f	class:gms::i_failure_detection_event_listener
+~i_failure_detector	i_failure_detector.hh	/^    virtual ~i_failure_detector() {}$/;"	f	class:gms::i_failure_detector

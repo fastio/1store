@@ -432,8 +432,7 @@ std::unique_ptr<segment_zone> segment_zone::try_creating_zone()
         try {
             zone = std::make_unique<segment_zone>(static_cast<segment*>(ptr), size);
             logger.debug("Creating new zone @{}, size: {}", zone.get(), size);
-            //next_attempt_size = std::min(std::max(size << 1, /*segment_zone::minimum_size*/256), /*segment_zone::maximum_size*/256);
-            next_attempt_size = std::min(std::max(size << 1, /*segment_zone::minimum_size*/(size_t)256), /*segment_zone::maximum_size*/(size_t)256);
+            next_attempt_size = std::min(std::max(size << 1, minimum_size), maximum_size);
             while (size--) {
                 auto seg = zone->segment_from_position(size);
                 zone->_free_segments.push_front(*new (seg) free_segment);
@@ -444,7 +443,8 @@ std::unique_ptr<segment_zone> segment_zone::try_creating_zone()
         }
     }
     logger.trace("Failed to create zone");
-    next_attempt_size = segment_zone::minimum_size; return zone;
+    next_attempt_size = minimum_size;
+    return zone;
 }
 
 struct segment_zone_base_address_compare {
