@@ -25,6 +25,7 @@
 #include "redis_protocol.hh"
 #include "core/metrics_registration.hh"
 #include "core/thread.hh"
+#include "core/gate.hh"
 namespace redis {
 class server {
 private:
@@ -56,6 +57,7 @@ private:
     };
     stats _stats;
     request_latency_tracer _latency_tracer;
+    seastar::gate _request_gate;
 public:
     server(redis_service& db, uint16_t port = 6379)
         : _redis(db)
@@ -75,8 +77,10 @@ public:
                    ++_stats._connections_current;
                    auto conn = make_lw_shared<connection>(std::move(fd), addr, _redis);
                    do_until([conn] { return conn->_in.eof(); }, [this, conn] {
-                       return conn->_proto.handle(conn->_in, conn->_out, _latency_tracer).then([this, conn] {
-                           return conn->_out.flush();
+                       return with_gate(_request_gate, [this, conn] {
+                           return conn->_proto.handle(conn->_in, conn->_out, _latency_tracer).then([this, conn] {
+                               return conn->_out.flush();
+                           });
                        });
                    }).finally([this, conn] {
                        --_stats._connections_current;
@@ -87,7 +91,9 @@ public:
        }).or_terminate();
     }
     future<> stop() {
-        return make_ready_future<>();
+        return _request_gate.close().then([this] {
+           return make_ready_future<>();
+        });
     }
 };
 } /* namespace redis */
