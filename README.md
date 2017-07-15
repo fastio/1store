@@ -35,7 +35,7 @@ See building instructions for [Fedora](docs/building-fedora.md), [CentOS](docs/b
 
 ## Current Roadmap
 
-We want to build next generation redis cluster.
+We will build the next generation of redis cluster.
 
 ### Short-term
 
