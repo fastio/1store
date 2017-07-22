@@ -36,7 +36,9 @@ static logger main_log ("main");
 int main(int ac, char** av) {
     distributed<redis::database> db;
     distributed<redis::server> server;
-    redis::redis_service redis(db);
+    distributed<redis::redis> redis(db);
+    distributed<redis::storage_service> storage(db);
+    distributed<redis::storage_proxy> storage(redis);
     prometheus::config prometheus_config;
     httpd::http_server_control prometheus_server;
     namespace bpo = boost::program_options;

@@ -31,12 +31,12 @@ redis_protocol::redis_protocol(redis_service& redis) : _redis(redis)
 
 void redis_protocol::prepare_request()
 {
-    _command_args._command_args_count = _parser._args_count - 1;
-    _command_args._command_args = std::move(_parser._args_list);
-    _command_args._tmp_keys.clear();
-    _command_args._tmp_key_values.clear();
-    _command_args._tmp_key_scores.clear();
-    _command_args._tmp_key_value_pairs.clear();
+    _request_args._request_args_count = _parser._args_count - 1;
+    _request_args._request_args = std::move(_parser._args_list);
+    _request_args._tmp_keys.clear();
+    _request_args._tmp_key_values.clear();
+    _request_args._tmp_key_scores.clear();
+    _request_args._tmp_key_value_pairs.clear();
 }
 
 future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out, request_latency_tracer& tracer)
@@ -56,194 +56,194 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
                 prepare_request();
                 switch (_parser._command) {
                 case redis_protocol_parser::command::set:
-                    return _redis.set(_command_args, std::ref(out));
+                    return _redis.set(_request_args, std::ref(out));
                 case redis_protocol_parser::command::mset:
-                    return _redis.mset(_command_args, std::ref(out));
+                    return _redis.mset(_request_args, std::ref(out));
                 case redis_protocol_parser::command::get:
-                    return _redis.get(_command_args, std::ref(out));
+                    return _redis.get(_request_args, std::ref(out));
                 case redis_protocol_parser::command::del:
-                    return _redis.del(_command_args, std::ref(out));
+                    return _redis.del(_request_args, std::ref(out));
                 case redis_protocol_parser::command::ping:
                     return out.write(msg_pong);
                 case redis_protocol_parser::command::incr:
-                    return _redis.incr(_command_args, std::ref(out));
+                    return _redis.incr(_request_args, std::ref(out));
                 case redis_protocol_parser::command::decr:
-                    return _redis.incr(_command_args, std::ref(out));
+                    return _redis.incr(_request_args, std::ref(out));
                 case redis_protocol_parser::command::incrby:
-                    return _redis.incrby(_command_args, std::ref(out));
+                    return _redis.incrby(_request_args, std::ref(out));
                 case redis_protocol_parser::command::decrby:
-                    return _redis.decrby(_command_args, std::ref(out));
+                    return _redis.decrby(_request_args, std::ref(out));
                 case redis_protocol_parser::command::mget:
-                    return _redis.mget(_command_args, out);
+                    return _redis.mget(_request_args, out);
                 case redis_protocol_parser::command::command:
                     return out.write(msg_ok);
                 case redis_protocol_parser::command::exists:
-                    return _redis.exists(_command_args, std::ref(out));
+                    return _redis.exists(_request_args, std::ref(out));
                 case redis_protocol_parser::command::append:
-                    return _redis.append(_command_args, std::ref(out));
+                    return _redis.append(_request_args, std::ref(out));
                 case redis_protocol_parser::command::strlen:
-                    return _redis.strlen(_command_args, std::ref(out));
+                    return _redis.strlen(_request_args, std::ref(out));
                 case redis_protocol_parser::command::lpush:
-                    return _redis.lpush(_command_args, std::ref(out));
+                    return _redis.lpush(_request_args, std::ref(out));
                 case redis_protocol_parser::command::lpushx:
-                    return _redis.lpushx(_command_args, std::ref(out));
+                    return _redis.lpushx(_request_args, std::ref(out));
                 case redis_protocol_parser::command::lpop:
-                    return _redis.lpop(_command_args, std::ref(out));
+                    return _redis.lpop(_request_args, std::ref(out));
                 case redis_protocol_parser::command::llen:
-                    return _redis.llen(_command_args, std::ref(out));
+                    return _redis.llen(_request_args, std::ref(out));
                 case redis_protocol_parser::command::lindex:
-                    return _redis.lindex(_command_args, std::ref(out));
+                    return _redis.lindex(_request_args, std::ref(out));
                 case redis_protocol_parser::command::linsert:
-                    return _redis.linsert(_command_args, std::ref(out));
+                    return _redis.linsert(_request_args, std::ref(out));
                 case redis_protocol_parser::command::lrange:
-                    return _redis.lrange(_command_args, std::ref(out));
+                    return _redis.lrange(_request_args, std::ref(out));
                 case redis_protocol_parser::command::lset:
-                    return _redis.lset(_command_args, std::ref(out));
+                    return _redis.lset(_request_args, std::ref(out));
                 case redis_protocol_parser::command::rpush:
-                    return _redis.rpush(_command_args, std::ref(out));
+                    return _redis.rpush(_request_args, std::ref(out));
                 case redis_protocol_parser::command::rpushx:
-                    return _redis.rpushx(_command_args, std::ref(out));
+                    return _redis.rpushx(_request_args, std::ref(out));
                 case redis_protocol_parser::command::rpop:
-                    return _redis.rpop(_command_args, std::ref(out));
+                    return _redis.rpop(_request_args, std::ref(out));
                 case redis_protocol_parser::command::lrem:
-                    return _redis.lrem(_command_args, std::ref(out));
+                    return _redis.lrem(_request_args, std::ref(out));
                 case redis_protocol_parser::command::ltrim:
-                    return _redis.ltrim(_command_args, std::ref(out));
+                    return _redis.ltrim(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hset:
-                    return _redis.hset(_command_args, std::ref(out));
+                    return _redis.hset(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hmset:
-                    return _redis.hmset(_command_args, std::ref(out));
+                    return _redis.hmset(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hdel:
-                    return _redis.hdel(_command_args, std::ref(out));
+                    return _redis.hdel(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hget:
-                    return _redis.hget(_command_args, std::ref(out));
+                    return _redis.hget(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hlen:
-                    return _redis.hlen(_command_args, std::ref(out));
+                    return _redis.hlen(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hexists:
-                    return _redis.hexists(_command_args, std::ref(out));
+                    return _redis.hexists(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hstrlen:
-                    return _redis.hstrlen(_command_args, std::ref(out));
+                    return _redis.hstrlen(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hincrby:
-                    return _redis.hincrby(_command_args, std::ref(out));
+                    return _redis.hincrby(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hincrbyfloat:
-                    return _redis.hincrbyfloat(_command_args, std::ref(out));
+                    return _redis.hincrbyfloat(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hkeys:
-                    return _redis.hgetall_keys(_command_args, std::ref(out));
+                    return _redis.hgetall_keys(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hvals:
-                    return _redis.hgetall_values(_command_args, std::ref(out));
+                    return _redis.hgetall_values(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hmget:
-                    return _redis.hmget(_command_args, std::ref(out));
+                    return _redis.hmget(_request_args, std::ref(out));
                 case redis_protocol_parser::command::hgetall:
-                    return _redis.hgetall(_command_args, std::ref(out));
+                    return _redis.hgetall(_request_args, std::ref(out));
                 case redis_protocol_parser::command::sadd:
-                    return _redis.sadd(_command_args, std::ref(out));
+                    return _redis.sadd(_request_args, std::ref(out));
                 case redis_protocol_parser::command::scard:
-                    return _redis.scard(_command_args, std::ref(out));
+                    return _redis.scard(_request_args, std::ref(out));
                 case redis_protocol_parser::command::sismember:
-                    return _redis.sismember(_command_args, std::ref(out));
+                    return _redis.sismember(_request_args, std::ref(out));
                 case redis_protocol_parser::command::smembers:
-                    return _redis.smembers(_command_args, std::ref(out));
+                    return _redis.smembers(_request_args, std::ref(out));
                 case redis_protocol_parser::command::srandmember:
-                    return _redis.srandmember(_command_args, std::ref(out));
+                    return _redis.srandmember(_request_args, std::ref(out));
                 case redis_protocol_parser::command::srem:
-                    return _redis.srem(_command_args, std::ref(out));
+                    return _redis.srem(_request_args, std::ref(out));
                 case redis_protocol_parser::command::sdiff:
-                    return _redis.sdiff(_command_args,std::ref(out));
+                    return _redis.sdiff(_request_args,std::ref(out));
                 case redis_protocol_parser::command::sdiffstore:
-                    return _redis.sdiff_store(_command_args, std::ref(out));
+                    return _redis.sdiff_store(_request_args, std::ref(out));
                 case redis_protocol_parser::command::sinter:
-                    return _redis.sinter(_command_args, std::ref(out));
+                    return _redis.sinter(_request_args, std::ref(out));
                 case redis_protocol_parser::command::sinterstore:
-                    return _redis.sinter_store(_command_args, std::ref(out));
+                    return _redis.sinter_store(_request_args, std::ref(out));
                 case redis_protocol_parser::command::sunion:
-                    return _redis.sunion(_command_args, std::ref(out));
+                    return _redis.sunion(_request_args, std::ref(out));
                 case redis_protocol_parser::command::sunionstore:
-                    return _redis.sunion_store(_command_args, std::ref(out));
+                    return _redis.sunion_store(_request_args, std::ref(out));
                 case redis_protocol_parser::command::smove:
-                    return _redis.smove(_command_args, std::ref(out));
+                    return _redis.smove(_request_args, std::ref(out));
                 case redis_protocol_parser::command::spop:
-                    return _redis.spop(_command_args, std::ref(out));
+                    return _redis.spop(_request_args, std::ref(out));
                 case redis_protocol_parser::command::type:
-                    return _redis.type(_command_args, std::ref(out));
+                    return _redis.type(_request_args, std::ref(out));
                 case redis_protocol_parser::command::expire:
-                    return _redis.expire(_command_args, std::ref(out));
+                    return _redis.expire(_request_args, std::ref(out));
                 case redis_protocol_parser::command::pexpire:
-                    return _redis.pexpire(_command_args, std::ref(out));
+                    return _redis.pexpire(_request_args, std::ref(out));
                 case redis_protocol_parser::command::ttl:
-                    return _redis.ttl(_command_args, std::ref(out));
+                    return _redis.ttl(_request_args, std::ref(out));
                 case redis_protocol_parser::command::pttl:
-                    return _redis.pttl(_command_args, std::ref(out));
+                    return _redis.pttl(_request_args, std::ref(out));
                 case redis_protocol_parser::command::persist:
-                    return _redis.persist(_command_args, std::ref(out));
+                    return _redis.persist(_request_args, std::ref(out));
                 case redis_protocol_parser::command::zadd:
-                    return _redis.zadd(_command_args, std::ref(out));
+                    return _redis.zadd(_request_args, std::ref(out));
                 case redis_protocol_parser::command::zrange:
-                    return _redis.zrange(_command_args, false, std::ref(out));
+                    return _redis.zrange(_request_args, false, std::ref(out));
                 case redis_protocol_parser::command::zrevrange:
-                    return _redis.zrange(_command_args, true, std::ref(out));
+                    return _redis.zrange(_request_args, true, std::ref(out));
                 case redis_protocol_parser::command::zrangebyscore:
-                    return _redis.zrangebyscore(_command_args, false, std::ref(out));
+                    return _redis.zrangebyscore(_request_args, false, std::ref(out));
                 case redis_protocol_parser::command::zrevrangebyscore:
-                    return _redis.zrangebyscore(_command_args, true, std::ref(out));
+                    return _redis.zrangebyscore(_request_args, true, std::ref(out));
                 case redis_protocol_parser::command::zrem:
-                    return _redis.zrem(_command_args, std::ref(out));
+                    return _redis.zrem(_request_args, std::ref(out));
                 case redis_protocol_parser::command::zremrangebyscore:
-                    return _redis.zremrangebyscore(_command_args, std::ref(out));
+                    return _redis.zremrangebyscore(_request_args, std::ref(out));
                 case redis_protocol_parser::command::zremrangebyrank:
-                    return _redis.zremrangebyrank(_command_args, std::ref(out));
+                    return _redis.zremrangebyrank(_request_args, std::ref(out));
                 case redis_protocol_parser::command::zcard:
-                    return _redis.zcard(_command_args, std::ref(out));
+                    return _redis.zcard(_request_args, std::ref(out));
                 case redis_protocol_parser::command::zcount:
-                    return _redis.zcount(_command_args, std::ref(out));
+                    return _redis.zcount(_request_args, std::ref(out));
                 case redis_protocol_parser::command::zscore:
-                    return _redis.zscore(_command_args, std::ref(out));
+                    return _redis.zscore(_request_args, std::ref(out));
                 case redis_protocol_parser::command::zincrby:
-                    return _redis.zincrby(_command_args, std::ref(out));
+                    return _redis.zincrby(_request_args, std::ref(out));
                 case redis_protocol_parser::command::zrank:
-                    return _redis.zrank(_command_args, false, std::ref(out));
+                    return _redis.zrank(_request_args, false, std::ref(out));
                 case redis_protocol_parser::command::zrevrank:
-                    return _redis.zrank(_command_args, true, std::ref(out));
+                    return _redis.zrank(_request_args, true, std::ref(out));
                 case redis_protocol_parser::command::zunionstore:
-                    return _redis.zunionstore(_command_args, std::ref(out));
+                    return _redis.zunionstore(_request_args, std::ref(out));
                 case redis_protocol_parser::command::zinterstore:
-                    return _redis.zinterstore(_command_args, std::ref(out));
+                    return _redis.zinterstore(_request_args, std::ref(out));
                 case redis_protocol_parser::command::select:
-                    return _redis.select(_command_args, std::ref(out));
+                    return _redis.select(_request_args, std::ref(out));
                 case redis_protocol_parser::command::geoadd:
-                    return _redis.geoadd(_command_args, std::ref(out));
+                    return _redis.geoadd(_request_args, std::ref(out));
                 case redis_protocol_parser::command::geodist:
-                    return _redis.geodist(_command_args, std::ref(out));
+                    return _redis.geodist(_request_args, std::ref(out));
                 case redis_protocol_parser::command::geopos:
-                    return _redis.geopos(_command_args, std::ref(out));
+                    return _redis.geopos(_request_args, std::ref(out));
                 case redis_protocol_parser::command::geohash:
-                    return _redis.geohash(_command_args, std::ref(out));
+                    return _redis.geohash(_request_args, std::ref(out));
                 case redis_protocol_parser::command::georadius:
-                    return _redis.georadius(_command_args, false, std::ref(out));
+                    return _redis.georadius(_request_args, false, std::ref(out));
                 case redis_protocol_parser::command::georadiusbymember:
-                    return _redis.georadius(_command_args, true, std::ref(out));
+                    return _redis.georadius(_request_args, true, std::ref(out));
                 case redis_protocol_parser::command::setbit:
-                    return _redis.setbit(_command_args, std::ref(out));
+                    return _redis.setbit(_request_args, std::ref(out));
                 case redis_protocol_parser::command::getbit:
-                    return _redis.getbit(_command_args, std::ref(out));
+                    return _redis.getbit(_request_args, std::ref(out));
                 case redis_protocol_parser::command::bitcount:
-                    return _redis.bitcount(_command_args, std::ref(out));
+                    return _redis.bitcount(_request_args, std::ref(out));
 
                 /*
                 case redis_protocol_parser::command::bitpos:
-                    return _redis.bitpos(_command_args).then([&out] (auto&& m) {
+                    return _redis.bitpos(_request_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
                 case redis_protocol_parser::command::bitop:
-                    return _redis.bitop(_command_args).then([&out] (auto&& m) {
+                    return _redis.bitop(_request_args).then([&out] (auto&& m) {
                         return out.write(std::move(m));
                     });
                 */
                 case redis_protocol_parser::command::pfadd:
-                    return _redis.pfadd(_command_args, std::ref(out));
+                    return _redis.pfadd(_request_args, std::ref(out));
                 case redis_protocol_parser::command::pfcount:
-                    return _redis.pfcount(_command_args, std::ref(out));
+                    return _redis.pfcount(_request_args, std::ref(out));
                 case redis_protocol_parser::command::pfmerge:
-                    return _redis.pfmerge(_command_args, std::ref(out));
+                    return _redis.pfmerge(_request_args, std::ref(out));
                 default:
                     tracer.incr_number_exceptions();
                     return out.write("+Not Implemented");

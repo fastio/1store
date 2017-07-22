@@ -47,10 +47,16 @@ namespace redis {
 
 namespace stdx = std::experimental;
 
+class redis;
+extern distributed<redis> _the_redis;
+inline distributed<redis>& get_redis() {
+    return _the_redis;
+}
+
 struct args_collection;
 class database;
 using message = scattered_message<char>;
-class redis_service {
+class redis {
 private:
     inline unsigned get_cpu(const sstring& key) {
         return std::hash<sstring>()(key) % smp::count;
@@ -60,10 +66,11 @@ private:
     }
     distributed<database>& _db;
 public:
-    redis_service(distributed<database>& db) : _db(db)
+    redis(distributed<database>& db) : _db(db)
     {
     }
 
+    future<> stop();
     // [TEST APIs]
     future<sstring> echo(args_collection& args);
     // [COUNTER APIs]

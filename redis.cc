@@ -53,7 +53,7 @@ static logger redis_log ("redis");
 
 namespace stdx = std::experimental;
 
-future<sstring> redis_service::echo(args_collection& args)
+future<sstring> redis::echo(args_collection& args)
 {
     if (args._command_args_count < 1) {
         return make_ready_future<sstring>("");
@@ -62,7 +62,7 @@ future<sstring> redis_service::echo(args_collection& args)
     return make_ready_future<sstring>(std::move(message));
 }
 
-future<bool> redis_service::set_impl(sstring& key, sstring& val, long expir, uint8_t flag)
+future<bool> redis::set_impl(sstring& key, sstring& val, long expir, uint8_t flag)
 {
     redis_key rk { std::ref(key) };
     auto cpu = get_cpu(rk);
@@ -71,7 +71,7 @@ future<bool> redis_service::set_impl(sstring& key, sstring& val, long expir, uin
     });
 }
 
-future<> redis_service::set(args_collection& args, output_stream<char>& out)
+future<> redis::set(args_collection& args, output_stream<char>& out)
 {
     // parse args
     if (args._command_args_count < 2) {
@@ -128,13 +128,13 @@ future<> redis_service::set(args_collection& args, output_stream<char>& out)
     });;
 }
 
-future<bool> redis_service::remove_impl(sstring& key) {
+future<bool> redis::remove_impl(sstring& key) {
     redis_key rk { std::ref(key) };
     auto cpu = get_cpu(rk);
     return _db.invoke_on(cpu, &database::del_direct, std::move(rk));
 }
 
-future<> redis_service::del(args_collection& args, output_stream<char>& out)
+future<> redis::del(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -165,7 +165,7 @@ future<> redis_service::del(args_collection& args, output_stream<char>& out)
     }
 }
 
-future<> redis_service::mset(args_collection& args, output_stream<char>& out)
+future<> redis::mset(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -195,7 +195,7 @@ future<> redis_service::mset(args_collection& args, output_stream<char>& out)
    });
 }
 
-future<> redis_service::get(args_collection& args, output_stream<char>& out)
+future<> redis::get(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1) {
         return out.write(msg_syntax_err);
@@ -208,7 +208,7 @@ future<> redis_service::get(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::mget(args_collection& args, output_stream<char>& out)
+future<> redis::mget(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1) {
         return out.write(msg_syntax_err);
@@ -235,7 +235,7 @@ future<> redis_service::mget(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::strlen(args_collection& args, output_stream<char>& out)
+future<> redis::strlen(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -248,14 +248,14 @@ future<> redis_service::strlen(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<bool> redis_service::exists_impl(sstring& key)
+future<bool> redis::exists_impl(sstring& key)
 {
     redis_key rk { std::ref(key) };
     auto cpu = get_cpu(rk);
     return _db.invoke_on(cpu, &database::exists_direct, std::move(rk));
 }
 
-future<> redis_service::exists(args_collection& args, output_stream<char>& out)
+future<> redis::exists(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -286,7 +286,7 @@ future<> redis_service::exists(args_collection& args, output_stream<char>& out)
     }
 }
 
-future<> redis_service::append(args_collection& args, output_stream<char>& out)
+future<> redis::append(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -300,7 +300,7 @@ future<> redis_service::append(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::push_impl(sstring& key, sstring& val, bool force, bool left, output_stream<char>& out)
+future<> redis::push_impl(sstring& key, sstring& val, bool force, bool left, output_stream<char>& out)
 {
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
@@ -309,7 +309,7 @@ future<> redis_service::push_impl(sstring& key, sstring& val, bool force, bool l
     });
 }
 
-future<> redis_service::push_impl(sstring& key, std::vector<sstring>& vals, bool force, bool left, output_stream<char>& out)
+future<> redis::push_impl(sstring& key, std::vector<sstring>& vals, bool force, bool left, output_stream<char>& out)
 {
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
@@ -318,7 +318,7 @@ future<> redis_service::push_impl(sstring& key, std::vector<sstring>& vals, bool
     });
 }
 
-future<> redis_service::push_impl(args_collection& args, bool force, bool left, output_stream<char>& out)
+future<> redis::push_impl(args_collection& args, bool force, bool left, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -334,37 +334,37 @@ future<> redis_service::push_impl(args_collection& args, bool force, bool left, 
     }
 }
 
-future<> redis_service::lpush(args_collection& args, output_stream<char>& out)
+future<> redis::lpush(args_collection& args, output_stream<char>& out)
 {
     return push_impl(args, true, false, out);
 }
 
-future<> redis_service::lpushx(args_collection& args, output_stream<char>& out)
+future<> redis::lpushx(args_collection& args, output_stream<char>& out)
 {
     return push_impl(args, false, false, out);
 }
 
-future<> redis_service::rpush(args_collection& args, output_stream<char>& out)
+future<> redis::rpush(args_collection& args, output_stream<char>& out)
 {
     return push_impl(args, true, true, out);
 }
 
-future<> redis_service::rpushx(args_collection& args, output_stream<char>& out)
+future<> redis::rpushx(args_collection& args, output_stream<char>& out)
 {
     return push_impl(args, false, true, out);
 }
 
-future<> redis_service::lpop(args_collection& args, output_stream<char>& out)
+future<> redis::lpop(args_collection& args, output_stream<char>& out)
 {
     return pop_impl(args, false, out);
 }
 
-future<> redis_service::rpop(args_collection& args, output_stream<char>& out)
+future<> redis::rpop(args_collection& args, output_stream<char>& out)
 {
     return pop_impl(args, true, out);
 }
 
-future<> redis_service::pop_impl(args_collection& args, bool left, output_stream<char>& out)
+future<> redis::pop_impl(args_collection& args, bool left, output_stream<char>& out)
 {
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -377,7 +377,7 @@ future<> redis_service::pop_impl(args_collection& args, bool left, output_stream
     });
 }
 
-future<> redis_service::lindex(args_collection& args, output_stream<char>& out)
+future<> redis::lindex(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -391,7 +391,7 @@ future<> redis_service::lindex(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::llen(args_collection& args, output_stream<char>& out)
+future<> redis::llen(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -404,7 +404,7 @@ future<> redis_service::llen(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::linsert(args_collection& args, output_stream<char>& out)
+future<> redis::linsert(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -423,7 +423,7 @@ future<> redis_service::linsert(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::lrange(args_collection& args, output_stream<char>& out)
+future<> redis::lrange(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -440,7 +440,7 @@ future<> redis_service::lrange(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::lset(args_collection& args, output_stream<char>& out)
+future<> redis::lset(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -456,7 +456,7 @@ future<> redis_service::lset(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::ltrim(args_collection& args, output_stream<char>& out)
+future<> redis::ltrim(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -471,7 +471,7 @@ future<> redis_service::ltrim(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::lrem(args_collection& args, output_stream<char>& out)
+future<> redis::lrem(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -486,25 +486,25 @@ future<> redis_service::lrem(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::incr(args_collection& args, output_stream<char>& out)
+future<> redis::incr(args_collection& args, output_stream<char>& out)
 {
     return counter_by(args, true, false, out);
 }
 
-future<> redis_service::incrby(args_collection& args, output_stream<char>& out)
+future<> redis::incrby(args_collection& args, output_stream<char>& out)
 {
     return counter_by(args, true, true, out);
 }
-future<> redis_service::decr(args_collection& args, output_stream<char>& out)
+future<> redis::decr(args_collection& args, output_stream<char>& out)
 {
     return counter_by(args, false, false, out);
 }
-future<> redis_service::decrby(args_collection& args, output_stream<char>& out)
+future<> redis::decrby(args_collection& args, output_stream<char>& out)
 {
     return counter_by(args, false, true, out);
 }
 
-future<> redis_service::counter_by(args_collection& args, bool incr, bool with_step, output_stream<char>& out)
+future<> redis::counter_by(args_collection& args, bool incr, bool with_step, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty() || (with_step == true && args._command_args_count <= 1)) {
         return out.write(msg_syntax_err);
@@ -526,7 +526,7 @@ future<> redis_service::counter_by(args_collection& args, bool incr, bool with_s
     });
 }
 
-future<> redis_service::hdel(args_collection& args, output_stream<char>& out)
+future<> redis::hdel(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -549,7 +549,7 @@ future<> redis_service::hdel(args_collection& args, output_stream<char>& out)
     }
 }
 
-future<> redis_service::hexists(args_collection& args, output_stream<char>& out)
+future<> redis::hexists(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -563,7 +563,7 @@ future<> redis_service::hexists(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::hset(args_collection& args, output_stream<char>& out)
+future<> redis::hset(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -578,7 +578,7 @@ future<> redis_service::hset(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::hmset(args_collection& args, output_stream<char>& out)
+future<> redis::hmset(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -595,7 +595,7 @@ future<> redis_service::hmset(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::hincrby(args_collection& args, output_stream<char>& out)
+future<> redis::hincrby(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -611,7 +611,7 @@ future<> redis_service::hincrby(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::hincrbyfloat(args_collection& args, output_stream<char>& out)
+future<> redis::hincrbyfloat(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -627,7 +627,7 @@ future<> redis_service::hincrbyfloat(args_collection& args, output_stream<char>&
     });
 }
 
-future<> redis_service::hlen(args_collection& args, output_stream<char>& out)
+future<> redis::hlen(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -640,7 +640,7 @@ future<> redis_service::hlen(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::hstrlen(args_collection& args, output_stream<char>& out)
+future<> redis::hstrlen(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -654,7 +654,7 @@ future<> redis_service::hstrlen(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::hget(args_collection& args, output_stream<char>& out)
+future<> redis::hget(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -668,7 +668,7 @@ future<> redis_service::hget(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::hgetall(args_collection& args, output_stream<char>& out)
+future<> redis::hgetall(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -681,7 +681,7 @@ future<> redis_service::hgetall(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::hgetall_keys(args_collection& args, output_stream<char>& out)
+future<> redis::hgetall_keys(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -694,7 +694,7 @@ future<> redis_service::hgetall_keys(args_collection& args, output_stream<char>&
     });
 }
 
-future<> redis_service::hgetall_values(args_collection& args, output_stream<char>& out)
+future<> redis::hgetall_values(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -707,7 +707,7 @@ future<> redis_service::hgetall_values(args_collection& args, output_stream<char
     });
 }
 
-future<> redis_service::hmget(args_collection& args, output_stream<char>& out)
+future<> redis::hmget(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -724,7 +724,7 @@ future<> redis_service::hmget(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::smembers_impl(sstring& key, output_stream<char>& out)
+future<> redis::smembers_impl(sstring& key, output_stream<char>& out)
 {
     redis_key rk{std::ref(key)};
     auto cpu = get_cpu(rk);
@@ -733,7 +733,7 @@ future<> redis_service::smembers_impl(sstring& key, output_stream<char>& out)
     });
 }
 
-future<> redis_service::smembers(args_collection& args, output_stream<char>& out)
+future<> redis::smembers(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -742,7 +742,7 @@ future<> redis_service::smembers(args_collection& args, output_stream<char>& out
     return smembers_impl(key, out);
 }
 
-future<> redis_service::sadds_impl(sstring& key, std::vector<sstring>& members, output_stream<char>& out)
+future<> redis::sadds_impl(sstring& key, std::vector<sstring>& members, output_stream<char>& out)
 {
     redis_key rk{std::ref(key)};
     auto cpu = get_cpu(rk);
@@ -751,7 +751,7 @@ future<> redis_service::sadds_impl(sstring& key, std::vector<sstring>& members, 
     });
 }
 
-future<> redis_service::sadds_impl_return_keys(sstring& key, std::vector<sstring>& members, output_stream<char>& out)
+future<> redis::sadds_impl_return_keys(sstring& key, std::vector<sstring>& members, output_stream<char>& out)
 {
     redis_key rk{std::ref(key)};
     auto cpu = get_cpu(rk);
@@ -762,7 +762,7 @@ future<> redis_service::sadds_impl_return_keys(sstring& key, std::vector<sstring
     });
 }
 
-future<> redis_service::sadd(args_collection& args, output_stream<char>& out)
+future<> redis::sadd(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -773,7 +773,7 @@ future<> redis_service::sadd(args_collection& args, output_stream<char>& out)
     return sadds_impl(key, std::ref(keys), out);
 }
 
-future<> redis_service::scard(args_collection& args, output_stream<char>& out)
+future<> redis::scard(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -785,7 +785,7 @@ future<> redis_service::scard(args_collection& args, output_stream<char>& out)
         return out.write(std::move(*m));
     });
 }
-future<> redis_service::sismember(args_collection& args, output_stream<char>& out)
+future<> redis::sismember(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -799,7 +799,7 @@ future<> redis_service::sismember(args_collection& args, output_stream<char>& ou
     });
 }
 
-future<> redis_service::srem(args_collection& args, output_stream<char>& out)
+future<> redis::srem(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -814,7 +814,7 @@ future<> redis_service::srem(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::sdiff_store(args_collection& args, output_stream<char>& out)
+future<> redis::sdiff_store(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -826,7 +826,7 @@ future<> redis_service::sdiff_store(args_collection& args, output_stream<char>& 
     return sdiff_impl(args._tmp_keys, &dest, out);
 }
 
-future<> redis_service::sdiff(args_collection& args, output_stream<char>& out)
+future<> redis::sdiff(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -837,7 +837,7 @@ future<> redis_service::sdiff(args_collection& args, output_stream<char>& out)
     return sdiff_impl(std::ref(args._command_args), nullptr, out);
 }
 
-future<> redis_service::sdiff_impl(std::vector<sstring>& keys, sstring* dest, output_stream<char>& out)
+future<> redis::sdiff_impl(std::vector<sstring>& keys, sstring* dest, output_stream<char>& out)
 {
     using item_unordered_map = std::unordered_map<unsigned, std::vector<sstring>>;
     struct sdiff_state {
@@ -872,7 +872,7 @@ future<> redis_service::sdiff_impl(std::vector<sstring>& keys, sstring* dest, ou
     });
 }
 
-future<> redis_service::sinter_impl(std::vector<sstring>& keys, sstring* dest, output_stream<char>& out)
+future<> redis::sinter_impl(std::vector<sstring>& keys, sstring* dest, output_stream<char>& out)
 {
     using item_unordered_map = std::unordered_map<unsigned, std::vector<sstring>>;
     struct sinter_state {
@@ -912,7 +912,7 @@ future<> redis_service::sinter_impl(std::vector<sstring>& keys, sstring* dest, o
    });
 }
 
-future<> redis_service::sinter(args_collection& args, output_stream<char>& out)
+future<> redis::sinter(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -923,7 +923,7 @@ future<> redis_service::sinter(args_collection& args, output_stream<char>& out)
     return sinter_impl(args._command_args, nullptr, out);
 }
 
-future<> redis_service::sinter_store(args_collection& args, output_stream<char>& out)
+future<> redis::sinter_store(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -935,7 +935,7 @@ future<> redis_service::sinter_store(args_collection& args, output_stream<char>&
     return sinter_impl(args._tmp_keys, &dest, out);
 }
 
-future<> redis_service::sunion_impl(std::vector<sstring>& keys, sstring* dest, output_stream<char>& out)
+future<> redis::sunion_impl(std::vector<sstring>& keys, sstring* dest, output_stream<char>& out)
 {
     struct union_state {
         std::vector<sstring> result;
@@ -966,7 +966,7 @@ future<> redis_service::sunion_impl(std::vector<sstring>& keys, sstring* dest, o
     });
 }
 
-future<> redis_service::sunion(args_collection& args, output_stream<char>& out)
+future<> redis::sunion(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -977,7 +977,7 @@ future<> redis_service::sunion(args_collection& args, output_stream<char>& out)
     return sunion_impl(args._command_args, nullptr, out);
 }
 
-future<> redis_service::sunion_store(args_collection& args, output_stream<char>& out)
+future<> redis::sunion_store(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -989,21 +989,21 @@ future<> redis_service::sunion_store(args_collection& args, output_stream<char>&
     return sunion_impl(args._tmp_keys, &dest, out);
 }
 
-future<bool> redis_service::srem_direct(sstring& key, sstring& member)
+future<bool> redis::srem_direct(sstring& key, sstring& member)
 {
     redis_key rk {std::ref(key) };
     auto cpu = get_cpu(rk);
     return   _db.invoke_on(cpu, &database::srem_direct, rk, std::ref(member));
 }
 
-future<bool> redis_service::sadd_direct(sstring& key, sstring& member)
+future<bool> redis::sadd_direct(sstring& key, sstring& member)
 {
     redis_key rk {std::ref(key) };
     auto cpu = get_cpu(rk);
     return  _db.invoke_on(cpu, &database::sadd_direct, rk, std::ref(member));
 }
 
-future<> redis_service::smove(args_collection& args, output_stream<char>& out)
+future<> redis::smove(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1028,7 +1028,7 @@ future<> redis_service::smove(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::srandmember(args_collection& args, output_stream<char>& out)
+future<> redis::srandmember(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1049,7 +1049,7 @@ future<> redis_service::srandmember(args_collection& args, output_stream<char>& 
     });
 }
 
-future<> redis_service::spop(args_collection& args, output_stream<char>& out)
+future<> redis::spop(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1069,7 +1069,7 @@ future<> redis_service::spop(args_collection& args, output_stream<char>& out)
         return out.write(std::move(*m));
     });
 }
-future<> redis_service::type(args_collection& args, output_stream<char>& out)
+future<> redis::type(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1082,7 +1082,7 @@ future<> redis_service::type(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::expire(args_collection& args, output_stream<char>& out)
+future<> redis::expire(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1102,7 +1102,7 @@ future<> redis_service::expire(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::pexpire(args_collection& args, output_stream<char>& out)
+future<> redis::pexpire(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count <= 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1121,7 +1121,7 @@ future<> redis_service::pexpire(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::pttl(args_collection& args, output_stream<char>& out)
+future<> redis::pttl(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1134,7 +1134,7 @@ future<> redis_service::pttl(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::ttl(args_collection& args, output_stream<char>& out)
+future<> redis::ttl(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1147,7 +1147,7 @@ future<> redis_service::ttl(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::persist(args_collection& args, output_stream<char>& out)
+future<> redis::persist(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1160,7 +1160,7 @@ future<> redis_service::persist(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::zadd(args_collection& args, output_stream<char>& out)
+future<> redis::zadd(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1226,7 +1226,7 @@ future<> redis_service::zadd(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::zcard(args_collection& args, output_stream<char>& out)
+future<> redis::zcard(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1239,7 +1239,7 @@ future<> redis_service::zcard(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::zrange(args_collection& args, bool reverse, output_stream<char>& out)
+future<> redis::zrange(args_collection& args, bool reverse, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1267,7 +1267,7 @@ future<> redis_service::zrange(args_collection& args, bool reverse, output_strea
     });
 }
 
-future<> redis_service::zrangebyscore(args_collection& args, bool reverse, output_stream<char>& out)
+future<> redis::zrangebyscore(args_collection& args, bool reverse, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1295,7 +1295,7 @@ future<> redis_service::zrangebyscore(args_collection& args, bool reverse, outpu
     });
 }
 
-future<> redis_service::zcount(args_collection& args, output_stream<char>& out)
+future<> redis::zcount(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1315,7 +1315,7 @@ future<> redis_service::zcount(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::zincrby(args_collection& args, output_stream<char>& out)
+future<> redis::zincrby(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1335,7 +1335,7 @@ future<> redis_service::zincrby(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::zrank(args_collection& args, bool reverse, output_stream<char>& out)
+future<> redis::zrank(args_collection& args, bool reverse, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1349,7 +1349,7 @@ future<> redis_service::zrank(args_collection& args, bool reverse, output_stream
     });
 }
 
-future<> redis_service::zrem(args_collection& args, output_stream<char>& out)
+future<> redis::zrem(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1366,7 +1366,7 @@ future<> redis_service::zrem(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::zscore(args_collection& args, output_stream<char>& out)
+future<> redis::zscore(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1380,7 +1380,7 @@ future<> redis_service::zscore(args_collection& args, output_stream<char>& out)
     });
 }
 
-bool redis_service::parse_zset_args(args_collection& args, zset_args& uargs)
+bool redis::parse_zset_args(args_collection& args, zset_args& uargs)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return false;
@@ -1451,7 +1451,7 @@ bool redis_service::parse_zset_args(args_collection& args, zset_args& uargs)
     return true;
 }
 
-future<> redis_service::zunionstore(args_collection& args, output_stream<char>& out)
+future<> redis::zunionstore(args_collection& args, output_stream<char>& out)
 {
     zset_args uargs;
     if (parse_zset_args(args, uargs) == false) {
@@ -1478,7 +1478,7 @@ future<> redis_service::zunionstore(args_collection& args, output_stream<char>& 
                     auto& key = range_result[i].first;
                     auto& score = range_result[i].second;
                     if (result.find(key) != result.end()) {
-                       result[key] = redis_service::score_aggregation(result[key], score * weight, state.aggregate_flag);
+                       result[key] = redis::score_aggregation(result[key], score * weight, state.aggregate_flag);
                     }
                     else {
                         result[key] = score;
@@ -1495,7 +1495,7 @@ future<> redis_service::zunionstore(args_collection& args, output_stream<char>& 
     });
 }
 
-future<> redis_service::zinterstore(args_collection& args, output_stream<char>& out)
+future<> redis::zinterstore(args_collection& args, output_stream<char>& out)
 {
     zset_args uargs;
     if (parse_zset_args(args, uargs) == false) {
@@ -1539,7 +1539,7 @@ future<> redis_service::zinterstore(args_collection& args, output_stream<char>& 
                             auto it = result.find(key);
                             if (it != result.end()) {
                                 auto& old_score = it->second;
-                                new_result[key] = redis_service::score_aggregation(old_score, score * weight, state.aggregate_flag);
+                                new_result[key] = redis::score_aggregation(old_score, score * weight, state.aggregate_flag);
                             }
                         }
                         state.result = std::move(new_result);
@@ -1558,7 +1558,7 @@ future<> redis_service::zinterstore(args_collection& args, output_stream<char>& 
     });
 }
 
-future<> redis_service::zremrangebyscore(args_collection& args, output_stream<char>& out)
+future<> redis::zremrangebyscore(args_collection& args, output_stream<char>& out)
 {
     // ZREMRANGEBYSCORE key min max
     // Removes all elements in the sorted set stored at key with a score between min and max (inclusive).
@@ -1581,7 +1581,7 @@ future<> redis_service::zremrangebyscore(args_collection& args, output_stream<ch
     });
 }
 
-future<> redis_service::zremrangebyrank(args_collection& args, output_stream<char>& out)
+future<> redis::zremrangebyrank(args_collection& args, output_stream<char>& out)
 {
     // ZREMRANGEBYRANK key begin end
     // Removes all elements in the sorted set stored at key with a rank between start and end (inclusive).
@@ -1604,37 +1604,37 @@ future<> redis_service::zremrangebyrank(args_collection& args, output_stream<cha
     });
 }
 
-future<> redis_service::zdiffstore(args_collection&, output_stream<char>& out)
+future<> redis::zdiffstore(args_collection&, output_stream<char>& out)
 {
     return out.write(msg_syntax_err);
 }
 
-future<> redis_service::zunion(args_collection& args, output_stream<char>& out)
+future<> redis::zunion(args_collection& args, output_stream<char>& out)
 {
     return out.write(msg_syntax_err);
 }
 
-future<> redis_service::zinter(args_collection& args, output_stream<char>& out)
+future<> redis::zinter(args_collection& args, output_stream<char>& out)
 {
     return out.write(msg_syntax_err);
 }
 
-future<> redis_service::zdiff(args_collection& args, output_stream<char>& out)
+future<> redis::zdiff(args_collection& args, output_stream<char>& out)
 {
     return out.write(msg_syntax_err);
 }
 
-future<> redis_service::zrangebylex(args_collection& args, output_stream<char>& out)
+future<> redis::zrangebylex(args_collection& args, output_stream<char>& out)
 {
     return out.write(msg_syntax_err);
 }
 
-future<> redis_service::zlexcount(args_collection& args, output_stream<char>& out)
+future<> redis::zlexcount(args_collection& args, output_stream<char>& out)
 {
     return out.write(msg_syntax_err);
 }
 
-future<> redis_service::select(args_collection& args, output_stream<char>& out)
+future<> redis::select(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1662,7 +1662,7 @@ future<> redis_service::select(args_collection& args, output_stream<char>& out)
 }
 
 
-future<> redis_service::geoadd(args_collection& args, output_stream<char>& out)
+future<> redis::geoadd(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 4 || (args._command_args_count - 1) % 3 != 0 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1691,7 +1691,7 @@ future<> redis_service::geoadd(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::geodist(args_collection& args, output_stream<char>& out)
+future<> redis::geodist(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1722,7 +1722,7 @@ future<> redis_service::geodist(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::geohash(args_collection& args, output_stream<char>& out)
+future<> redis::geohash(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1738,7 +1738,7 @@ future<> redis_service::geohash(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::geopos(args_collection& args, output_stream<char>& out)
+future<> redis::geopos(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1755,7 +1755,7 @@ future<> redis_service::geopos(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::georadius(args_collection& args, bool member, output_stream<char>& out)
+future<> redis::georadius(args_collection& args, bool member, output_stream<char>& out)
 {
     size_t option_index = member ? 4 : 5;
     if (args._command_args_count < option_index || args._command_args.empty()) {
@@ -1909,7 +1909,7 @@ future<> redis_service::georadius(args_collection& args, bool member, output_str
     });
 }
 
-future<> redis_service::setbit(args_collection& args, output_stream<char>& out)
+future<> redis::setbit(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1930,7 +1930,7 @@ future<> redis_service::setbit(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::getbit(args_collection& args, output_stream<char>& out)
+future<> redis::getbit(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1949,7 +1949,7 @@ future<> redis_service::getbit(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::bitcount(args_collection& args, output_stream<char>& out)
+future<> redis::bitcount(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 3 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -1969,22 +1969,22 @@ future<> redis_service::bitcount(args_collection& args, output_stream<char>& out
     });
 }
 
-future<> redis_service::bitop(args_collection& args, output_stream<char>& out)
+future<> redis::bitop(args_collection& args, output_stream<char>& out)
 {
     return out.write(msg_nil);
 }
 
-future<> redis_service::bitpos(args_collection& args, output_stream<char>& out)
+future<> redis::bitpos(args_collection& args, output_stream<char>& out)
 {
     return out.write(msg_nil);
 }
 
-future<> redis_service::bitfield(args_collection& args, output_stream<char>& out)
+future<> redis::bitfield(args_collection& args, output_stream<char>& out)
 {
     return out.write(msg_nil);
 }
 
-future<> redis_service::pfadd(args_collection& args, output_stream<char>& out)
+future<> redis::pfadd(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -2001,7 +2001,7 @@ future<> redis_service::pfadd(args_collection& args, output_stream<char>& out)
     });
 }
 
-future<> redis_service::pfcount(args_collection& args, output_stream<char>& out)
+future<> redis::pfcount(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 1 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
@@ -2040,7 +2040,7 @@ future<> redis_service::pfcount(args_collection& args, output_stream<char>& out)
     }
 }
 
-future<> redis_service::pfmerge(args_collection& args, output_stream<char>& out)
+future<> redis::pfmerge(args_collection& args, output_stream<char>& out)
 {
     if (args._command_args_count < 2 || args._command_args.empty()) {
         return out.write(msg_syntax_err);
