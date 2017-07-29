@@ -22,6 +22,7 @@
 #include "core/sharded.hh"
 #include "core/sstring.hh"
 #include <experimental/optional>
+
 struct token {
    size_t _hash;
 };
@@ -45,7 +46,19 @@ public:
     bool should_served_by_me(const redis_key& rk) const;
     const std::vector<inet_address>& get_replica_nodes_for_write(const redis_key& rk) const;
     const inet_address& get_replica_node_for_read(const redis_key& rk) const;
+    const size_t get_replica_count() const { return _replica_count; }
+    void set_sorted_tokens(const std::vector<token>& tokens, const std::unordered_map<token, inet_address>& token_to_endpoint);
+
+    future<> stop() {}
 private:
     size_t _replica_count = 1;
-    size_t _vnode_count = 1;
+    size_t _vnode_count = 1023;
+    std::vector<token> _sorted_tokens;
+    std::unordered_map<token, inet_address> _token_to_endpoint;
+
+    // FIXME: need a timer to evict elements by LRU?
+    std::unordered_map<token, std::vector<inet_address>> _token_to_targets_endpoints_cache;
+    const std::vector<inet_address>& get_replica_nodes_internal(const redis_key& rk) const;
+    size_t token_to_index(const token& t) const;
 };
+

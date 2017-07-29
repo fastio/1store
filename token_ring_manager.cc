@@ -19,3 +19,53 @@
 *
 */
 #include "token_ring_manager.hh"
+const std::vector<inet_address>& token_ring_manager::get_target_endpoints_for_key(const redis_key& rk) const
+{
+}
+
+size_t token_ring_manager::token_to_index(const token& t) const
+{
+    assert(_sorted_tokens.empty() == false);
+    auto it = std::lower_bound(_sorted_tokens.begin(), _sorted_tokens.end(), t);
+    if (it == _sorted_tokens.end()) {
+        return 0;
+    }
+    return std::distance(_sorted_tokens.begin(), it);
+}
+
+const std::vector<inet_address> token_ring_manager::get_replica_nodes_internal(const redis_key& rk) const
+{
+    auto targets = _token_to_targets_endpoints_cache.find(token{ rk.hash() });
+    if (targets != _token_to_targets_endpoints_cache.end()) {
+        return *targets;
+    }
+    std::vector<inet_address> new_targets;
+    new_targets.reserve(_replica_count);
+    auto token_index = token_to_index(token{ rk.hash() });
+
+    for (size_t i = token_index; i < _sorted_tokens.size(); ++i) {
+        new_targets.emplace_back(_token_to_endpoint[_sorted_tokens[i]]);
+    }
+    // cache the result
+    _token_to_targets_endpoints_cache[token{ rk.hash() }] = new_targets;
+    return new_targets;
+}
+
+const std::vector<inet_address>& token_ring_manager::get_replica_nodes_for_write(const redis_key& rk) const
+{
+    return get_replica_nodes_internal(rk);
+}
+
+
+const inet_address token_ring_manager::get_replica_node_for_read(const redis_key& rk) const
+{
+    // the get_replica_nodes_internal never returns empty result;
+    return get_replica_nodes_internal()[0];
+}
+
+void token_ring_manager::set_sorted_tokens(const std::vector<token>& tokens, const std::unordered_map<token, inet_address>& token_to_endpoint)
+{
+    _sorted_tokens = tokens;
+    _token_to_endpoint = token_to_endpoint;
+    _token_to_targets_endpoints_cache.clear();
+}
