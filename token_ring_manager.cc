@@ -35,20 +35,21 @@ size_t token_ring_manager::token_to_index(const token& t) const
 
 const std::vector<inet_address> token_ring_manager::get_replica_nodes_internal(const redis_key& rk) const
 {
-    auto targets = _token_write_targets_endpoints_cache.find(token{ rk.hash() });
+    auto first_token_index = token_to_index(token{ rk.hash() });
+    auto& first_token = _sorted_tokens[first_token_index];
+    auto targets = _token_write_targets_endpoints_cache.find(first_token);
     if (targets != _token_write_targets_endpoints_cache.end()) {
         return *targets;
     }
     std::vector<inet_address> new_targets;
     new_targets.reserve(_replica_count);
-    auto token_index = token_to_index(token{ rk.hash() });
 
     auto all_tokens = _sorted_tokens.size();
     for (size_t i = 0; i < _replica_count; ++i) {
-        new_targets.emplace_back(_token_to_endpoint[_sorted_tokens[(i + token_index) % all_tokens]]);
+        new_targets.emplace_back(_token_to_endpoint[_sorted_tokens[(i + first_token_index) % all_tokens]]);
     }
     // cache the result
-    _token_write_targets_endpoints_cache[token{ rk.hash() }] = new_targets;
+    _token_write_targets_endpoints_cache[first_token] = new_targets;
     return new_targets;
 }
 
@@ -60,13 +61,14 @@ const std::vector<inet_address>& token_ring_manager::get_replica_nodes_for_write
 
 const inet_address token_ring_manager::get_replica_node_for_read(const redis_key& rk) const
 {
-    auto targets = _token_read_targets_endpoints_cache.find(token{ rk.hash() });
+    auto first_token_index = token_to_index(token{ rk.hash() });
+    auto& first_token = _sorted_tokens[first_token_index];
+    auto targets = _token_read_targets_endpoints_cache.find(first_token);
     if (targets != _token_read_targets_endpoints_cache.end()) {
         return *targets;
     }
-    auto token_index = token_to_index(token{ rk.hash() });
-    auto target = _sorted_tokens[token_index];
-    _token_read_targets_endpoints_cache[token { rk.hash() }] = target;
+    auto target = _token_to_endpoint[first_token_index];
+    _token_read_targets_endpoints_cache[first_token] = target;
     return target;
 }
 
