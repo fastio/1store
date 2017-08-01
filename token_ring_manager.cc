@@ -44,8 +44,9 @@ const std::vector<inet_address> token_ring_manager::get_replica_nodes_internal(c
     std::vector<inet_address> new_targets;
     new_targets.reserve(_replica_count);
 
+    new_targets.emplace_back(_token_to_endpoint[first_token]);
     auto all_tokens = _sorted_tokens.size();
-    for (size_t i = 0; i < _replica_count; ++i) {
+    for (size_t i = 1; i < _replica_count; ++i) {
         new_targets.emplace_back(_token_to_endpoint[_sorted_tokens[(i + first_token_index) % all_tokens]]);
     }
     // cache the result
