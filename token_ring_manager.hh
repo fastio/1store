@@ -53,11 +53,13 @@ public:
 private:
     size_t _replica_count = 1;
     size_t _vnode_count = 1023;
-    std::vector<token> _sorted_tokens;
-    std::unordered_map<token, inet_address> _token_to_endpoint;
+    std::vector<token> _sorted_tokens {};
+    std::unordered_map<token, inet_address> _token_to_endpoint {};
 
     // FIXME: need a timer to evict elements by LRU?
-    std::unordered_map<token, std::vector<inet_address>> _token_to_targets_endpoints_cache;
+    std::unordered_map<token, std::vector<inet_address>> _token_write_targets_endpoints_cache {};
+    std::unordered_map<token, inet_address>              _token_read_targets_endpoints_cache {};
+
     const std::vector<inet_address>& get_replica_nodes_internal(const redis_key& rk) const;
     size_t token_to_index(const token& t) const;
 };
