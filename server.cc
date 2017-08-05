@@ -20,6 +20,9 @@
 */
 #include "server.hh"
 namespace redis {
+
+distributed<server> _the_server;
+
 void server::setup_metrics()
 {
     namespace sm = seastar::metrics;

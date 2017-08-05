@@ -34,11 +34,6 @@ static logger main_log ("main");
 
 
 int main(int ac, char** av) {
-    distributed<redis::database> db;
-    distributed<redis::server> server;
-    distributed<redis::redis> redis(db);
-    distributed<redis::storage_service> storage(db);
-    distributed<redis::storage_proxy> storage(redis);
     prometheus::config prometheus_config;
     httpd::http_server_control prometheus_server;
     namespace bpo = boost::program_options;
@@ -49,17 +44,17 @@ int main(int ac, char** av) {
         ;
 
     return app.run_deprecated(ac, av, [&] {
-        engine().at_exit([&] { return server.stop(); });
-        engine().at_exit([&] { return db.stop(); });
+        engine().at_exit([&] { return redis::get_server().stop(); });
+        engine().at_exit([&] { return redis::get_database().stop(); });
         engine().at_exit([&] { return prometheus_server.stop(); });
 
         auto&& config = app.configuration();
         auto port = config["port"].as<uint16_t>();
         auto pport = config["prometheus_port"].as<uint16_t>();
-        return db.start().then([&, port] {
-            return server.start(std::ref(redis), port);
+        return redis::get_database().start().then([&, port] {
+            return redis::get_server().start(port);
         }).then([&] {
-            return server.invoke_on_all(&redis::server::start);
+            return redis::get_server().invoke_on_all(&redis::server::start);
         }).then([&, pport] {
              prometheus_config.metric_help = "Redis server statistics";
              prometheus_config.prefix = "redis";

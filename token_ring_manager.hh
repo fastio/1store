@@ -22,7 +22,9 @@
 #include "core/sharded.hh"
 #include "core/sstring.hh"
 #include <experimental/optional>
-
+#include <unordered_map>
+#include <vector>
+namespace redis {
 struct token {
    size_t _hash;
 };
@@ -63,4 +65,4 @@ private:
     const std::vector<inet_address>& get_replica_nodes_internal(const redis_key& rk) const;
     size_t token_to_index(const token& t) const;
 };
-
+}

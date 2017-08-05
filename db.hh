@@ -38,6 +38,15 @@ namespace stdx = std::experimental;
 namespace redis {
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
 class sset_lsa;
+class database;
+extern distributed<database> _the_database;
+inline distributed<database>& get_database() {
+    return _the_database;
+}
+inline database& local_database() {
+    return _the_database.local();
+}
+
 class database final : private logalloc::region {
 public:
     database();

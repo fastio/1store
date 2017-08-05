@@ -19,6 +19,7 @@
 *
 */
 #include "token_ring_manager.hh"
+namespace redis {
 const std::vector<inet_address>& token_ring_manager::get_target_endpoints_for_key(const redis_key& rk) const
 {
 }
@@ -78,4 +79,5 @@ void token_ring_manager::set_sorted_tokens(const std::vector<token>& tokens, con
     _sorted_tokens = tokens;
     _token_to_endpoint = token_to_endpoint;
     _token_to_targets_endpoints_cache.clear();
+}
 }

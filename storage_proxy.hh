@@ -45,7 +45,12 @@
 #include "geo.hh"
 #include "redis.hh"
 namespace redis {
-class storage_proxy : public seastar::async_sharded_service<storage_service> {
+class storage_proxy;
+extern distributed<storage_proxy> _storage_proxy;
+inline distributed<storage_proxy>& proxy() {
+    return _storage_proxy;
+}
+class storage_proxy : public seastar::async_sharded_service<storage_proxy> {
     distributed<redis>& _redis;
 public:
     storage_proxy(distributed<redis>& o) : _redis(o) {}

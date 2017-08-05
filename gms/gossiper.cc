@@ -845,6 +845,7 @@ void gossiper::make_random_gossip_digest(std::vector<gossip_digest>& g_digests) 
 }
 
 future<> gossiper::advertise_removing(inet_address endpoint, utils::UUID host_id, utils::UUID local_host_id) {
+/*
     return seastar::async([this, g = this->shared_from_this(), endpoint, host_id, local_host_id] {
         auto& state = endpoint_state_map.at(endpoint);
         // remember this node's generation
@@ -867,6 +868,8 @@ future<> gossiper::advertise_removing(inet_address endpoint, utils::UUID host_id
         //eps.add_application_state(application_state::REMOVAL_COORDINATOR, storage_service_value_factory().removal_coordinator(local_host_id));
         endpoint_state_map[endpoint] = eps;
     });
+*/
+    return make_ready_future<>();
 }
 
 future<> gossiper::advertise_token_removed(inet_address endpoint, utils::UUID host_id) {

@@ -44,6 +44,11 @@ namespace gms {
     class gossip_digest_ack2;
 }
 
+namespace redis {
+    class internal_read_message;
+    class internal_write_message;
+}
+
 namespace utils {
     class UUID;
 }
@@ -60,7 +65,10 @@ enum class messaging_verb : int32_t {
     GOSSIP_ECHO        = 4,
     GOSSIP_SHUTDOWN    = 5,
     // end of gossip verb
-    LAST               = 6,
+    // Used by internal request
+    INTERNAL_READ      = 6,
+    INTERNAL_WRITE     = 7,
+    LAST               = 8,
 };
 
 } // namespace net
@@ -201,6 +209,17 @@ public:
     void unregister_gossip_digest_ack2();
     future<> send_gossip_digest_ack2(msg_addr id, gms::gossip_digest_ack2 msg);
 
+    // Wrapper for INTERNAL_DATA_BUS_REQUEST
+    /*
+    void register_internal_read(std::function<future<foreign_ptr<lw_shared_ptr<scattered_message<char>>> (const rpc::client& cinfo, internal_read_request)>&& fun);
+    void unregister_internal_read();
+    future<foreign_ptr<lw_shared_ptr<scattered_message<char>>> send_internal_read(msg_addr id, internal_read_request msg);
+
+
+    void register_internal_write(std::function<future<foreign_ptr<lw_shared_ptr<scattered_message<char>>> (const rpc::client& cinfo, internal_write_message)>&& fun);
+    void unregister_internal_write();
+    future<foreign_ptr<lw_shared_ptr<scattered_message<char>>> send_internal_write(msg_addr id, internal_write_message msg);
+    */
     void foreach_server_connection_stats(std::function<void(const rpc::client_info&, const rpc::stats&)>&& f) const;
 public:
     // Return rpc::protocol::client for a shard which is a ip + cpuid pair.

@@ -44,4 +44,15 @@
 #include "common.hh"
 #include "geo.hh"
 namespace redis {
+class storage_service;
+extern distributed<storage_service> _storage_service;
+inline distributed<storage_service>& service() {
+    return _storage_service;
+}
+class storage_service : public seastar::async_sharded_service<storage_service> {
+public:
+    storage_service() {}
+    ~storage_service() {}
+    future<> stop();
+};
 }

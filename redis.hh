@@ -47,16 +47,19 @@ namespace redis {
 
 namespace stdx = std::experimental;
 
-class redis;
-extern distributed<redis> _the_redis;
-inline distributed<redis>& get_redis() {
+class redis_service;
+extern distributed<redis_service> _the_redis;
+inline distributed<redis_service>& get_redis_service() {
     return _the_redis;
+}
+inline redis_service& local_redis_service() {
+    return _the_redis.local();
 }
 
 struct args_collection;
 class database;
 using message = scattered_message<char>;
-class redis {
+class redis_service {
 private:
     inline unsigned get_cpu(const sstring& key) {
         return std::hash<sstring>()(key) % smp::count;
@@ -64,9 +67,8 @@ private:
     inline unsigned get_cpu(const redis_key& key) {
         return key.hash() % smp::count;
     }
-    distributed<database>& _db;
 public:
-    redis(distributed<database>& db) : _db(db)
+    redis_service()
     {
     }
 

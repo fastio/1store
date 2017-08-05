@@ -82,20 +82,11 @@ public:
 
 class redis_protocol {
 private:
-    redis_service& _redis;
     redis_protocol_parser _parser;
     args_collection _request_args;
 public:
-    redis_protocol(redis_service& redis);
+    redis_protocol();
     void prepare_request();
-    void print_input()
-    {
-        std::cout << "{ \n" << _request_args._request_args_count << "\n";
-        for (size_t i = 0; i < _request_args._request_args.size(); i++) {
-            std::cout << i << "=> " << _request_args._request_args[i] << "\n";
-        };
-        std::cout << "}\n";
-    }
     future<> handle(input_stream<char>& in, output_stream<char>& out, request_latency_tracer& tracer);
 };
 }

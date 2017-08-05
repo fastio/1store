@@ -27,10 +27,15 @@
 #include "core/thread.hh"
 #include "core/gate.hh"
 namespace redis {
+
+class server;
+extern distributed<server> _the_server;
+inline distributed<server>& get_server() {
+    return _the_server;
+}
 class server {
 private:
     lw_shared_ptr<server_socket> _listener;
-    redis_service& _redis;
     uint16_t _port;
     struct connection {
         connected_socket _socket;
@@ -38,12 +43,11 @@ private:
         input_stream<char> _in;
         output_stream<char> _out;
         redis_protocol _proto;
-        connection(connected_socket&& socket, socket_address addr, redis_service& redis)
+        connection(connected_socket&& socket, socket_address addr)
             : _socket(std::move(socket))
               , _addr(addr)
               , _in(_socket.input())
               , _out(_socket.output())
-              , _proto(redis)
         {
         }
         ~connection() {
@@ -59,9 +63,8 @@ private:
     request_latency_tracer _latency_tracer;
     seastar::gate _request_gate;
 public:
-    server(redis_service& db, uint16_t port = 6379)
-        : _redis(db)
-        , _port(port)
+    server(uint16_t port = 6379)
+        : _port(port)
     {
         setup_metrics();
     }
@@ -75,7 +78,7 @@ public:
                return seastar::async([this, &fd, addr] {
                    ++_stats._connections_total;
                    ++_stats._connections_current;
-                   auto conn = make_lw_shared<connection>(std::move(fd), addr, _redis);
+                   auto conn = make_lw_shared<connection>(std::move(fd), addr);
                    do_until([conn] { return conn->_in.eof(); }, [this, conn] {
                        return with_gate(_request_gate, [this, conn] {
                            return conn->_proto.handle(conn->_in, conn->_out, _latency_tracer).then([this, conn] {

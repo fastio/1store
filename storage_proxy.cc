@@ -51,6 +51,7 @@ future<> storage_proxy::stop()
 
 future<> storage_proxy::process(args_collection& request_args, output_stream<char>& out)
 {
+    /*
     auto rk = extract_request_key(request_args);
     auto type = request_args.type();
     if (type == request::write) {
@@ -94,6 +95,7 @@ future<> storage_proxy::process(args_collection& request_args, output_stream<cha
         });
     }
     // The system commands
+    */
     return make_ready_future<>();
 }
 }

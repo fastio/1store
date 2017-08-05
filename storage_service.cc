@@ -44,4 +44,8 @@
 #include "common.hh"
 #include "geo.hh"
 namespace redis {
+future<> storage_service::stop()
+{
+    return make_ready_future<>();
+}
 }

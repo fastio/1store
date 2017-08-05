@@ -61,6 +61,8 @@ private:
     std::uniform_int_distribution<size_t> _dist;
 };
 
+distributed<database> _the_database;
+
 database::database()
 {
     using namespace std::chrono;
