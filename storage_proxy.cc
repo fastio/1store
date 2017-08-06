@@ -18,7 +18,7 @@
 *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
-#pragma once
+#include "storage_proxy.hh"
 #include <functional>
 #include "core/sharded.hh"
 #include "core/sstring.hh"
@@ -44,6 +44,14 @@
 #include "common.hh"
 #include "geo.hh"
 namespace redis {
+
+distributed<storage_proxy> _storage_proxy;
+
+future<> storage_proxy::start()
+{
+    return make_ready_future<>();
+}
+
 future<> storage_proxy::stop()
 {
     return make_ready_future<>();

@@ -394,7 +394,6 @@ deps = {
       'redis.cc',
       'dict_lsa.cc',
       'server.cc',
-      'main.cc',
       'db.cc',
       'redis_protocol_parser.rl',
       'redis_protocol.cc',
@@ -404,6 +403,10 @@ deps = {
       'list_lsa.cc',
       'cache.cc',
       'reply_builder.cc',
+      'token_ring_manager.cc',
+      'storage_proxy.cc',
+      'storage_service.cc',
+      'main.cc',
       ] + libnet + core + http + utils + protobuf + prometheus + idls + exceptions + gms + msic + message,
       'tests/cache_test': ['tests/cache_test.cc'] + core + utils,
 }

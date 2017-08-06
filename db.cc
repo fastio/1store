@@ -1931,6 +1931,10 @@ future<scattered_message_ptr> database::pfmerge(const redis_key& rk, uint8_t* me
     });
 }
 
+future<> database::start()
+{
+    return make_ready_future<>();
+}
 
 future<> database::stop()
 {

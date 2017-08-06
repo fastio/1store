@@ -21,6 +21,7 @@
 #pragma once
 #include <functional>
 #include "core/sharded.hh"
+#include "core/distributed.hh"
 #include "core/sstring.hh"
 #include <experimental/optional>
 #include <iomanip>
@@ -47,15 +48,15 @@
 namespace redis {
 class storage_proxy;
 extern distributed<storage_proxy> _storage_proxy;
-inline distributed<storage_proxy>& proxy() {
+inline distributed<storage_proxy>& get_storage_proxy() {
     return _storage_proxy;
 }
 class storage_proxy : public seastar::async_sharded_service<storage_proxy> {
-    distributed<redis>& _redis;
 public:
-    storage_proxy(distributed<redis>& o) : _redis(o) {}
-    future<> stop();
+    storage_proxy() {}
     future<> process(args_collection& request_args, output_stream<char>& out);
+    future<> stop();
+    future<> start();
 private:
     redis_key extract_request_key(args_collection& request_args) const;
 };

@@ -18,7 +18,7 @@
 *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
-#pragma once
+#include "storage_service.hh"
 #include <functional>
 #include "core/sharded.hh"
 #include "core/sstring.hh"
@@ -44,6 +44,14 @@
 #include "common.hh"
 #include "geo.hh"
 namespace redis {
+
+distributed<storage_service> _storage_service;
+
+future<> storage_service::start()
+{
+    return make_ready_future<>();
+}
+
 future<> storage_service::stop()
 {
     return make_ready_future<>();

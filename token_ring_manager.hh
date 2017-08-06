@@ -20,15 +20,15 @@
 */
 #pragma once
 #include "core/sharded.hh"
+#include "core/distributed.hh"
 #include "core/sstring.hh"
 #include <experimental/optional>
 #include <unordered_map>
 #include <vector>
+#include "gms/inet_address.hh"
+#include "common.hh"
 namespace redis {
-struct token {
-   size_t _hash;
-};
-
+using token = size_t;
 class token_ring_manager;
 extern distributed<token_ring_manager> _ring;
 inline distributed<token_ring_manager>& ring() {
@@ -44,25 +44,24 @@ public:
     token_ring_manager(token_ring_manager&&) = delete;
     token_ring_manager& operator = (token_ring_manager&&) = delete;
 
-    const std::vector<inet_address>& get_target_endpoints_for_key(const redis_key& rk) const;
-    bool should_served_by_me(const redis_key& rk) const;
-    const std::vector<inet_address>& get_replica_nodes_for_write(const redis_key& rk) const;
-    const inet_address& get_replica_node_for_read(const redis_key& rk) const;
+    const std::vector<gms::inet_address> get_replica_nodes_for_write(const redis_key& rk);
+    const gms::inet_address get_replica_node_for_read(const redis_key& rk);
     const size_t get_replica_count() const { return _replica_count; }
-    void set_sorted_tokens(const std::vector<token>& tokens, const std::unordered_map<token, inet_address>& token_to_endpoint);
+    void set_sorted_tokens(const std::vector<token>& tokens, const std::unordered_map<token, gms::inet_address>& token_to_endpoint);
 
-    future<> stop() {}
+    future<> start();
+    future<> stop();
 private:
     size_t _replica_count = 1;
     size_t _vnode_count = 1023;
     std::vector<token> _sorted_tokens {};
-    std::unordered_map<token, inet_address> _token_to_endpoint {};
+    std::unordered_map<token, gms::inet_address> _token_to_endpoint {};
 
     // FIXME: need a timer to evict elements by LRU?
-    std::unordered_map<token, std::vector<inet_address>> _token_write_targets_endpoints_cache {};
-    std::unordered_map<token, inet_address>              _token_read_targets_endpoints_cache {};
+    std::unordered_map<token, std::vector<gms::inet_address>> _token_write_targets_endpoints_cache {};
+    std::unordered_map<token, gms::inet_address>              _token_read_targets_endpoints_cache {};
 
-    const std::vector<inet_address>& get_replica_nodes_internal(const redis_key& rk) const;
+    const std::vector<gms::inet_address> get_replica_nodes_internal(const redis_key& rk);
     size_t token_to_index(const token& t) const;
 };
 }

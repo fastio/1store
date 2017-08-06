@@ -55,6 +55,16 @@ namespace stdx = std::experimental;
 
 distributed<redis_service> _the_redis;
 
+future<> redis_service::start()
+{
+    return make_ready_future<>();
+}
+
+future<> redis_service::stop()
+{
+    return make_ready_future<>();
+}
+
 future<sstring> redis_service::echo(args_collection& args)
 {
     if (args._command_args_count < 1) {

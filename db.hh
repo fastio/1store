@@ -155,6 +155,7 @@ public:
     future<scattered_message_ptr> pfmerge(const redis_key& rk, uint8_t* merged_sources, size_t size);
     future<foreign_ptr<lw_shared_ptr<sstring>>> get_hll_direct(const redis_key& rk);
 
+    future<> start();
     future<> stop();
 private:
     future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> georadius(const sset_lsa&, double longtitude, double latitude, double radius, size_t count, int flag);

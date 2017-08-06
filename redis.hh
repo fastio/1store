@@ -72,6 +72,7 @@ public:
     {
     }
 
+    future<> start();
     future<> stop();
     // [TEST APIs]
     future<sstring> echo(args_collection& args);

@@ -20,8 +20,17 @@
 */
 #include "token_ring_manager.hh"
 namespace redis {
-const std::vector<inet_address>& token_ring_manager::get_target_endpoints_for_key(const redis_key& rk) const
+
+distributed<token_ring_manager> _ring;
+
+future<> token_ring_manager::start()
 {
+    return make_ready_future<>();
+}
+
+future<> token_ring_manager::stop()
+{
+    return make_ready_future<>();
 }
 
 size_t token_ring_manager::token_to_index(const token& t) const
@@ -34,15 +43,15 @@ size_t token_ring_manager::token_to_index(const token& t) const
     return std::distance(_sorted_tokens.begin(), it);
 }
 
-const std::vector<inet_address> token_ring_manager::get_replica_nodes_internal(const redis_key& rk) const
+const std::vector<gms::inet_address> token_ring_manager::get_replica_nodes_internal(const redis_key& rk)
 {
     auto first_token_index = token_to_index(token{ rk.hash() });
     auto& first_token = _sorted_tokens[first_token_index];
     auto targets = _token_write_targets_endpoints_cache.find(first_token);
     if (targets != _token_write_targets_endpoints_cache.end()) {
-        return *targets;
+        return targets->second;
     }
-    std::vector<inet_address> new_targets;
+    std::vector<gms::inet_address> new_targets;
     new_targets.reserve(_replica_count);
 
     new_targets.emplace_back(_token_to_endpoint[first_token]);
@@ -55,29 +64,30 @@ const std::vector<inet_address> token_ring_manager::get_replica_nodes_internal(c
     return new_targets;
 }
 
-const std::vector<inet_address>& token_ring_manager::get_replica_nodes_for_write(const redis_key& rk) const
+const std::vector<gms::inet_address> token_ring_manager::get_replica_nodes_for_write(const redis_key& rk)
 {
     return get_replica_nodes_internal(rk);
 }
 
 
-const inet_address token_ring_manager::get_replica_node_for_read(const redis_key& rk) const
+const gms::inet_address token_ring_manager::get_replica_node_for_read(const redis_key& rk)
 {
     auto first_token_index = token_to_index(token{ rk.hash() });
     auto& first_token = _sorted_tokens[first_token_index];
     auto targets = _token_read_targets_endpoints_cache.find(first_token);
     if (targets != _token_read_targets_endpoints_cache.end()) {
-        return *targets;
+        return targets->second;
     }
     auto target = _token_to_endpoint[first_token_index];
     _token_read_targets_endpoints_cache[first_token] = target;
     return target;
 }
 
-void token_ring_manager::set_sorted_tokens(const std::vector<token>& tokens, const std::unordered_map<token, inet_address>& token_to_endpoint)
+void token_ring_manager::set_sorted_tokens(const std::vector<token>& tokens, const std::unordered_map<token, gms::inet_address>& token_to_endpoint)
 {
     _sorted_tokens = tokens;
     _token_to_endpoint = token_to_endpoint;
-    _token_to_targets_endpoints_cache.clear();
+    _token_write_targets_endpoints_cache.clear();
+    _token_read_targets_endpoints_cache.clear();
 }
 }
