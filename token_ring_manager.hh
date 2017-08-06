@@ -34,6 +34,9 @@ extern distributed<token_ring_manager> _ring;
 inline distributed<token_ring_manager>& ring() {
     return _ring;
 }
+inline token_ring_manager& get_local_ring() {
+    return _ring.local();
+}
 class token_ring_manager final {
 public:
     token_ring_manager() {}
@@ -49,6 +52,9 @@ public:
     const size_t get_replica_count() const { return _replica_count; }
     void set_sorted_tokens(const std::vector<token>& tokens, const std::unordered_map<token, gms::inet_address>& token_to_endpoint);
 
+    bool is_member(const gms::inet_address& endpoint) const { return true; }
+    std::chrono::milliseconds get_ring_delay() const;
+    std::vector<token> get_tokens(const gms::inet_address& endpoint) const { return {}; }
     future<> start();
     future<> stop();
 private:

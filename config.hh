@@ -30,7 +30,7 @@
 
 class file;
 
-namespace db {
+namespace redis {
 
 class string_map : public std::unordered_map<sstring, sstring> {
 public:
@@ -127,9 +127,9 @@ public:
      *         according the environment variables definitions.
      */
     static boost::filesystem::path get_conf_dir();
-    using string_map = db::string_map;
+    using string_map = redis::string_map;
     typedef std::vector<sstring> string_list;
-    using seed_provider_type = db::seed_provider_type;
+    using seed_provider_type = redis::seed_provider_type;
 
     /*
      * All values and documentation taken from

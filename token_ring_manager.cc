@@ -19,6 +19,7 @@
 *
 */
 #include "token_ring_manager.hh"
+#include "db.hh"
 namespace redis {
 
 distributed<token_ring_manager> _ring;
@@ -89,5 +90,10 @@ void token_ring_manager::set_sorted_tokens(const std::vector<token>& tokens, con
     _token_to_endpoint = token_to_endpoint;
     _token_write_targets_endpoints_cache.clear();
     _token_read_targets_endpoints_cache.clear();
+}
+
+std::chrono::milliseconds token_ring_manager::get_ring_delay() const{
+    auto ring_delay = get_local_database().get_config().ring_delay_ms();
+    return std::chrono::milliseconds(ring_delay);
 }
 }

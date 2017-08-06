@@ -34,6 +34,7 @@
 #include "cache.hh"
 #include "reply_builder.hh"
 #include  <experimental/vector>
+#include "config.hh"
 namespace stdx = std::experimental;
 namespace redis {
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
@@ -43,7 +44,7 @@ extern distributed<database> _the_database;
 inline distributed<database>& get_database() {
     return _the_database;
 }
-inline database& local_database() {
+inline database& get_local_database() {
     return _the_database.local();
 }
 
@@ -157,6 +158,10 @@ public:
 
     future<> start();
     future<> stop();
+
+    const redis::config& get_config() const {
+        return *_config;
+    }
 private:
     future<foreign_ptr<lw_shared_ptr<georadius_result_type>>> georadius(const sset_lsa&, double longtitude, double latitude, double radius, size_t count, int flag);
     static inline long alignment_index_base_on(size_t size, long index)
@@ -297,5 +302,6 @@ private:
     stats _stat;
     void setup_metrics();
     size_t sum_expiring_entries();
+    std::unique_ptr<redis::config> _config;
 };
 }

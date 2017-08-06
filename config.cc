@@ -36,7 +36,7 @@
 
 static logging::logger logger("config");
 
-db::config::config()
+redis::config::config()
 :
         // Initialize members to defaults.
 #define _mk_init(name, type, deflt, status, desc, ...)      \
@@ -47,7 +47,7 @@ db::config::config()
 
 namespace bpo = boost::program_options;
 
-namespace db {
+namespace redis {
 // Special "validator" for boost::program_options to allow reading options
 // into an unordered_map<string, string> (we have in config.hh a bunch of
 // those). This validator allows the parameter of each option to look like
@@ -55,11 +55,11 @@ namespace db {
 // multiple entries into the map. "String" can be any time which can be
 // converted from std::string, e.g., sstring.
 static void validate(boost::any& out, const std::vector<std::string>& in,
-        db::string_map*, int) {
+        redis::string_map*, int) {
     if (out.empty()) {
-        out = boost::any(db::string_map());
+        out = boost::any(redis::string_map());
     }
-    auto* p = boost::any_cast<db::string_map>(&out);
+    auto* p = boost::any_cast<redis::string_map>(&out);
     for (const auto& s : in) {
         auto i = s.find_first_of('=');
         if (i == std::string::npos) {
@@ -91,15 +91,15 @@ struct convert<sstring> {
 };
 
 template <>
-struct convert<db::config::string_list> {
-    static Node encode(const db::config::string_list& rhs) {
+struct convert<redis::config::string_list> {
+    static Node encode(const redis::config::string_list& rhs) {
         Node node(NodeType::Sequence);
         for (auto& s : rhs) {
             node.push_back(convert<sstring>::encode(s));
         }
         return node;
     }
-    static bool decode(const Node& node, db::config::string_list& rhs) {
+    static bool decode(const Node& node, redis::config::string_list& rhs) {
         if (!node.IsSequence()) {
             return false;
         }
@@ -116,15 +116,15 @@ struct convert<db::config::string_list> {
 };
 
 template<>
-struct convert<db::string_map> {
-    static Node encode(const db::string_map& rhs) {
+struct convert<redis::string_map> {
+    static Node encode(const redis::string_map& rhs) {
         Node node(NodeType::Map);
         for (auto& p : rhs) {
             node.force_insert(p.first, p.second);
         }
         return node;
     }
-    static bool decode(const Node& node, db::string_map& rhs) {
+    static bool decode(const Node& node, redis::string_map& rhs) {
         if (!node.IsMap()) {
             return false;
         }
@@ -137,15 +137,15 @@ struct convert<db::string_map> {
 };
 
 template<>
-struct convert<db::config::seed_provider_type> {
-    static Node encode(const db::config::seed_provider_type& rhs) {
+struct convert<redis::config::seed_provider_type> {
+    static Node encode(const redis::config::seed_provider_type& rhs) {
         throw std::runtime_error("should not reach");
     }
-    static bool decode(const Node& node, db::config::seed_provider_type& rhs) {
+    static bool decode(const Node& node, redis::config::seed_provider_type& rhs) {
         if (!node.IsSequence()) {
             return false;
         }
-        rhs = db::config::seed_provider_type();
+        rhs = redis::config::seed_provider_type();
         for (auto& n : node) {
             if (!n.IsMap()) {
                 continue;
@@ -155,7 +155,7 @@ struct convert<db::config::seed_provider_type> {
                     rhs.class_name = n2.second.as<sstring>();
                 }
                 if (n2.first.as<sstring>() == "parameters") {
-                    auto v = n2.second.as<std::vector<db::config::string_map>>();
+                    auto v = n2.second.as<std::vector<redis::config::string_map>>();
                     if (!v.empty()) {
                         rhs.parameters = v.front();
                     }
@@ -171,7 +171,7 @@ struct convert<db::config::seed_provider_type> {
 
 namespace db {
 template<typename... Args>
-std::basic_ostream<Args...> & operator<<(std::basic_ostream<Args...> & os, const db::config::string_map & map) {
+std::basic_ostream<Args...> & operator<<(std::basic_ostream<Args...> & os, const redis::config::string_map & map) {
     int n = 0;
     for (auto& e : map) {
         if (n > 0) {
@@ -183,7 +183,7 @@ std::basic_ostream<Args...> & operator<<(std::basic_ostream<Args...> & os, const
 }
 
 template<typename... Args>
-std::basic_istream<Args...> & operator>>(std::basic_istream<Args...> & is, db::config::string_map & map) {
+std::basic_istream<Args...> & operator>>(std::basic_istream<Args...> & is, redis::config::string_map & map) {
     std::string str;
     is >> str;
 
@@ -210,37 +210,37 @@ std::basic_istream<Args...> & operator>>(std::basic_istream<Args...> & is, db::c
  * Only opts marked "used" should get a boost::opt
  *
  */
-template<typename T, db::config::value_status S>
+template<typename T, redis::config::value_status S>
 struct do_value_opt;
 
 template<typename T>
-struct do_value_opt<T, db::config::value_status::Used> {
+struct do_value_opt<T, redis::config::value_status::Used> {
     template<typename Func>
-    void operator()(Func&& func, const char* name, const T& dflt, T * dst, db::config::config_source & src, const char* desc) const {
+    void operator()(Func&& func, const char* name, const T& dflt, T * dst, redis::config::config_source & src, const char* desc) const {
         func(name, dflt, dst, src, desc);
     }
 };
 
 template<>
-struct do_value_opt<db::config::seed_provider_type, db::config::value_status::Used> {
-    using seed_provider_type = db::config::seed_provider_type;
+struct do_value_opt<redis::config::seed_provider_type, redis::config::value_status::Used> {
+    using seed_provider_type = redis::config::seed_provider_type;
     template<typename Func>
-    void operator()(Func&& func, const char* name, const seed_provider_type& dflt, seed_provider_type * dst, db::config::config_source & src, const char* desc) const {
+    void operator()(Func&& func, const char* name, const seed_provider_type& dflt, seed_provider_type * dst, redis::config::config_source & src, const char* desc) const {
         func((sstring(name) + "_class_name").c_str(), dflt.class_name, &dst->class_name, src, desc);
         func((sstring(name) + "_parameters").c_str(), dflt.parameters, &dst->parameters, src, desc);
     }
 };
 
 template<typename T>
-struct do_value_opt<T, db::config::value_status::Unused> {
+struct do_value_opt<T, redis::config::value_status::Unused> {
     template<typename... Args> void operator()(Args&&... args) const {}
 };
 template<typename T>
-struct do_value_opt<T, db::config::value_status::Invalid> {
+struct do_value_opt<T, redis::config::value_status::Invalid> {
     template<typename... Args> void operator()(Args&&... args) const {}
 };
 
-bpo::options_description db::config::get_options_description() {
+bpo::options_description redis::config::get_options_description() {
     bpo::options_description opts("Urchin options");
     auto init = opts.add_options();
     add_options(init);
@@ -278,7 +278,7 @@ inline typed_value_ex<std::vector<T>>* value_ex(std::vector<T>* v) {
     return r;
 }
 
-bpo::options_description_easy_init& db::config::add_options(bpo::options_description_easy_init& init) {
+bpo::options_description_easy_init& redis::config::add_options(bpo::options_description_easy_init& init) {
     auto opt_add =
             [&init](const char* name, const auto& dflt, auto* dst, auto& src, const char* desc) mutable {
                 sstring tmp(name);
@@ -317,35 +317,35 @@ bpo::options_description_easy_init& db::config::add_options(bpo::options_descrip
 struct handle_yaml {
     virtual ~handle_yaml() {};
     virtual void operator()(const YAML::Node&) = 0;
-    virtual db::config::value_status status() const = 0;
-    virtual db::config::config_source source() const = 0;
+    virtual redis::config::value_status status() const = 0;
+    virtual redis::config::config_source source() const = 0;
 };
 
-template<typename T, db::config::value_status S>
+template<typename T, redis::config::value_status S>
 struct handle_yaml_impl : public handle_yaml {
-    typedef db::config::value<T, S> value_type;
+    typedef redis::config::value<T, S> value_type;
 
-    handle_yaml_impl(value_type& v, db::config::config_source& src) : _dst(v), _src(src) {}
+    handle_yaml_impl(value_type& v, redis::config::config_source& src) : _dst(v), _src(src) {}
     void operator()(const YAML::Node& node) override {
         _dst(node.as<T>());
-        _src = db::config::config_source::SettingsFile;
+        _src = redis::config::config_source::SettingsFile;
     }
-    db::config::value_status status() const override {
+    redis::config::value_status status() const override {
         return _dst.status();
     }
-    db::config::config_source source() const override {
+    redis::config::config_source source() const override {
         return _src;
     }
     value_type& _dst;
-    db::config::config_source&
+    redis::config::config_source&
         _src;
 };
 
-void db::config::read_from_yaml(const sstring& yaml) {
+void redis::config::read_from_yaml(const sstring& yaml) {
     read_from_yaml(yaml.c_str());
 }
 
-void db::config::read_from_yaml(const char* yaml) {
+void redis::config::read_from_yaml(const char* yaml) {
     std::unordered_map<sstring, std::unique_ptr<handle_yaml>> values;
 
 #define _add_yaml_opt(name, type, deflt, status, desc, ...)      \
@@ -404,7 +404,7 @@ void db::config::read_from_yaml(const char* yaml) {
     }
 }
 
-future<> db::config::read_from_file(file f) {
+future<> redis::config::read_from_file(file f) {
     return f.size().then([this, f](size_t s) {
         return do_with(make_file_input_stream(f), [this, s](input_stream<char>& in) {
             return in.read_exactly(s).then([this](temporary_buffer<char> buf) {
@@ -414,13 +414,13 @@ future<> db::config::read_from_file(file f) {
     });
 }
 
-future<> db::config::read_from_file(const sstring& filename) {
+future<> redis::config::read_from_file(const sstring& filename) {
     return open_file_dma(filename, open_flags::ro).then([this](file f) {
        return read_from_file(std::move(f));
     });
 }
 
-boost::filesystem::path db::config::get_conf_dir() {
+boost::filesystem::path redis::config::get_conf_dir() {
     using namespace boost::filesystem;
 
     path confdir;
@@ -438,7 +438,7 @@ boost::filesystem::path db::config::get_conf_dir() {
     return confdir;
 }
 
-void db::config::check_experimental(const sstring& what) const {
+void redis::config::check_experimental(const sstring& what) const {
     if (!experimental()) {
         throw std::runtime_error(sprint("%s is currently disabled. Start Scylla with --experimental=on to enable.", what));
     }

@@ -49,6 +49,9 @@ extern distributed<storage_service> _storage_service;
 inline distributed<storage_service>& get_storage_service() {
     return _storage_service;
 }
+inline storage_service& get_local_storage_service() {
+    return _storage_service.local();
+}
 class storage_service : public seastar::async_sharded_service<storage_service> {
 public:
     storage_service() {}
