@@ -406,6 +406,8 @@ deps = {
       'token_ring_manager.cc',
       'storage_proxy.cc',
       'storage_service.cc',
+      'config.cc',
+      'init.cc',
       'main.cc',
       ] + libnet + core + http + utils + protobuf + prometheus + idls + exceptions + gms + msic + message,
       'tests/cache_test': ['tests/cache_test.cc'] + core + utils,

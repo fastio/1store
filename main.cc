@@ -28,6 +28,7 @@
 #include "token_ring_manager.hh"
 #include "storage_proxy.hh"
 #include "storage_service.hh"
+#include "init.hh"
 #define PLATFORM "seastar"
 #define VERSION "v1.0"
 #define VERSION_STRING PLATFORM " " VERSION
@@ -42,14 +43,20 @@ int main(int ac, char** av) {
     httpd::http_server_control prometheus_server;
     namespace bpo = boost::program_options;
     app_template app;
-    app.add_options()
-        ("port", bpo::value<uint16_t>()->default_value(6379), "Redis server port to listen on")
-        ("prometheus_port", bpo::value<uint16_t>()->default_value(10000), "Prometheus server port to listen on")
-        ;
+    auto opt_add = app.add_options();
+    auto cfg = make_lw_shared<redis::config>();
+    bool help_loggers = false;
+    bool help_version = false;
+
+    cfg->add_options(opt_add)
+    ("options-file", bpo::value<sstring>(), "configuration file (i.e. <PEDIS_HOME>/etc/redis.yaml)")
+    ("help-loggers", bpo::bool_switch(&help_loggers), "print a list of logger names and exit")
+    ("version", bpo::bool_switch(&help_version), "print version number and exit")
+    ;
 
     try {
         return app.run_deprecated(ac, av, [&] {
-            return seastar::async([ac, av, &app, &prometheus_config, &prometheus_server, &return_value] () {
+            return seastar::async([ac, av, cfg, &app, &prometheus_config, &prometheus_server, &return_value] () {
                 auto& db = redis::get_database();
                 auto& server = redis::get_server();
                 auto& redis = redis::get_redis_service();
@@ -68,7 +75,37 @@ int main(int ac, char** av) {
                 auto&& config = app.configuration();
                 auto port = config["port"].as<uint16_t>();
                 auto pport = config["prometheus_port"].as<uint16_t>();
+                // start databse
                 db.start().get();
+
+                // start gossper
+                sstring listen_address = cfg->listen_address();
+                uint16_t storage_port = cfg->storage_port();
+                uint16_t ssl_storage_port = cfg->ssl_storage_port();
+                double phi = cfg->phi_convict_threshold();
+                auto seed_provider= cfg->seed_provider();
+                sstring cluster_name = cfg->cluster_name();
+
+                const auto& ssl_opts = cfg->server_encryption_options();
+                auto encrypt_what = init_utils::get_or_default(ssl_opts, "internode_encryption", "none");
+                auto trust_store = init_utils::get_or_default(ssl_opts, "truststore");
+                auto cert = init_utils::get_or_default(ssl_opts, "certificate", init_utils::relative_conf_dir("redis.crt").string());
+                auto key = init_utils::get_or_default(ssl_opts, "keyfile", init_utils::relative_conf_dir("redis.key").string());
+                init_message_failuredetector_gossiper(
+                        listen_address
+                        , storage_port
+                        , ssl_storage_port
+                        , encrypt_what
+                        , trust_store
+                        , cert
+                        , key
+                        , cfg->internode_compression()
+                        , seed_provider
+                        , cluster_name
+                        , phi
+                        , cfg->listen_on_broadcast_address()
+                ).get();
+
                 server.start(port).get();
                 server.invoke_on_all(&redis::server::start).get();
                 token_ring.start().get();
