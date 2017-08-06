@@ -99,7 +99,23 @@ static void apply_logger_settings(sstring default_level, redis::config::string_m
     logging::logger::set_stdout_enabled(log_to_stdout);
     logging::logger::set_syslog_enabled(log_to_syslog);
 }
+
+static void tcp_syncookies_sanity() {
+    try {
+        auto f = file_desc::open("/proc/sys/net/ipv4/tcp_syncookies", O_RDONLY | O_CLOEXEC);
+        char buf[128] = {};
+        f.read(buf, 128);
+        if (sstring(buf) == "0\n") {
+            startlog.warn("sysctl entry net.ipv4.tcp_syncookies is set to 0.\n"
+                    "For better performance, set following parameter on sysctl is strongly recommended:\n"
+                    "net.ipv4.tcp_syncookies=1");
+        }
+    } catch (const std::system_error& e) {
+        startlog.warn("Unable to check if net.ipv4.tcp_syncookies is set {}", e);
+    }
+}
 };
+
 class directories {
 public:
     future<> touch_and_lock(sstring path) {

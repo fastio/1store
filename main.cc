@@ -29,6 +29,7 @@
 #include "storage_proxy.hh"
 #include "storage_service.hh"
 #include "init.hh"
+#include "release.hh"
 #define PLATFORM "seastar"
 #define VERSION "v1.0"
 #define VERSION_STRING PLATFORM " " VERSION
@@ -49,14 +50,31 @@ int main(int ac, char** av) {
     bool help_version = false;
 
     cfg->add_options(opt_add)
-    ("options-file", bpo::value<sstring>(), "configuration file (i.e. <PEDIS_HOME>/etc/redis.yaml)")
+    ("options-file", bpo::value<sstring>(), "configuration file (i.e. ${REDIS_HOME}/etc/redis.yaml)")
     ("help-loggers", bpo::bool_switch(&help_loggers), "print a list of logger names and exit")
     ("version", bpo::bool_switch(&help_version), "print version number and exit")
     ;
+    if (help_version) {
+        print("%s", pedis_version());
+        return return_value;
+    }
+    if (help_loggers) {
+        init_utils::do_help_loggers();
+        return return_value;
+    }
 
     try {
         return app.run_deprecated(ac, av, [&] {
+            print("Parallel Redis version %s starting ... ", pedis_version());
+
+            init_utils::apply_logger_settings(cfg->default_log_level(), cfg->logger_log_level(), cfg->log_to_stdout(), cfg->log_to_syslog());
+            init_utils::tcp_syncookies_sanity();
+
             return seastar::async([ac, av, cfg, &app, &prometheus_config, &prometheus_server, &return_value] () {
+                auto&& opts = app.configuration();
+                init_utils::read_config(opts, *cfg).get();
+                init_utils::apply_logger_settings(cfg->default_log_level(), cfg->logger_log_level(), cfg->log_to_stdout(), cfg->log_to_syslog());
+
                 auto& db = redis::get_database();
                 auto& server = redis::get_server();
                 auto& redis = redis::get_redis_service();
@@ -118,7 +136,7 @@ int main(int ac, char** av) {
                 listen_options lo;
                 lo.reuse_address = true;
                 prometheus_server.listen(make_ipv4_address({pport})).get();
-                main_log.info("Parallel Redis ... [{}]", port);
+                print(" [SUCCESS]\n");
             }).then_wrapped([&return_value] (auto && f) {
                 try {
                    f.get();
