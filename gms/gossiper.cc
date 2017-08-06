@@ -56,6 +56,8 @@
 #include <seastar/core/metrics.hh>
 #include <chrono>
 #include <boost/range/algorithm/set_algorithm.hpp>
+#include "token_ring_manager.hh"
+#include "db.hh"
 
 namespace gms {
 
@@ -489,7 +491,6 @@ void gossiper::remove_endpoint(inet_address endpoint) {
 
 // Runs inside seastar::async context
 void gossiper::do_status_check() {
-/*
     logger.trace("Performing status check ...");
 
     auto now = this->now();
@@ -520,7 +521,7 @@ void gossiper::do_status_check() {
         // check for dead state removal
         auto expire_time = get_expire_time_for_endpoint(endpoint);
         if (!is_alive && (now > expire_time)
-             && (!service::get_local_storage_service().get_token_metadata().is_member(endpoint))) {
+             && (redis::get_local_ring().is_member(endpoint))) {
             logger.debug("time is expiring for endpoint : {} ({})", endpoint, expire_time.time_since_epoch().count());
             evict_from_membership(endpoint);
         }
@@ -535,7 +536,6 @@ void gossiper::do_status_check() {
             it++;
         }
     }
-*/
 }
 
 // Depends on:
@@ -706,27 +706,23 @@ std::set<inet_address> gossiper::get_live_members() {
 
 std::set<inet_address> gossiper::get_live_token_owners() {
     std::set<inet_address> token_owners;
-/*
     for (auto& member : get_live_members()) {
         auto it = endpoint_state_map.find(member);
-        if (it != endpoint_state_map.end() && !is_dead_state(it->second) && service::get_local_storage_service().get_token_metadata().is_member(member)) {
+        if (it != endpoint_state_map.end() && !is_dead_state(it->second) && redis::get_local_ring().is_member(member)) {
             token_owners.insert(member);
         }
     }
-*/
     return token_owners;
 }
 
 std::set<inet_address> gossiper::get_unreachable_token_owners() {
     std::set<inet_address> token_owners;
-/*
     for (auto&& x : _unreachable_endpoints) {
         auto& endpoint = x.first;
-        if (service::get_local_storage_service().get_token_metadata().is_member(endpoint)) {
+        if (redis::get_local_ring().is_member(endpoint)) {
             token_owners.insert(endpoint);
         }
     }
-*/
     return token_owners;
 }
 
@@ -831,27 +827,15 @@ void gossiper::make_random_gossip_digest(std::vector<gossip_digest>& g_digests) 
         }
         g_digests.push_back(gossip_digest(endpoint, generation, max_version));
     }
-#if 0
-    if (logger.isTraceEnabled()) {
-        StringBuilder sb = new StringBuilder();
-        for (GossipDigest g_digest : g_digests)
-        {
-            sb.append(g_digest);
-            sb.append(" ");
-        }
-        logger.trace("Gossip Digests are : {}", sb);
-    }
-#endif
 }
 
 future<> gossiper::advertise_removing(inet_address endpoint, utils::UUID host_id, utils::UUID local_host_id) {
-/*
     return seastar::async([this, g = this->shared_from_this(), endpoint, host_id, local_host_id] {
         auto& state = endpoint_state_map.at(endpoint);
         // remember this node's generation
         int generation = state.get_heart_beat_state().get_generation();
         logger.info("Removing host: {}", host_id);
-        auto ring_delay = service::get_local_storage_service().get_ring_delay();
+        auto ring_delay = redis::get_local_ring().get_ring_delay();
         logger.info("Sleeping for {}ms to ensure {} does not change", ring_delay.count(), endpoint);
         sleep(ring_delay).get();
         // make sure it did not change
@@ -868,8 +852,6 @@ future<> gossiper::advertise_removing(inet_address endpoint, utils::UUID host_id
         //eps.add_application_state(application_state::REMOVAL_COORDINATOR, storage_service_value_factory().removal_coordinator(local_host_id));
         endpoint_state_map[endpoint] = eps;
     });
-*/
-    return make_ready_future<>();
 }
 
 future<> gossiper::advertise_token_removed(inet_address endpoint, utils::UUID host_id) {
@@ -893,7 +875,6 @@ future<> gossiper::unsafe_assassinate_endpoint(sstring address) {
 }
 
 future<> gossiper::assassinate_endpoint(sstring address) {
-/*
     return get_gossiper().invoke_on(0, [address] (auto&& gossiper) {
         return seastar::async([&gossiper, g = gossiper.shared_from_this(), address] {
             inet_address endpoint(address);
@@ -904,11 +885,11 @@ future<> gossiper::assassinate_endpoint(sstring address) {
             int ver = 9999;
             endpoint_state&& ep_state = is_exist ? endpoint_state_map.at(endpoint) :
                                                    endpoint_state(heart_beat_state(gen, ver));
-            std::vector<dht::token> tokens;
+            std::vector<redis::token> tokens;
             logger.warn("Assassinating {} via gossip", endpoint);
             if (is_exist) {
-                auto& ss = service::get_local_storage_service();
-                auto tokens = ss.get_token_metadata().get_tokens(endpoint);
+                auto& ring = redis::get_local_ring();
+                auto tokens = ring.get_tokens(endpoint);
                 if (tokens.empty()) {
                     logger.warn("Unable to calculate tokens for {}.  Will use a random one", address);
                     throw std::runtime_error(sprint("Unable to calculate tokens for %s", endpoint));
@@ -916,9 +897,9 @@ future<> gossiper::assassinate_endpoint(sstring address) {
 
                 int generation = ep_state.get_heart_beat_state().get_generation();
                 int heartbeat = ep_state.get_heart_beat_state().get_heart_beat_version();
-                logger.info("Sleeping for {} ms to ensure {} does not change", ss.get_ring_delay().count(), endpoint);
+                logger.info("Sleeping for {} ms to ensure {} does not change", redis::get_local_ring().get_ring_delay().count(), endpoint);
                 // make sure it did not change
-                sleep(ss.get_ring_delay()).get();
+                sleep(redis::get_local_ring().get_ring_delay()).get();
 
                 auto it = endpoint_state_map.find(endpoint);
                 if (it == endpoint_state_map.end()) {
@@ -936,16 +917,14 @@ future<> gossiper::assassinate_endpoint(sstring address) {
             }
 
             // do not pass go, do not collect 200 dollars, just gtfo
-            std::unordered_set<dht::token> tokens_set(tokens.begin(), tokens.end());
-            auto expire_time = gossiper.compute_expire_time();
+            //std::unordered_set<redis::token> tokens_set(tokens.begin(), tokens.end());
+            //auto expire_time = gossiper.compute_expire_time();
             //ep_state.add_application_state(application_state::STATUS, storage_service_value_factory().left(tokens_set, expire_time.time_since_epoch().count()));
             gossiper.handle_major_state_change(endpoint, ep_state);
             sleep(INTERVAL * 4).get();
             logger.warn("Finished assassinating {}", endpoint);
         });
     });
-*/ 
-    return make_ready_future<>();
 }
 
 bool gossiper::is_known_endpoint(inet_address endpoint) {
@@ -1028,16 +1007,13 @@ future<> gossiper::do_gossip_to_seed(gossip_digest_syn prod) {
 }
 
 bool gossiper::is_gossip_only_member(inet_address endpoint) {
-/*
     auto it = endpoint_state_map.find(endpoint);
     if (it == endpoint_state_map.end()) {
         return false;
     }
     auto& eps = it->second;
-    auto& ss = service::get_local_storage_service();
-    return !is_dead_state(eps) && !ss.get_token_metadata().is_member(endpoint);
-*/
-    return false;
+    auto& ring = redis::get_local_ring();
+    return !is_dead_state(eps) && !ring.is_member(endpoint);
 }
 
 clk::time_point gossiper::get_expire_time_for_endpoint(inet_address endpoint) {
@@ -1458,7 +1434,6 @@ future<> gossiper::start_gossiping(int generation_nbr, std::map<application_stat
 }
 
 future<> gossiper::do_shadow_round() {
-/*
     return seastar::async([this, g = this->shared_from_this()] {
         build_seeds_list();
         _in_shadow_round = true;
@@ -1481,9 +1456,9 @@ future<> gossiper::do_shadow_round() {
                     logger.trace("Fail to send GossipDigestSyn (ShadowRound) to {}: {}", id, ep);
                 });
             }
-            auto& ss = service::get_local_storage_service();
+            auto& ring = redis::get_local_ring();
             sleep(std::chrono::seconds(1)).get();
-            if (clk::now() > t + ss.get_ring_delay() * 10) {
+            if (clk::now() > t + ring.get_ring_delay() * 10) {
                 throw std::runtime_error(sprint("Unable to gossip with any seeds (ShadowRound)"));
             }
             if (this->_in_shadow_round) {
@@ -1491,8 +1466,6 @@ future<> gossiper::do_shadow_round() {
             }
         }
     });
-*/
-            return make_ready_future<>();
 }
 
 void gossiper::build_seeds_list() {
@@ -1539,7 +1512,6 @@ void gossiper::add_saved_endpoint(inet_address ep) {
 // - before_change callbacks
 // - on_change callbacks
 future<> gossiper::add_local_application_state(application_state state, versioned_value value) {
-/*
     return get_gossiper().invoke_on(0, [state, value = std::move(value)] (auto& gossiper) mutable {
         return seastar::async([&gossiper, g = gossiper.shared_from_this(), state, value = std::move(value)] () mutable {
             inet_address ep_addr = gossiper.get_broadcast_address();
@@ -1566,8 +1538,6 @@ future<> gossiper::add_local_application_state(application_state state, versione
             logger.warn("Fail to apply application_state: {}", ep);
         });
     });
-*/
-    return make_ready_future<>();
 }
 
 future<> gossiper::do_stop_gossiping() {
@@ -1746,9 +1716,8 @@ sstring gossiper::get_gossip_status(const inet_address& endpoint) const {
 }
 
 future<> gossiper::wait_for_gossip_to_settle() {
-/*
     return seastar::async([this] {
-        auto& cfg = service::get_local_storage_service().db().local().get_config();
+        auto& cfg = redis::get_local_database().get_config();
         auto force_after = cfg.skip_wait_for_gossip_to_settle();
         if (force_after == 0) {
             return;
@@ -1782,8 +1751,6 @@ future<> gossiper::wait_for_gossip_to_settle() {
             logger.info("No gossip backlog; proceeding");
         }
     });
-*/
-    return make_ready_future<>();
 }
 
 bool gossiper::is_safe_for_bootstrap(inet_address endpoint) {
