@@ -341,7 +341,7 @@ libs = ' '.join(['-laio',
                               '-lboost_program_options -lboost_system -lboost_filesystem'),
                  '-lstdc++ -lm',
                  maybe_static(args.staticboost, '-lboost_thread'),
-                 '-lcryptopp -lrt -lgnutls -lgnutlsxx -llz4 -lprotobuf -ldl -lgcc_s -lunwind',
+                 '-lcryptopp -lrt -lgnutls -lgnutlsxx -llz4 -lprotobuf -ldl -lgcc_s -lunwind -lyaml-cpp',
                  ])
 
 boost_unit_test_lib = maybe_static(args.staticboost, '-lboost_unit_test_framework')
