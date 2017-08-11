@@ -168,7 +168,7 @@ future<> init_message_failuredetector_gossiper(sstring listen_address
                 , sstring ms_cert
                 , sstring ms_key
                 , sstring ms_compress
-                , redis::seed_provider_type seed_provider
+                , sstring seeds 
                 , sstring cluster_name = "Test Cluster"
                 , double phi = 8
                 , bool sltba = false);

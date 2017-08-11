@@ -39,7 +39,7 @@ future<> init_message_failuredetector_gossiper(sstring listen_address
                 , sstring ms_cert
                 , sstring ms_key
                 , sstring ms_compress
-                , redis::seed_provider_type seed_provider
+                , sstring seeds_str 
                 , sstring cluster_name
                 , double phi
                 , bool sltba)
@@ -94,15 +94,12 @@ future<> init_message_failuredetector_gossiper(sstring listen_address
     //engine().at_exit([]{ return gms::get_failure_detector().stop(); });
     // Init gossiper
     std::set<gms::inet_address> seeds;
-    if (seed_provider.parameters.count("seeds") > 0) {
-        size_t begin = 0;
-        size_t next = 0;
-        sstring seeds_str = seed_provider.parameters.find("seeds")->second;
-        while (begin < seeds_str.length() && begin != (next=seeds_str.find(",",begin))) {
-            auto seed = boost::trim_copy(seeds_str.substr(begin,next-begin));
-            seeds.emplace(gms::inet_address(std::move(seed)));
-            begin = next+1;
-        }
+    size_t begin = 0;
+    size_t next = 0;
+    while (begin < seeds_str.length() && begin != (next=seeds_str.find(",",begin))) {
+        auto seed = boost::trim_copy(seeds_str.substr(begin,next-begin));
+        seeds.emplace(gms::inet_address(std::move(seed)));
+        begin = next+1;
     }
     if (seeds.empty()) {
         seeds.emplace(gms::inet_address("127.0.0.1"));

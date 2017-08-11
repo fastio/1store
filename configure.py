@@ -320,6 +320,7 @@ gms = [
         'gms/failure_detector.cc',
         'gms/gossip_digest_ack.cc',
         'gms/gossiper.cc',
+        'gms/inet_address.cc',
         ]
 idls = [
         'idl/gossip_digest.idl.hh',

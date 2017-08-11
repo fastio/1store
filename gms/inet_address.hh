@@ -85,7 +85,11 @@ public:
         return os << x._addr;
     }
     friend struct std::hash<inet_address>;
+
+    static future<inet_address> lookup(sstring);
 };
+
+std::ostream& operator<<(std::ostream& os, const inet_address& x);
 
 }
 

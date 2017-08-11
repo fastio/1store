@@ -136,37 +136,6 @@ struct convert<redis::string_map> {
     }
 };
 
-template<>
-struct convert<redis::config::seed_provider_type> {
-    static Node encode(const redis::config::seed_provider_type& rhs) {
-        throw std::runtime_error("should not reach");
-    }
-    static bool decode(const Node& node, redis::config::seed_provider_type& rhs) {
-        if (!node.IsSequence()) {
-            return false;
-        }
-        rhs = redis::config::seed_provider_type();
-        for (auto& n : node) {
-            if (!n.IsMap()) {
-                continue;
-            }
-            for (auto& n2 : n) {
-                if (n2.first.as<sstring>() == "class_name") {
-                    rhs.class_name = n2.second.as<sstring>();
-                }
-                if (n2.first.as<sstring>() == "parameters") {
-                    auto v = n2.second.as<std::vector<redis::config::string_map>>();
-                    if (!v.empty()) {
-                        rhs.parameters = v.front();
-                    }
-                }
-            }
-        }
-        return true;
-    }
-};
-
-
 }
 
 namespace db {
@@ -218,16 +187,6 @@ struct do_value_opt<T, redis::config::value_status::Used> {
     template<typename Func>
     void operator()(Func&& func, const char* name, const T& dflt, T * dst, redis::config::config_source & src, const char* desc) const {
         func(name, dflt, dst, src, desc);
-    }
-};
-
-template<>
-struct do_value_opt<redis::config::seed_provider_type, redis::config::value_status::Used> {
-    using seed_provider_type = redis::config::seed_provider_type;
-    template<typename Func>
-    void operator()(Func&& func, const char* name, const seed_provider_type& dflt, seed_provider_type * dst, redis::config::config_source & src, const char* desc) const {
-        func((sstring(name) + "_class_name").c_str(), dflt.class_name, &dst->class_name, src, desc);
-        func((sstring(name) + "_parameters").c_str(), dflt.parameters, &dst->parameters, src, desc);
     }
 };
 
@@ -307,9 +266,6 @@ bpo::options_description_easy_init& redis::config::add_options(bpo::options_desc
 
     // Handle "old" syntax with "aliases"
     alias_add("datadir", data_file_directories, "alias for 'data-file-directories'");
-    alias_add("thrift-port", rpc_port, "alias for 'rpc-port'");
-    alias_add("cql-port", native_transport_port, "alias for 'native-transport-port'");
-
     return init;
 }
 

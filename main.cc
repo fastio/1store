@@ -30,6 +30,9 @@
 #include "storage_service.hh"
 #include "init.hh"
 #include "release.hh"
+#include "gms/gossiper.hh"
+#include "gms/inet_address.hh"
+#include "utils/fb_utilities.hh"
 #define PLATFORM "seastar"
 #define VERSION "v1.0"
 #define VERSION_STRING PLATFORM " " VERSION
@@ -90,9 +93,8 @@ int main(int ac, char** av) {
                 engine().at_exit([&] { return ss.stop(); });
                 engine().at_exit([&] { return prometheus_server.stop(); });
 
-                auto&& config = app.configuration();
-                auto port = config["port"].as<uint16_t>();
-                auto pport = config["prometheus_port"].as<uint16_t>();
+                auto port = cfg->service_port();
+                auto pport = cfg->prometheus_port();
                 // start databse
                 db.start().get();
 
@@ -101,9 +103,20 @@ int main(int ac, char** av) {
                 uint16_t storage_port = cfg->storage_port();
                 uint16_t ssl_storage_port = cfg->ssl_storage_port();
                 double phi = cfg->phi_convict_threshold();
-                auto seed_provider= cfg->seed_provider();
+                auto seeds = cfg->seeds();
                 sstring cluster_name = cfg->cluster_name();
 
+                if (!listen_address.empty()) {
+                    try {
+                        utils::fb_utilities::set_broadcast_address(gms::inet_address::lookup(listen_address).get0());
+                    } catch (...) {
+                        startlog.error("Bad configuration: invalid 'listen_address': {}: {}", listen_address, std::current_exception());
+                        throw bad_configuration_error();
+                    }
+                } else {
+                    startlog.error("Bad configuration: listen_address was not defined\n");
+                    throw bad_configuration_error();
+                }
                 const auto& ssl_opts = cfg->server_encryption_options();
                 auto encrypt_what = init_utils::get_or_default(ssl_opts, "internode_encryption", "none");
                 auto trust_store = init_utils::get_or_default(ssl_opts, "truststore");
@@ -118,17 +131,18 @@ int main(int ac, char** av) {
                         , cert
                         , key
                         , cfg->internode_compression()
-                        , seed_provider
+                        , seeds 
                         , cluster_name
                         , phi
                         , cfg->listen_on_broadcast_address()
                 ).get();
 
-                server.start(port).get();
-                server.invoke_on_all(&redis::server::start).get();
                 token_ring.start().get();
                 proxy.start().get();
                 ss.start().get();
+
+                gms::get_local_gossiper().wait_for_gossip_to_settle().get();
+
                 prometheus_config.metric_help = "Redis server statistics";
                 prometheus_config.prefix = "redis";
                 prometheus_server.start("prometheus").get();
@@ -136,6 +150,8 @@ int main(int ac, char** av) {
                 listen_options lo;
                 lo.reuse_address = true;
                 prometheus_server.listen(make_ipv4_address({pport})).get();
+                server.start(port).get();
+                server.invoke_on_all(&redis::server::start).get();
                 print(" [SUCCESS]\n");
             }).then_wrapped([&return_value] (auto && f) {
                 try {

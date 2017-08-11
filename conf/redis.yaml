@@ -1,0 +1,102 @@
+# Redis config YAML
+# This config file is copied from Scylla [https://github.com/scylladb/scylla], and modified by Pedis. 
+#
+#######################################
+# This file is split to two sections:
+# 1. Supported parameters
+# 2. Unsupported parameters: reserved for future use or backwards
+#    compatibility.
+# Scylla will only read and use the first segment
+#######################################
+
+### Supported Parameters
+
+# The name of the cluster. This is mainly used to prevent machines in
+# one logical cluster from joining another.
+cluster_name: 'Test'
+
+# This defines the number of tokens randomly assigned to this node on the ring
+# The more tokens, relative to other nodes, the larger the proportion of data
+# that this node will store. You probably want all nodes to have the same number
+# of tokens assuming they have equal hardware capability.
+#
+# If you already have a cluster with 1 token per node, and wish to migrate to 
+# multiple tokens per node, see http://wiki.apache.org/cassandra/Operations
+num_tokens: 256
+
+# Directory where Scylla should store data on disk.
+# If not set, the default directory is $CASSANDRA_HOME/data/data.
+data_file_directories:
+    - ${REDIS_HOME}/data
+
+# commit log.  when running on magnetic HDD, this should be a
+# separate spindle than the data directories.
+# If not set, the default directory is $CASSANDRA_HOME/data/commitlog.
+commitlog_directory: ${REDIS_HOME}/commitlog
+
+# commitlog_sync may be either "periodic" or "batch."
+#
+# the other option is "periodic" where writes may be acked immediately
+# and the CommitLog is simply synced every commitlog_sync_period_in_ms
+# milliseconds.
+commitlog_sync: periodic
+commitlog_sync_period_in_ms: 10000
+
+# The size of the individual commitlog file segments.  A commitlog
+# segment may be archived, deleted, or recycled once all the data
+# in it (potentially from each columnfamily in the system) has been
+# flushed to sstables.
+#
+# The default size is 32, which is almost always fine, but if you are
+# archiving commitlog segments (see commitlog_archiving.properties),
+# then you probably want a finer granularity of archiving; 8 or 16 MB
+# is reasonable.
+commitlog_segment_size_in_mb: 32
+
+# seeds address are mandatory!
+seeds: "127.0.0.1"
+
+# Address or interface to bind to and tell other Scylla nodes to connect to.
+# You _must_ change this if you want multiple nodes to be able to communicate!
+#
+# Setting listen_address to 0.0.0.0 is always wrong.
+listen_address: localhost
+
+# Address to broadcast to other Scylla nodes
+# Leaving this blank will set it to the same value as listen_address
+# broadcast_address: 1.2.3.4
+
+# port for the CQL native transport to listen for clients on
+# For security reasons, you should not expose this port to the internet.  Firewall it if needed.
+service_port: 6379 
+
+# Throttles all outbound streaming file transfers on this node to the
+# given total throughput in Mbps. This is necessary because Scylla does
+# mostly sequential IO when streaming data during bootstrap or repair, which
+# can lead to saturating the network connection and degrading rpc performance.
+# When unset, the default is 200 Mbps or 25 MB/s.
+# stream_throughput_outbound_megabits_per_sec: 200
+
+# How long the coordinator should wait for read operations to complete
+read_request_timeout_in_ms: 5000
+
+# How long the coordinator should wait for writes to complete
+write_request_timeout_in_ms: 2000
+
+# phi value that must be reached for a host to be marked down.
+# most users should never need to adjust this.
+# phi_convict_threshold: 8
+
+# port for REST API server
+api_port: 10000
+
+# IP for the REST API server
+api_address: 127.0.0.1
+
+# Log WARN on any batch size exceeding this value. 5kb per batch by default.
+# Caution should be taken on increasing the size of this threshold as it can lead to node instability.
+batch_size_warn_threshold_in_kb: 5
+
+# A value of -1 (default) will automatically equate it to the total amount of memory
+# available for Scylla.
+commitlog_total_space_in_mb: -1
