@@ -1,6 +1,6 @@
 # Pedis (Parallel Redis)
 
-** It's a new start for Pedis which will be constructed based on Scylla.**
+**It's a new start for Pedis which will be constructed based on Scylla.**
 
 ## What's Pedis?
 
