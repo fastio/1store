@@ -1,0 +1,185 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Copyright (C) 2015 ScyllaDB
+ *
+ * Modified by ScyllaDB
+ */
+
+/*
+ * This file is part of Scylla.
+ *
+ * Scylla is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Scylla is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#include "partition_range_compat.hh"
+#include "db/consistency_level.hh"
+#include "db/commitlog/commitlog.hh"
+#include "redis_storage_proxy.hh"
+#include "unimplemented.hh"
+#include "frozen_mutation.hh"
+#include "query_result_merger.hh"
+#include "core/do_with.hh"
+#include "message/messaging_service.hh"
+#include "gms/failure_detector.hh"
+#include "gms/gossiper.hh"
+#include "storage_service.hh"
+#include "core/future-util.hh"
+#include "db/read_repair_decision.hh"
+#include "db/config.hh"
+#include "db/batchlog_manager.hh"
+#include "exceptions/exceptions.hh"
+#include <boost/range/algorithm_ext/push_back.hpp>
+#include <boost/iterator/counting_iterator.hpp>
+#include <boost/range/adaptors.hpp>
+#include <boost/algorithm/cxx11/any_of.hpp>
+#include <boost/algorithm/cxx11/none_of.hpp>
+#include <boost/range/algorithm/count_if.hpp>
+#include <boost/range/algorithm/find.hpp>
+#include <boost/range/algorithm/find_if.hpp>
+#include <boost/range/algorithm/remove_if.hpp>
+#include <boost/range/algorithm/heap_algorithm.hpp>
+#include <boost/range/numeric.hpp>
+#include <boost/range/algorithm/sort.hpp>
+#include <boost/range/empty.hpp>
+#include <boost/range/algorithm/min_element.hpp>
+#include <boost/range/adaptor/transformed.hpp>
+#include "utils/latency.hh"
+#include "schema.hh"
+#include "schema_registry.hh"
+#include "utils/joinpoint.hh"
+#include <seastar/util/lazy.hh>
+#include "core/metrics.hh"
+#include <core/execution_stage.hh>
+#include "redis/redis_service.hh"
+#include "redis/request_wrapper.hh"
+#include "redis/result.hh"
+#include "redis/reply_builder.hh"
+#include "redis/redis_command_code.hh"
+
+namespace service {
+using namespace seastar;
+static logging::logger slogger("redis_storage_proxy");
+static logging::logger qlogger("query_result");
+static logging::logger mlogger("mutation_data");
+
+distributed<service::redis_storage_proxy> _the_redis_storage_proxy;
+
+using namespace exceptions;
+
+static inline bool is_me(gms::inet_address from) {
+    return from == utils::fb_utilities::get_broadcast_address();
+}
+
+static inline sstring get_dc(gms::inet_address ep) {
+    auto& snitch_ptr = locator::i_endpoint_snitch::get_local_snitch_ptr();
+    return snitch_ptr->get_datacenter(ep);
+}
+
+static inline sstring get_local_dc() {
+    auto local_addr = utils::fb_utilities::get_broadcast_address();
+    return get_dc(local_addr);
+}
+
+redis_storage_proxy::redis_storage_proxy() {
+
+}
+
+redis_storage_proxy::~redis_storage_proxy() {
+}
+
+future<>
+redis_storage_proxy::stop() {
+    uninit_messaging_service();
+    return make_ready_future<>();
+}
+
+std::vector<gms::inet_address> redis_storage_proxy::get_live_endpoints(const dht::token& token) {
+/*
+    auto& ks = get_redis_keyspace();
+    auto& rs = ks.get_replication_strategy();
+    std::vector<gms::inet_address> eps = rs.get_natural_endpoints(token);
+    auto itend = boost::range::remove_if(eps, std::not1(std::bind1st(std::mem_fn(&gms::failure_detector::is_alive), &gms::get_local_failure_detector())));
+    eps.erase(itend, eps.end());
+    return std::move(eps);
+*/
+    return {};
+}
+
+future<> redis_storage_proxy::proxy_command_to_endpoint(gms::inet_address addr, const redis::request_wrapper& req) {
+    return make_ready_future<>();
+}
+    
+dht::decorated_key redis_storage_proxy::construct_decorated_key_from(const bytes& key) const {
+    auto& partitioner = dht::global_partitioner();
+    return { partitioner.get_token(key), std::move(partition_key::from_bytes(key)) };
+}
+
+future<> redis_storage_proxy::execute_command_set(const redis::request_wrapper& req, output_stream<char>& out)
+{
+    /*
+    if (req._args_count != 2) {
+        return redis::reply_builder::build_invalid_argument_message(out);
+    }
+    auto dk = construct_decorated_key_from(req._args[0]);
+    auto targets = get_live_endpoints(dk.token());
+    if (targets.empty()) {
+        return redis::reply_builder::build_system_error_message(out);
+    }
+    if (is_me(targets[0])) {
+        return get_local_redis_service().set(req, out);
+    }
+    return proxy_command_to_endpoint(targets[0], req).then([this, &out] (auto result) {
+        return redis::reply_builder::build(result, out);
+    });
+    */
+    return make_ready_future<>();
+}
+
+future<> redis_storage_proxy::execute_command_get(const redis::request_wrapper& req, output_stream<char>& out)
+{
+    return make_ready_future<>();
+}
+
+future<> redis_storage_proxy::execute_command_del(const redis::request_wrapper& req, output_stream<char>& out)
+{
+    return make_ready_future<>();
+}
+
+future<> redis_storage_proxy::execute(const redis::request_wrapper& req, output_stream<char>& out) {
+    switch (req._command) {
+        case redis::command_code::set: return execute_command_set(req, out);
+        case redis::command_code::get: return execute_command_get(req, out);
+        case redis::command_code::del: return execute_command_del(req, out);
+        default:
+            return make_ready_future<>();
+    }
+}
+}

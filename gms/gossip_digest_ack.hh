@@ -38,9 +38,7 @@
 
 #pragma once
 
-#include <vector>
-#include <map>
-#include <iostream>
+#include "types.hh"
 #include "utils/serialization.hh"
 #include "gms/gossip_digest.hh"
 #include "gms/inet_address.hh"

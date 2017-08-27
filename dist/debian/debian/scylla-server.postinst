@@ -1,0 +1,37 @@
+#!/bin/sh
+
+set -e
+
+if [ "$1" = configure ]; then
+    getent passwd scylla || NOUSR=1
+    getent group scylla || NOGRP=1
+
+    # this handles both case group is not exist || group already exists
+    if [ $NOUSR ]; then
+        adduser --system \
+                --quiet \
+                --home /var/lib/scylla \
+                --no-create-home \
+                --disabled-password \
+                --group scylla
+    # only group is not exist, create it and add user to the group
+    elif [ $NOGRP ]; then
+        addgroup --system scylla
+        adduser scylla scylla
+    fi
+    chown -R scylla:scylla /var/lib/scylla
+    chown -R scylla:scylla /var/lib/scylla-housekeeping
+fi
+
+ln -sfT /etc/scylla /var/lib/scylla/conf
+
+grep -v api_ui_dir /etc/scylla/scylla.yaml | grep -v api_doc_dir > /tmp/scylla.yaml
+echo "api_ui_dir: /usr/lib/scylla/swagger-ui/dist/" >> /tmp/scylla.yaml
+echo "api_doc_dir: /usr/lib/scylla/api/api-doc/" >> /tmp/scylla.yaml
+mv /tmp/scylla.yaml /etc/scylla/scylla.yaml
+
+if [ -d /etc/collectd/ ] && [ ! -e /etc/collectd/collectd.conf ]; then
+    zcat /usr/share/doc/scylla-server/collectd.conf.example.gz > /etc/collectd/collectd.conf
+fi
+
+#DEBHELPER#

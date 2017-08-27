@@ -38,6 +38,7 @@
 
 #pragma once
 
+#include "unimplemented.hh"
 #include "core/distributed.hh"
 #include "core/shared_ptr.hh"
 #include "core/print.hh"
@@ -56,7 +57,7 @@
 #include <set>
 #include <seastar/core/condition-variable.hh>
 #include <seastar/core/metrics_registration.hh>
-#include <random>
+
 namespace gms {
 
 class gossip_digest_syn;
@@ -83,11 +84,11 @@ class gossiper : public i_failure_detection_event_listener, public seastar::asyn
 public:
     using clk = std::chrono::system_clock;
 private:
-    using messaging_verb = net::messaging_verb;
-    using messaging_service = net::messaging_service;
-    using msg_addr = net::msg_addr;
-    net::messaging_service& ms() {
-        return net::get_local_messaging_service();
+    using messaging_verb = netw::messaging_verb;
+    using messaging_service = netw::messaging_service;
+    using msg_addr = netw::msg_addr;
+    netw::messaging_service& ms() {
+        return netw::get_local_messaging_service();
     }
     void init_messaging_service_handler();
     void uninit_messaging_service_handler();
@@ -123,18 +124,14 @@ public:
     std::unordered_map<inet_address, endpoint_state> shadow_endpoint_state_map;
 
     const std::vector<sstring> DEAD_STATES = {
-        /*
-           versioned_value::REMOVING_TOKEN,
-           versioned_value::REMOVED_TOKEN,
-        */
+        versioned_value::REMOVING_TOKEN,
+        versioned_value::REMOVED_TOKEN,
         versioned_value::STATUS_LEFT,
         versioned_value::HIBERNATE
     };
     const std::vector<sstring> SILENT_SHUTDOWN_STATES = {
-        /*
         versioned_value::REMOVING_TOKEN,
         versioned_value::REMOVED_TOKEN,
-        */
         versioned_value::STATUS_LEFT,
         versioned_value::HIBERNATE,
         versioned_value::STATUS_BOOTSTRAPPING,
@@ -150,6 +147,7 @@ public:
 private:
 
     std::random_device _random;
+    std::default_random_engine _random_engine{_random()};
 
     /**
      * subscribers for interest in EndpointState change
@@ -187,7 +185,7 @@ private:
     } _subscribers;
 
     /* live member set */
-    std::set<inet_address> _live_endpoints;
+    std::vector<inet_address> _live_endpoints;
     std::list<inet_address> _live_endpoints_just_added;
 
     /* nodes are being marked as alive */
@@ -212,7 +210,7 @@ private:
     clk::time_point _last_processed_message_at = now();
 
     std::map<inet_address, clk::time_point> _shadow_unreachable_endpoints;
-    std::set<inet_address> _shadow_live_endpoints;
+    std::vector<inet_address> _shadow_live_endpoints;
 
     void run();
 public:
@@ -372,8 +370,8 @@ private:
      */
     future<> send_gossip(gossip_digest_syn message, std::set<inet_address> epset);
 
-    /* Sends a Gossip message to a live member and returns true if the recipient was a seed */
-    future<> do_gossip_to_live_member(gossip_digest_syn message);
+    /* Sends a Gossip message to a live member */
+    future<> do_gossip_to_live_member(gossip_digest_syn message, inet_address ep);
 
     /* Sends a Gossip message to an unreachable member */
     future<> do_gossip_to_unreachable_member(gossip_digest_syn message);
@@ -507,6 +505,7 @@ public:
     void debug_show();
 public:
     bool is_shutdown(const inet_address& endpoint) const;
+    bool is_normal(const inet_address& endpoint) const;
     bool is_silent_shutdown_state(const endpoint_state& ep_state) const;
     void mark_as_shutdown(const inet_address& endpoint);
     void force_newer_generation();

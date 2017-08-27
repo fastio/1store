@@ -37,7 +37,8 @@
  */
 
 #pragma once
-#include <vector>
+
+#include "types.hh"
 #include "core/sstring.hh"
 #include "utils/serialization.hh"
 #include "gms/gossip_digest.hh"

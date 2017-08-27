@@ -1,0 +1,14 @@
+[amzn-main]
+name=amzn-main-Base
+mirrorlist=http://repo.us-east-1.amazonaws.com/latest/main/mirror.list
+mirrorlist_expire=300
+metadata_expire=300
+priority=10
+failovermethod=priority
+fastestmirror_enabled=0
+gpgcheck=0
+enabled=1
+retries=5
+timeout=10
+report_instanceid=yes
+includepkgs=kernel*

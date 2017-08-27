@@ -1,0 +1,132 @@
+#!/bin/bash -e
+#
+#  Copyright (C) 2015 ScyllaDB
+
+. /usr/lib/scylla/scylla_lib.sh
+
+print_usage() {
+    echo "scylla_raid_setup --disks /dev/hda,/dev/hdb... --raiddev /dev/md0 --update-fstab --root /var/lib/scylla --volume-role [all|data|commitlog]"
+    echo "  --disks	specify disks for RAID"
+    echo "  --raiddev	MD device name for RAID"
+    echo "  --update-fstab update /etc/fstab for RAID"
+    echo "  --root specify the root of the tree"
+    echo "  --volume-role specify how will this device be used (data, commitlog, or all)"
+    exit 1
+}
+
+RAID=/dev/md0
+FSTAB=0
+ROOT=/var/lib/scylla
+ROLE="all"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        "--disks")
+            DISKS=`echo "$2"|tr -s ',' ' '`
+            NR_DISK=$((`echo "$2"|grep , -o|wc -w` + 1))
+            shift 2
+            ;;
+        "--raiddev")
+            RAID="$2"
+            shift 2
+            ;;
+        "--update-fstab")
+            FSTAB=1
+            shift 1
+            ;;
+        "--root")
+            ROOT="$2"
+            shift 2
+            ;;
+        "--volume-role")
+            ROLE="$2"
+            shift 2
+            ;;
+        *)
+            print_usage
+            ;;
+    esac
+done
+
+ROOT=${ROOT%/}
+case "$ROLE" in
+    "all")
+        MOUNT_AT=$ROOT
+        ;;
+    "data")
+        MOUNT_AT="$ROOT/data"
+        ;;
+    "commitlog")
+        MOUNT_AT="$ROOT/commitlog"
+        ;;
+    *)
+        echo "Invalid role specified ($ROLE)"
+        print_usage
+        ;;
+esac
+
+if [ "$DISKS" = "" ]; then
+    print_usage
+fi
+
+for dsk in $DISKS; do
+    if [ ! -b $dsk ]; then
+        echo "$dsk is not found"
+        exit 1
+    fi
+done
+
+echo Creating RAID0 for scylla using $NR_DISK disk\(s\): $DISKS
+if [ -e $RAID ]; then
+    echo "$RAID is already using"
+    exit 1
+fi
+if mountpoint -q $MOUNT_AT; then
+    echo "$MOUNT_AT is already mounted"
+    exit 1
+fi
+
+if is_debian_variant; then
+    env DEBIAN_FRONTEND=noninteractive apt-get -y install mdadm xfsprogs
+elif is_gentoo_variant; then
+    emerge -uq sys-fs/mdadm sys-fs/xfsprogs
+else
+    yum -y install mdadm xfsprogs
+fi
+if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "14.04" ]; then
+    mdadm --create --verbose --force --run $RAID --level=0 -c1024 --raid-devices=$NR_DISK $DISKS
+    mkfs.xfs $RAID -f
+else
+    for dsk in $DISKS; do
+        blkdiscard $dsk &
+    done
+    wait
+    mdadm --create --verbose --force --run $RAID --level=0 -c1024 --raid-devices=$NR_DISK $DISKS
+    mkfs.xfs $RAID -f -K
+fi
+if is_debian_variant; then
+    mdadm --detail --scan > /etc/mdadm/mdadm.conf
+else
+    mdadm --detail --scan > /etc/mdadm.conf
+fi
+
+mkdir -p "$MOUNT_AT"
+mount -t xfs -o noatime $RAID "$MOUNT_AT"
+
+# create this unconditionally so we are more robust about ordering
+# if the script is run multiple times. But must do after mount in case
+# we are mounting the root
+mkdir -p "$ROOT/data"
+mkdir -p "$ROOT/commitlog"
+mkdir -p "$ROOT/coredump"
+chown scylla:scylla "$ROOT"
+chown scylla:scylla "$ROOT"/*
+
+if [ $FSTAB -ne 0 ]; then
+    UUID=`blkid $RAID | awk '{print $2}'`
+    echo "$UUID $MOUNT_AT xfs noatime 0 0" >> /etc/fstab
+fi
+
+if is_debian_variant; then
+    update-initramfs -u
+fi
