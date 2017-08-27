@@ -1,1 +1,0 @@
-dist/common/sysctl.d/99-scylla-sched.conf /etc/sysctl.d

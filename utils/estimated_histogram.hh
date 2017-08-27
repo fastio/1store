@@ -45,7 +45,6 @@
 #include <algorithm>
 #include <vector>
 #include <chrono>
-#include "core/metrics_types.hh"
 
 namespace utils {
 
@@ -61,8 +60,6 @@ struct estimated_histogram {
      * to around 36M by default (creating 90+1 buckets), which will give us timing resolution from microseconds to
      * 36 seconds, with less precision as the numbers get larger.
      *
-     * When using the histogram for latency, the values are in microseconds
-     *
      * Each bucket represents values from (previous bucket offset, current offset].
      */
     std::vector<int64_t> bucket_offsets;
@@ -77,43 +74,6 @@ struct estimated_histogram {
         new_offsets(bucket_count);
         buckets.resize(bucket_offsets.size() + 1, 0);
     }
-
-    seastar::metrics::histogram get_histogram(size_t lower_bucket = 1, size_t max_buckets = 16) const {
-        seastar::metrics::histogram res;
-        res.buckets.resize(max_buckets);
-        double last_bound = lower_bucket;
-        size_t pos = 0;
-        size_t last = buckets.size() - 1;
-        while (last > 0 && buckets[last] == 0) {
-            last--;
-        }
-        res.sample_count = _count;
-        for (size_t i = 0; i < res.buckets.size(); i++) {
-            auto& v = res.buckets[i];
-            v.upper_bound = last_bound;
-
-            while (bucket_offsets[pos] <= last_bound) {
-                if (pos > last) {
-                    res.buckets.resize(i + 1);
-                    return res;
-                }
-                v.count += buckets[pos];
-                pos++;
-            }
-            last_bound *= 2;
-        }
-        while (pos < buckets.size()) {
-            res.buckets[max_buckets - 1].count += buckets[pos];
-            pos++;
-        }
-
-        return res;
-    }
-
-    seastar::metrics::histogram get_histogram(duration minmal_latency, size_t max_buckets = 16) const {
-        return get_histogram(std::chrono::duration_cast<std::chrono::microseconds>(minmal_latency).count(), max_buckets);
-    }
-
 
     // FIXME: convert Java code below.
 #if 0
@@ -157,8 +117,7 @@ public:
     }
 
     void clear() {
-        std::fill(buckets.begin(), buckets.end(), 0);
-        _count = 0;
+        buckets.resize(buckets.size(), 0);
     }
     /**
      * Increments the count of the bucket closest to n, rounding UP.

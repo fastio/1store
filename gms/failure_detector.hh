@@ -38,7 +38,6 @@
 
 #pragma once
 
-#include "unimplemented.hh"
 #include "core/sstring.hh"
 #include "core/shared_ptr.hh"
 #include "core/distributed.hh"
@@ -86,8 +85,6 @@ public:
 
     // see CASSANDRA-2597 for an explanation of the math at work here.
     double phi(clk::time_point tnow);
-
-    size_t size() { return _arrival_intervals.size(); }
 
     friend std::ostream& operator<<(std::ostream& os, const arrival_window& w);
 

@@ -22,7 +22,6 @@
 #include <seastar/core/bitops.hh>
 
 #include "utils/dynamic_bitset.hh"
-#include "seastarx.hh"
 
 namespace utils {
 

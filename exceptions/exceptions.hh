@@ -41,8 +41,6 @@
 
 #pragma once
 
-#include "db/consistency_level_type.hh"
-#include "db/write_type.hh"
 #include <stdexcept>
 #include "core/sstring.hh"
 #include "core/print.hh"
@@ -102,9 +100,8 @@ public:
         : exceptions::cassandra_exception{exceptions::exception_code::PROTOCOL_ERROR, std::move(msg)}
     { }
 };
-
+/*
 struct unavailable_exception : cassandra_exception {
-    db::consistency_level consistency;
     int32_t required;
     int32_t alive;
 
@@ -115,7 +112,7 @@ struct unavailable_exception : cassandra_exception {
         , alive(alive)
     {}
 };
-
+*/
 class request_execution_exception : public cassandra_exception {
 public:
     request_execution_exception(exception_code code, sstring msg) noexcept
@@ -129,6 +126,7 @@ public:
     truncate_exception(std::exception_ptr ep);
 };
 
+/*
 class request_timeout_exception : public cassandra_exception {
 public:
     db::consistency_level consistency;
@@ -169,11 +167,6 @@ struct overloaded_exception : public cassandra_exception {
 class request_validation_exception : public cassandra_exception {
 public:
     using cassandra_exception::cassandra_exception;
-};
-
-class invalidated_prepared_usage_attempt_exception : public exceptions::request_validation_exception {
-public:
-    invalidated_prepared_usage_attempt_exception() : request_validation_exception{exception_code::UNPREPARED, "Attempt to execute the invalidated prepared statement."} {}
 };
 
 class unauthorized_exception: public request_validation_exception {
@@ -264,5 +257,5 @@ public:
     unsupported_operation_exception() : std::runtime_error("unsupported operation") {}
     unsupported_operation_exception(const sstring& msg) : std::runtime_error("unsupported operation: " + msg) {}
 };
-
+*/
 }

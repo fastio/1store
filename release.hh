@@ -23,4 +23,4 @@
 
 #include <string>
 
-std::string scylla_version();
+std::string pedis_version();

@@ -31,31 +31,22 @@
 #include <type_traits>
 
 struct blob_storage {
-    struct [[gnu::packed]] ref_type {
-        blob_storage* ptr;
-
-        ref_type() {}
-        ref_type(blob_storage* ptr) : ptr(ptr) {}
-        operator blob_storage*() const { return ptr; }
-        blob_storage* operator->() const { return ptr; }
-        blob_storage& operator*() const { return *ptr; }
-    };
     using size_type = uint32_t;
     using char_type = bytes_view::value_type;
 
-    ref_type* backref;
+    blob_storage** backref;
     size_type size;
     size_type frag_size;
-    ref_type next;
+    blob_storage* next;
     char_type data[];
 
-    blob_storage(ref_type* backref, size_type size, size_type frag_size) noexcept
+    blob_storage(blob_storage** backref, size_type size, size_type frag_size) noexcept
         : backref(backref)
         , size(size)
         , frag_size(frag_size)
         , next(nullptr)
     {
-        *backref = this;
+        *unaligned_cast<blob_storage**>(backref) = this;
     }
 
     blob_storage(blob_storage&& o) noexcept
@@ -64,7 +55,7 @@ struct blob_storage {
         , frag_size(o.frag_size)
         , next(o.next)
     {
-        *backref = this;
+        *unaligned_cast<blob_storage**>(backref) = this;
         o.next = nullptr;
         if (next) {
             next->backref = &next;
@@ -107,10 +98,8 @@ private:
         bytes_view::value_type data[max_inline_size];
         int8_t size; // -1 -> use blob_storage
     };
-    union u {
-        u() {}
-        ~u() {}
-        blob_storage::ref_type ptr;
+    union {
+        blob_storage* ptr;
         small_blob small;
     } _u;
     static_assert(sizeof(small_blob) > sizeof(blob_storage*), "inline size too small");
@@ -213,6 +202,62 @@ public:
 
     managed_bytes(std::initializer_list<bytes::value_type> b) : managed_bytes(b.begin(), b.size()) {}
 
+    managed_bytes(size_type size, const blob_storage::char_type& c) : managed_bytes(initialized_later(), size) {
+        if (!external()) {
+            std::fill_n(_u.small.data, _u.small.size, c);
+            return;
+        }
+        auto b = _u.ptr;
+        while (b) {
+            std::fill_n(b->data, b->frag_size, c);
+            b = b->next;
+        }
+        assert(!b);
+    }
+
+    void extend(size_type new_size, const blob_storage::char_type& v)
+    {
+        assert(new_size > size());
+        if (new_size < max_inline_size) {
+            std::fill(_u.small.data + size(), _u.small.data + new_size, v);
+            _u.small.size = new_size;
+        }
+        else {
+            size_t needed_room_size = size_t(new_size);
+            blob_storage* last = nullptr;
+            auto& alctr = current_allocator();
+            auto maxseg = max_seg(alctr);
+            if (!external()) {
+                auto now = std::min(size_t(needed_room_size), maxseg);
+                void* p = alctr.alloc(&standard_migrator<blob_storage>::object, sizeof(blob_storage) + now, alignof(blob_storage));
+                last = new (p) blob_storage(&_u.ptr, needed_room_size, now);
+                memcpy(last->data, _u.small.data, _u.small.size);
+                std::fill(last->data + _u.small.size, last->data + now, v);
+                needed_room_size -= now;
+                _u.small.size = -1;
+            }
+            else {
+                last = _u.ptr;
+                last->size = needed_room_size;
+                while (last->next) {
+                    last = last->next;
+                }
+            }
+            try {
+                while (needed_room_size) {
+                    auto now = std::min(size_t(needed_room_size), maxseg);
+                    void* p = alctr.alloc(&standard_migrator<blob_storage>::object, sizeof(blob_storage) + now, alignof(blob_storage));
+                    last = new (p) blob_storage(&last->next, 0, now);
+                    std::fill(last->data, last->data + now, v);
+                    needed_room_size -= now;
+                }
+            } catch (...) {
+                free_chain(last);
+                throw;
+            }
+        }
+    }
+
     ~managed_bytes() noexcept {
         if (external()) {
             free_chain(_u.ptr);
@@ -225,23 +270,23 @@ public:
             return;
         }
         auto s = size();
-        const blob_storage::ref_type* next_src = &o._u.ptr;
+        blob_storage* const* next_src = &o._u.ptr;
         blob_storage* blob_src = nullptr;
         size_type size_src = 0;
         size_type offs_src = 0;
-        blob_storage::ref_type* next_dst = &_u.ptr;
+        blob_storage** next_dst = &_u.ptr;
         blob_storage* blob_dst = nullptr;
         size_type size_dst = 0;
         size_type offs_dst = 0;
         while (s) {
             if (!size_src) {
-                blob_src = *next_src;
+                blob_src = *unaligned_cast<blob_storage**>(next_src);
                 next_src = &blob_src->next;
                 size_src = blob_src->frag_size;
                 offs_src = 0;
             }
             if (!size_dst) {
-                blob_dst = *next_dst;
+                blob_dst = *unaligned_cast<blob_storage**>(next_dst);
                 next_dst = &blob_dst->next;
                 size_dst = blob_dst->frag_size;
                 offs_dst = 0;
@@ -330,15 +375,6 @@ public:
         return { data(), size() };
     }
 
-    bool is_fragmented() const {
-        return external() && _u.ptr->next;
-    }
-
-    operator bytes_mutable_view() {
-        assert(!is_fragmented());
-        return { data(), size() };
-    };
-
     bytes_view::value_type& operator[](size_type index) {
         return value_at_index(index);
     }
@@ -426,11 +462,4 @@ struct hash<managed_bytes> {
     }
 };
 
-}
-
-// blob_storage is a variable-size type
-inline
-size_t
-size_for_allocation_strategy(const blob_storage& bs) {
-    return sizeof(bs) + bs.frag_size;
 }

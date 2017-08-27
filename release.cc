@@ -23,14 +23,12 @@
 
 #include <seastar/core/print.hh>
 
-static const char scylla_version_str[] = SCYLLA_VERSION;
-static const char scylla_release_str[] = SCYLLA_RELEASE;
 
-std::string scylla_version()
+std::string pedis_version()
 {
-    return sprint("%s-%s", scylla_version_str, scylla_release_str);
+    return sprint("0.0.1");
 }
 
 // get the version number into writeable memory, so we can grep for it if we get a core dump
 std::string version_stamp_for_core
-    = "VERSION VERSION VERSION $Id: " + scylla_version() + " $ VERSION VERSION VERSION";
+    = "VERSION VERSION VERSION $Id: " + pedis_version() + " $ VERSION VERSION VERSION";
