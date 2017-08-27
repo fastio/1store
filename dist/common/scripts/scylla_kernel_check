@@ -1,0 +1,37 @@
+#!/bin/bash -e
+#
+#  Copyright (C) 2016 ScyllaDB
+
+. /usr/lib/scylla/scylla_lib.sh
+
+if [ ! -f /sbin/mkfs.xfs ]; then
+    if is_debian_variant; then
+        apt-get install -y xfsprogs
+    elif is_gentoo_variant; then
+        emerge -uq sys-fs/xfsprogs
+    else
+        yum install -y xfsprogs
+    fi
+fi
+
+mkdir -p /var/tmp/mnt
+dd if=/dev/zero of=/var/tmp/kernel-check.img bs=1M count=128 > /dev/null 2>&1
+mkfs.xfs /var/tmp/kernel-check.img > /dev/null
+mount /var/tmp/kernel-check.img /var/tmp/mnt -o loop
+iotune --fs-check --evaluation-directory /var/tmp/mnt > /dev/null 2>&1 &&:
+RET=$?
+umount /var/tmp/mnt
+rm -rf /var/tmp/mnt
+rm /var/tmp/kernel-check.img
+if [ $RET -eq 0 ]; then
+    echo "This is a supported kernel version."
+else
+    echo "This is an unsupported kernel version."
+    if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" = "14.04" ]; then
+        echo "Please upgrade to a newer kernel version by executing 'apt-get install linux-image-generic-lts-vivid && reboot'."
+    else
+        echo "Please upgrade to a newer kernel version."
+    fi
+    echo " see http://www.scylladb.com/kb/kb-fs-not-qualified-aio/ for details"
+fi
+exit $RET

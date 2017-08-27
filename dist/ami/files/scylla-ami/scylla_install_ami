@@ -1,0 +1,61 @@
+#!/bin/bash -e
+#
+#  Copyright (C) 2015 ScyllaDB
+
+if [ "`id -u`" -ne 0 ]; then
+    echo "Requires root permission."
+    exit 1
+fi
+
+print_usage() {
+    echo "build_install_ami --localrpm --repo [URL]"
+    echo "  --localrpm  deploy locally built rpms"
+    echo "  --repo  repository for both install and update, specify .repo/.list file URL"
+    echo "  --repo-for-install  repository for install, specify .repo/.list file URL"
+    echo "  --repo-for-update  repository for update, specify .repo/.list file URL"
+    exit 1
+}
+. /etc/os-release
+while [ $# -gt 0 ]; do
+    case "$1" in
+        "--localrpm")
+            INSTALL_ARGS="$INSTALL_ARGS --local-pkg /home/$ID"
+            shift 1
+            ;;
+        "--repo")
+            INSTALL_ARGS="$INSTALL_ARGS --repo $2"
+            shift 2
+            ;;
+        "--repo-for-install")
+            INSTALL_ARGS="$INSTALL_ARGS --repo-for-install $2"
+            shift 2
+            ;;
+        "--repo-for-update")
+            INSTALL_ARGS="$INSTALL_ARGS --repo-for-update $2"
+            shift 2
+            ;;
+        "-h" | "--help")
+            print_usage
+            ;;
+    esac
+done
+
+if [ "$ID" = "ubuntu" ]; then
+    apt-get purge -y apport
+else
+    yum remove -y abrt
+    mv /home/centos/scylla-ami/scylla-ami-setup.service /usr/lib/systemd/system/
+    systemctl daemon-reload
+    systemctl enable scylla-ami-setup.service
+    mv /home/centos/scylla-ami/amzn-main.repo /etc/yum.repos.d
+    yum -y update kernel
+fi
+chmod a+rx /home/$ID/scylla_install_pkg
+/home/$ID/scylla_install_pkg $INSTALL_ARGS
+grep -v ' - mounts' /etc/cloud/cloud.cfg > /tmp/cloud.cfg
+mv /tmp/cloud.cfg /etc/cloud/cloud.cfg
+mv /home/$ID/scylla-ami /usr/lib/scylla/scylla-ami
+/usr/lib/scylla/scylla_setup --ntp-domain amazon --no-coredump-setup --no-sysconfig-setup --no-raid-setup --no-io-setup --no-bootparam-setup
+/usr/lib/scylla/scylla_sysconfig_setup --ami
+/usr/lib/scylla/scylla_bootparam_setup --ami
+rm -fv /home/$ID/.ssh/authorized_keys

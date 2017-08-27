@@ -1,0 +1,102 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Modified by ScyllaDB
+ * Copyright (C) 2015 ScyllaDB
+ */
+
+/*
+ * This file is part of Scylla.
+ *
+ * Scylla is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Scylla is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#pragma once
+
+#include "locator/abstract_replication_strategy.hh"
+#include "exceptions/exceptions.hh"
+
+#include <experimental/optional>
+#include <set>
+
+namespace locator {
+class network_topology_strategy : public abstract_replication_strategy {
+public:
+    network_topology_strategy(
+        const sstring& keyspace_name,
+        token_metadata& token_metadata,
+        snitch_ptr& snitch,
+        const std::map<sstring,sstring>& config_options);
+
+    virtual size_t get_replication_factor() const override {
+        return _rep_factor;
+    }
+
+    size_t get_replication_factor(const sstring& dc) const {
+        auto dc_factor = _dc_rep_factor.find(dc);
+        return (dc_factor == _dc_rep_factor.end()) ? 0 : dc_factor->second;
+    }
+
+    const std::vector<sstring>& get_datacenters() const {
+        return _datacenteres;
+    }
+
+protected:
+    /**
+     * calculate endpoints in one pass through the tokens by tracking our
+     * progress in each DC, rack etc.
+     */
+    virtual std::vector<inet_address> calculate_natural_endpoints(
+        const token& search_token, token_metadata& tm) const override;
+
+    virtual void validate_options() const override;
+
+    virtual std::experimental::optional<std::set<sstring>> recognized_options() const override;
+
+private:
+    bool has_sufficient_replicas(
+        const sstring& dc,
+        std::unordered_map<sstring,
+                           std::unordered_set<inet_address>>& dc_replicas,
+        std::unordered_map<sstring,
+                           std::unordered_set<inet_address>>& all_endpoints) const;
+
+    bool has_sufficient_replicas(
+        std::unordered_map<sstring,
+                           std::unordered_set<inet_address>>& dc_replicas,
+        std::unordered_map<sstring,
+                           std::unordered_set<inet_address>>& all_endpoints) const;
+
+private:
+    // map: data centers -> replication factor
+    std::unordered_map<sstring, size_t> _dc_rep_factor;
+
+    std::vector<sstring> _datacenteres;
+    size_t _rep_factor;
+};
+} // namespace locator

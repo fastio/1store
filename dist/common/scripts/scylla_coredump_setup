@@ -1,0 +1,60 @@
+#!/bin/bash -e
+#
+#  Copyright (C) 2015 ScyllaDB
+
+. /usr/lib/scylla/scylla_lib.sh
+
+print_usage() {
+    echo "scylla_coredump_setup --dump-to-raiddir"
+    echo "  --dump-to-raiddir  store coredump to /var/lib/scylla"
+    echo "  --compress  enable compress on systemd-coredump"
+    exit 1
+}
+
+SYMLINK=0
+COMPRESS=no
+while [ $# -gt 0 ]; do
+    case "$1" in
+        "--dump-to-raiddir")
+            SYMLINK=1
+            shift 1
+            ;;
+        "--compress")
+            COMPRESS=yes
+            shift 1
+            ;;
+        *)
+            print_usage
+            ;;
+    esac
+done
+
+if [ "$ID" = "ubuntu" ] && [ "$VERSION_ID" != "16.04" ]; then
+    apt-get remove -y apport-noui
+    sysctl -p /etc/sysctl.d/99-scylla.conf
+elif [ "$ID" = "debian" ] || [ "$ID" = "gentoo" ]; then
+    sysctl -p /etc/sysctl.d/99-scylla.conf
+else
+    if [ "$ID" = "ubuntu" ]; then
+        apt-get install -y systemd-coredump
+    fi
+    cat << EOS > /etc/systemd/coredump.conf
+[Coredump]
+Storage=external
+Compress=$COMPRESS
+ProcessSizeMax=1024G
+ExternalSizeMax=1024G
+EOS
+    if [ $SYMLINK = 1 ]; then
+        rm -rf /var/lib/systemd/coredump
+        mkdir -p /var/lib/scylla/coredump
+        ln -sf /var/lib/scylla/coredump /var/lib/systemd/coredump
+    fi
+    systemctl daemon-reload
+    if [ "$ID" = "ubuntu" ]; then
+        sysctl -p /usr/lib/sysctl.d/50-coredump.conf
+    else
+        echo "kernel.core_pattern=|/usr/lib/systemd/systemd-coredump %p %u %g %s %t %e" > /etc/sysctl.d/99-coredump.conf
+        sysctl -p /etc/sysctl.d/99-coredump.conf
+    fi
+fi

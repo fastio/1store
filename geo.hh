@@ -21,6 +21,21 @@
 #pragma once
 #include "core/sstring.hh"
 namespace redis {
+using namespace seastar;
+static constexpr const int GEORADIUS_ASC         = (1 << 0);
+static constexpr const int GEORADIUS_DESC        = (1 << 1);
+static constexpr const int GEORADIUS_WITHCOORD   = (1 << 2);
+static constexpr const int GEORADIUS_WITHSCORE   = (1 << 3);
+static constexpr const int GEORADIUS_WITHHASH    = (1 << 4);
+static constexpr const int GEORADIUS_WITHDIST    = (1 << 5);
+static constexpr const int GEORADIUS_COUNT       = (1 << 6);
+static constexpr const int GEORADIUS_STORE_SCORE = (1 << 7);
+static constexpr const int GEORADIUS_STORE_DIST  = (1 << 8);
+static constexpr const int GEO_UNIT_M      = (1 << 9);
+static constexpr const int GEO_UNIT_KM     = (1 << 10);
+static constexpr const int GEO_UNIT_MI     = (1 << 11);
+static constexpr const int GEO_UNIT_FT     = (1 << 12);
+
 class geo {
 public:
     static bool encode_to_geohash(const double& longitude, const double& latitude, double& geohash);

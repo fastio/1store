@@ -1,0 +1,10 @@
+#!/bin/bash -e
+
+. /usr/lib/scylla/scylla_lib.sh
+
+if [ "$NETWORK_MODE" = "virtio" ]; then
+    ip tuntap del mode tap dev $TAP
+elif [ "$NETWORK_MODE" = "dpdk" ]; then
+    /usr/lib/scylla/dpdk-devbind.py -u $ETHPCIID
+    /usr/lib/scylla/dpdk-devbind.py -b $ETHDRV $ETHPCIID
+fi

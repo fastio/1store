@@ -1,0 +1,26 @@
+#!/usr/bin/make -f
+
+override_dh_auto_configure:
+	./configure.py --enable-dpdk --mode=release --static-stdc++ --static-thrift --compiler=@@COMPILER@@
+
+override_dh_auto_build:
+	ninja
+
+override_dh_auto_clean:
+	rm -rf build/release seastar/build
+	rm -rf Cql.tokens
+	rm -rf build.ninja seastar/build.ninja
+
+override_dh_installinit:
+	dh_installinit --no-start @@DH_INSTALLINIT@@
+	dh_installinit --no-start --name scylla-housekeeping-daily @@DH_INSTALLINIT@@
+	dh_installinit --no-start --name scylla-housekeeping-restart @@DH_INSTALLINIT@@
+	dh_installinit --no-start --name node-exporter @@DH_INSTALLINIT@@
+
+override_dh_installcron:
+	dh_installcron
+
+override_dh_strip:
+	dh_strip --dbg-package=scylla-server-dbg
+%:
+	dh $@

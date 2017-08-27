@@ -1,0 +1,47 @@
+#!/bin/bash -e
+#
+#  Copyright (C) 2015 ScyllaDB
+
+. /usr/lib/scylla/scylla_lib.sh
+
+print_usage() {
+    echo "scylla_bootparam_setup --ami"
+    echo "  --ami				setup AMI instance"
+    exit 1
+}
+
+
+AMI_OPT=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        "--ami")
+            AMI_OPT=1
+            shift 1
+            ;;
+        *)
+            print_usage
+            ;;
+    esac
+done
+
+if [ $AMI_OPT -eq 0 ]; then
+    exit 0
+fi
+if [ ! -e /etc/default/grub ] && [ ! -e /boot/grub/menu.lst ]; then
+    echo "Unsupported bootloader"
+    exit 1
+fi
+if [ -e /etc/default/grub ] && [ "`grep clocksource /etc/default/grub`" = "" ]; then
+    sed -e "s#^GRUB_CMDLINE_LINUX=\"#GRUB_CMDLINE_LINUX=\"clocksource=tsc tsc=reliable #" /etc/default/grub > /tmp/grub
+    mv /tmp/grub /etc/default/grub
+    if is_debian_variant; then
+        update-grub
+    else
+        grub2-mkconfig -o /boot/grub2/grub.cfg
+    fi
+fi
+
+if is_ec2 && [ -e /boot/grub/menu.lst ] && [ "`grep clocksource /boot/grub/menu.lst`" = "" ]; then
+    sed -e "s#\\(^\s*kernel.*\\)#\\1 clocksource=tsc tsc=reliable #" /boot/grub/menu.lst > /tmp/menu.lst
+    mv /tmp/menu.lst /boot/grub/menu.lst
+fi

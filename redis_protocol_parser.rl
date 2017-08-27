@@ -23,12 +23,15 @@
   which is the example in Seastar project.
 **/
 
-#include "core/ragel.hh"
+#include "ragel.hh"
+#include "redis_command_code.hh"
 #include <memory>
 #include <iostream>
 #include <algorithm>
 #include <functional>
-
+#include "bytes.hh"
+using namespace seastar;
+using namespace redis;
 %%{
 
 machine redis_resp_protocol;
@@ -77,107 +80,107 @@ crlf = '\r\n';
 u32 = digit+ >{ _u32 = 0;}  ${ _u32 *= 10; _u32 += fc - '0';};
 args_count = '*' u32 crlf ${_args_count = _u32;};
 blob := any+ >start_blob $advance_blob;
-set = "set"i ${_command = command::set;};
-mset = "mset"i ${_command = command::mset;};
-get = "get"i ${_command = command::get;};
-mget = "mget"i ${_command = command::mget;};
-del = "del"i ${_command = command::del;};
-echo = "echo"i ${_command = command::echo;};
-ping = "ping"i ${_command = command::ping;};
-incr = "incr"i ${_command = command::incr;};
-decr = "decr"i ${_command = command::decr;};
-incrby = "incrby"i ${_command = command::incrby;};
-decrby = "decrby"i ${_command = command::decrby;};
-command_ = "command"i ${_command = command::command;};
-exists = "exists"i ${_command = command::exists;};
-append = "append"i ${_command = command::append;};
-strlen = "strlen"i ${_command = command::strlen;};
-lpush = "lpush"i ${_command = command::lpush;};
-lpushx = "lpushx"i ${_command = command::lpushx;};
-lpop = "lpop"i ${_command = command::lpop;};
-llen = "llen"i ${_command = command::llen;};
-lindex = "lindex"i ${_command = command::lindex;};
-linsert = "linsert"i ${_command = command::linsert;};
-lrange = "lrange"i ${_command = command::lrange;};
-lset = "lset"i ${_command = command::lset;};
-rpush = "rpush"i ${_command = command::rpush;};
-rpushx = "rpushx"i ${_command = command::rpushx;};
-rpop = "rpop"i ${_command = command::rpop;};
-lrem = "lrem"i ${_command = command::lrem;};
-ltrim = "ltrim"i ${_command = command::ltrim;};
-hset = "hset"i ${_command = command::hset;};
-hmset = "hmset"i ${_command = command::hmset;};
-hdel = "hdel"i ${_command = command::hdel;};
-hget = "hget"i ${_command = command::hget;};
-hlen = "hlen"i ${_command = command::hlen;};
-hexists = "hexists"i ${_command = command::hexists;};
-hstrlen = "hstrlen"i ${_command = command::hstrlen;};
-hincrby = "hincrby"i ${_command = command::hincrby;};
-hincrbyfloat = "hincrbyfloat"i ${_command = command::hincrbyfloat;};
-hkeys = "hkeys"i ${_command = command::hkeys;};
-hvals = "hvals"i ${_command = command::hvals;};
-hmget = "hmget"i ${_command = command::hmget;};
-hgetall = "hgetall"i ${_command = command::hgetall;};
-sadd = "sadd"i ${_command = command::sadd;};
-scard = "scard"i ${_command = command::scard;};
-sismember = "sismember"i ${_command = command::sismember;};
-smembers = "smembers"i ${_command = command::smembers;};
-srandmember = "srandmember"i ${_command = command::srandmember;};
-srem = "srem"i ${_command = command::srem;};
-sdiff = "sdiff"i ${_command = command::sdiff;};
-sdiffstore = "sdiffstore"i ${_command = command::sdiffstore;};
-sinter = "sinter"i ${_command = command::sinter;};
-sinterstore = "sinterstore"i ${_command = command::sinterstore;};
-sunion = "sunion"i ${_command = command::sunion;};
-sunionstore = "sunionstore"i ${_command = command::sunionstore;};
-smove = "smove"i ${_command = command::smove;};
-spop = "spop"i ${_command = command::spop;};
-type = "type"i ${_command = command::type; };
-expire = "expire"i ${_command = command::expire; };
-pexpire = "pexpire"i ${_command = command::pexpire; };
-ttl = "ttl"i ${_command = command::ttl; };
-pttl = "pttl"i ${_command = command::pttl; };
-persist = "persist"i ${_command = command::persist; };
-zadd = "zadd"i ${_command = command::zadd; };
-zcard  = "zcard"i ${_command = command::zcard; };
-zcount = "zcount"i ${_command = command::zcount; };
-zincrby = "zincrby"i ${_command = command::zincrby; };
-zrange = "zrange"i ${_command = command::zrange;};
-zrank = "zrank"i ${_command = command::zrank; };
-zrem = "zrem"i ${_command = command::zrem; };
-zremrangebyrank = "zremrangebyrank"i ${_command = command::zremrangebyrank; };
-zremrangebyscore = "zremrangebyscore"i ${_command = command::zremrangebyscore; };
-zrevrange = "zrevrange"i ${_command = command::zrevrange; };
-zrevrangebyscore = "zrevrangebyscore"i ${_command = command::zrevrangebyscore; };
-zrevrank = "zrevrank"i ${_command = command::zrevrank; };
-zscore = "zscore"i ${_command = command::zscore; };
-zunionstore = "zunionstore"i ${_command = command::zunionstore; };
-zinterstore = "zinterstore"i ${_command = command::zinterstore; };
-zdiffstore = "zdiffstore"i ${_command = command::zdiffstore; };
-zunion = "zunion"i ${_command = command::zunion; };
-zinter = "zinter"i ${_command = command::zinter; };
-zdiff = "zunion"i ${_command = command::zdiff; };
-zscan = "zscan"i ${_command = command::zscan; };
-zrangebylex = "zrangebylex"i ${_command = command::zrangebylex; };
-zrangebyscore = "zrangebyscore"i ${_command = command::zrangebyscore; };
-zlexcount = "zlexcount"i ${_command = command::zlexcount;};
-zremrangebylex = "zremrangebylex"i ${_command = command::zremrangebylex; };
-select = "select"i ${_command = command::select; };
-geoadd = "geoadd"i ${_command = command::geoadd; };
-geodist = "geodist"i ${_command = command::geodist; };
-geohash = "geohash"i ${_command = command::geohash; };
-geopos = "geopos"i ${_command = command::geopos; };
-georadius = "georadius"i ${_command = command::georadius; };
-georadiusbymember = "georadiusbymember"i ${_command = command::georadiusbymember; };
-setbit = "setbit"i ${_command = command::setbit; };
-getbit = "getbit"i ${_command = command::getbit; };
-bitcount = "bitcount"i ${_command = command::bitcount; };
-bitop = "bitop"i ${_command = command::bitop; };
-bitfield = "bitfield"i ${_command = command::bitfield; };
-bitpos = "bitpos"i ${_command = command::bitpos; };
-pfadd = "pfadd"i ${_command = command::pfadd; };
-pfcount = "pfcount"i ${_command = command::pfcount; };
-pfmerge = "pfmerge"i ${_command = command::pfmerge; };
+set = "set"i ${_command = command_code::set;};
+mset = "mset"i ${_command = command_code::mset;};
+get = "get"i ${_command = command_code::get;};
+mget = "mget"i ${_command = command_code::mget;};
+del = "del"i ${_command = command_code::del;};
+echo = "echo"i ${_command = command_code::echo;};
+ping = "ping"i ${_command = command_code::ping;};
+incr = "incr"i ${_command = command_code::incr;};
+decr = "decr"i ${_command = command_code::decr;};
+incrby = "incrby"i ${_command = command_code::incrby;};
+decrby = "decrby"i ${_command = command_code::decrby;};
+command_ = "command"i ${_command = command_code::command;};
+exists = "exists"i ${_command = command_code::exists;};
+append = "append"i ${_command = command_code::append;};
+strlen = "strlen"i ${_command = command_code::strlen;};
+lpush = "lpush"i ${_command = command_code::lpush;};
+lpushx = "lpushx"i ${_command = command_code::lpushx;};
+lpop = "lpop"i ${_command = command_code::lpop;};
+llen = "llen"i ${_command = command_code::llen;};
+lindex = "lindex"i ${_command = command_code::lindex;};
+linsert = "linsert"i ${_command = command_code::linsert;};
+lrange = "lrange"i ${_command = command_code::lrange;};
+lset = "lset"i ${_command = command_code::lset;};
+rpush = "rpush"i ${_command = command_code::rpush;};
+rpushx = "rpushx"i ${_command = command_code::rpushx;};
+rpop = "rpop"i ${_command = command_code::rpop;};
+lrem = "lrem"i ${_command = command_code::lrem;};
+ltrim = "ltrim"i ${_command = command_code::ltrim;};
+hset = "hset"i ${_command = command_code::hset;};
+hmset = "hmset"i ${_command = command_code::hmset;};
+hdel = "hdel"i ${_command = command_code::hdel;};
+hget = "hget"i ${_command = command_code::hget;};
+hlen = "hlen"i ${_command = command_code::hlen;};
+hexists = "hexists"i ${_command = command_code::hexists;};
+hstrlen = "hstrlen"i ${_command = command_code::hstrlen;};
+hincrby = "hincrby"i ${_command = command_code::hincrby;};
+hincrbyfloat = "hincrbyfloat"i ${_command = command_code::hincrbyfloat;};
+hkeys = "hkeys"i ${_command = command_code::hkeys;};
+hvals = "hvals"i ${_command = command_code::hvals;};
+hmget = "hmget"i ${_command = command_code::hmget;};
+hgetall = "hgetall"i ${_command = command_code::hgetall;};
+sadd = "sadd"i ${_command = command_code::sadd;};
+scard = "scard"i ${_command = command_code::scard;};
+sismember = "sismember"i ${_command = command_code::sismember;};
+smembers = "smembers"i ${_command = command_code::smembers;};
+srandmember = "srandmember"i ${_command = command_code::srandmember;};
+srem = "srem"i ${_command = command_code::srem;};
+sdiff = "sdiff"i ${_command = command_code::sdiff;};
+sdiffstore = "sdiffstore"i ${_command = command_code::sdiffstore;};
+sinter = "sinter"i ${_command = command_code::sinter;};
+sinterstore = "sinterstore"i ${_command = command_code::sinterstore;};
+sunion = "sunion"i ${_command = command_code::sunion;};
+sunionstore = "sunionstore"i ${_command = command_code::sunionstore;};
+smove = "smove"i ${_command = command_code::smove;};
+spop = "spop"i ${_command = command_code::spop;};
+type = "type"i ${_command = command_code::type; };
+expire = "expire"i ${_command = command_code::expire; };
+pexpire = "pexpire"i ${_command = command_code::pexpire; };
+ttl = "ttl"i ${_command = command_code::ttl; };
+pttl = "pttl"i ${_command = command_code::pttl; };
+persist = "persist"i ${_command = command_code::persist; };
+zadd = "zadd"i ${_command = command_code::zadd; };
+zcard  = "zcard"i ${_command = command_code::zcard; };
+zcount = "zcount"i ${_command = command_code::zcount; };
+zincrby = "zincrby"i ${_command = command_code::zincrby; };
+zrange = "zrange"i ${_command = command_code::zrange;};
+zrank = "zrank"i ${_command = command_code::zrank; };
+zrem = "zrem"i ${_command = command_code::zrem; };
+zremrangebyrank = "zremrangebyrank"i ${_command = command_code::zremrangebyrank; };
+zremrangebyscore = "zremrangebyscore"i ${_command = command_code::zremrangebyscore; };
+zrevrange = "zrevrange"i ${_command = command_code::zrevrange; };
+zrevrangebyscore = "zrevrangebyscore"i ${_command = command_code::zrevrangebyscore; };
+zrevrank = "zrevrank"i ${_command = command_code::zrevrank; };
+zscore = "zscore"i ${_command = command_code::zscore; };
+zunionstore = "zunionstore"i ${_command = command_code::zunionstore; };
+zinterstore = "zinterstore"i ${_command = command_code::zinterstore; };
+zdiffstore = "zdiffstore"i ${_command = command_code::zdiffstore; };
+zunion = "zunion"i ${_command = command_code::zunion; };
+zinter = "zinter"i ${_command = command_code::zinter; };
+zdiff = "zunion"i ${_command = command_code::zdiff; };
+zscan = "zscan"i ${_command = command_code::zscan; };
+zrangebylex = "zrangebylex"i ${_command = command_code::zrangebylex; };
+zrangebyscore = "zrangebyscore"i ${_command = command_code::zrangebyscore; };
+zlexcount = "zlexcount"i ${_command = command_code::zlexcount;};
+zremrangebylex = "zremrangebylex"i ${_command = command_code::zremrangebylex; };
+select = "select"i ${_command = command_code::select; };
+geoadd = "geoadd"i ${_command = command_code::geoadd; };
+geodist = "geodist"i ${_command = command_code::geodist; };
+geohash = "geohash"i ${_command = command_code::geohash; };
+geopos = "geopos"i ${_command = command_code::geopos; };
+georadius = "georadius"i ${_command = command_code::georadius; };
+georadiusbymember = "georadiusbymember"i ${_command = command_code::georadiusbymember; };
+setbit = "setbit"i ${_command = command_code::setbit; };
+getbit = "getbit"i ${_command = command_code::getbit; };
+bitcount = "bitcount"i ${_command = command_code::bitcount; };
+bitop = "bitop"i ${_command = command_code::bitop; };
+bitfield = "bitfield"i ${_command = command_code::bitfield; };
+bitpos = "bitpos"i ${_command = command_code::bitpos; };
+pfadd = "pfadd"i ${_command = command_code::pfadd; };
+pfcount = "pfcount"i ${_command = command_code::pfcount; };
+pfmerge = "pfmerge"i ${_command = command_code::pfmerge; };
 
 command = (setbit | set | getbit | get | del | mget | mset | echo | ping | incr | decr | incrby | decrby | command_ | exists | append |
            strlen | lpushx | lpush | lpop | llen | lindex | linsert | lrange | lset | rpushx | rpush | rpop | lrem |
@@ -191,7 +194,7 @@ command = (setbit | set | getbit | get | del | mget | mset | echo | ping | incr 
            pfadd | pfcount | pfmerge );
 arg = '$' u32 crlf ${ _arg_size = _u32;};
 
-main := (args_count (arg command crlf) (arg @{fcall blob; } crlf)+) ${_state = state::ok;};
+main := (args_count (arg command crlf) (arg @{fcall blob; } crlf)+) ${_state = protocol_state::ok;};
 
 prepush {
     prepush();
@@ -206,126 +209,18 @@ postpop {
 class redis_protocol_parser : public ragel_parser_base<redis_protocol_parser> {
     %% write data nofinal noprefix;
 public:
-    enum class state {
-        error,
-        eof,
-        ok,
-    };
-    enum class command {
-        set,
-        mset,
-        get,
-        mget,
-        del,
-        echo,
-        ping,
-        incr,
-        decr,
-        incrby,
-        decrby,
-        command,
-        exists,
-        append,
-        strlen,
-        lpush,
-        lpushx,
-        lpop,
-        llen,
-        lindex,
-        linsert,
-        lrange,
-        lset,
-        rpush,
-        rpushx,
-        rpop,
-        lrem,
-        ltrim,
-        hset,
-        hdel,
-        hget,
-        hlen,
-        hexists,
-        hstrlen,
-        hincrby,
-        hincrbyfloat,
-        hkeys,
-        hvals,
-        hmget,
-        hmset,
-        hgetall,
-        sadd,
-        scard,
-        sismember,
-        smembers,
-        srem,
-        sdiff,
-        sdiffstore,
-        sinter,
-        sinterstore,
-        sunion,
-        sunionstore,
-        smove,
-        srandmember,
-        spop,
-        type,
-        expire,
-        pexpire,
-        ttl,
-        pttl,
-        persist,
-        zadd,
-        zcard,
-        zcount,
-        zincrby,
-        zrange,
-        zrangebyscore,
-        zrank,
-        zrem,
-        zremrangebyrank,
-        zremrangebyscore,
-        zrevrange,
-        zrevrangebyscore,
-        zrevrank,
-        zscore,
-        zunionstore,
-        zinterstore,
-        zdiffstore,
-        zunion,
-        zinter,
-        zdiff,
-        zscan,
-        zrangebylex,
-        zlexcount,
-        zremrangebylex,
-        select,
-        geoadd,
-        geohash,
-        geodist,
-        geopos,
-        georadius,
-        georadiusbymember,
-        setbit,
-        getbit,
-        bitcount,
-        bitop,
-        bitpos,
-        bitfield,
-        pfadd,
-        pfcount,
-        pfmerge,
-    };
 
-    state _state;
-    command _command;
+    protocol_state _state;
+    command_code _command;
     uint32_t _u32;
     uint32_t _arg_size;
     uint32_t _args_count;
     uint32_t _size_left;
-    std::vector<sstring>  _args_list;
+    std::vector<bytes>  _args_list;
 public:
     void init() {
         init_base();
-        _state = state::error;
+        _state = protocol_state::error;
         _args_list.clear();
         _args_count = 0;
         _size_left = 0;
@@ -334,10 +229,15 @@ public:
     }
 
     char* parse(char* p, char* pe, char* eof) {
-        sstring_builder::guard g(_builder, p, pe);
-        auto str = [this, &g, &p] { g.mark_end(p); return get_str(); };
+        bytes_builder::guard g(_builder, p, pe);
+        auto str = [this, &g, &p] {
+            g.mark_end(p);
+            auto s =  get_str();
+            return s;
+        };
+
         %% write exec;
-        if (_state != state::error) {
+        if (_state != protocol_state::error) {
             return p;
         }
         // error ?
@@ -348,6 +248,6 @@ public:
         return nullptr;
     }
     bool eof() const {
-        return _state == state::eof;
+        return _state == protocol_state::eof;
     }
 };

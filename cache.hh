@@ -24,8 +24,8 @@
 #include <boost/intrusive_ptr.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/optional.hpp>
-#include "common.hh"
 #include "bytes.hh"
+#include "keys.hh"
 #include "utils/managed_ref.hh"
 #include "utils/managed_bytes.hh"
 #include "utils/allocation_strategy.hh"
@@ -33,17 +33,23 @@
 #include "list_lsa.hh"
 #include "dict_lsa.hh"
 #include "sset_lsa.hh"
-#include "core/sstring.hh"
+#include "hll.hh"
+#include "log.hh"
+#include "dht/i_partitioner.hh"
 #include "core/timer-set.hh"
 #include "hll.hh"
-#include "util/log.hh"
+#include "bytes.hh"
 using logger =  seastar::logger;
 static logger logc ("cache");
 
 namespace redis {
+using namespace seastar;
+
 namespace bi = boost::intrusive;
-using clock_type = lowres_clock;
 class cache;
+
+using clock_type = lowres_clock;
+static constexpr clock_type::time_point never_expire_timepoint = clock_type::time_point(clock_type::duration::min());
 
 struct expiration {
     using time_point = clock_type::time_point;
@@ -94,7 +100,7 @@ protected:
     using hook_type = boost::intrusive::unordered_set_member_hook<>;
     hook_type _cache_link;
     entry_type _type;
-    managed_ref<managed_bytes> _key;
+    managed_bytes _key;
     size_t _key_hash;
     union storage {
         double _float_number;
@@ -111,70 +117,71 @@ protected:
 public:
     using time_point = expiration::time_point;
     using duration = expiration::duration;
-    cache_entry(const sstring& key, size_t hash, entry_type type) noexcept
+    cache_entry(const partition_key& pk, entry_type type) noexcept
         : _cache_link()
         , _type(type)
-        , _key_hash(hash)
+        , _key(pk.representation())
+        , _key_hash(std::hash<managed_bytes>()(_key))
+
     {
-        _key = make_managed<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(key.data()), key.size()});
     }
 
-    cache_entry(const sstring& key, size_t hash, double data) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_FLOAT)
+    cache_entry(const partition_key& pk, double data) noexcept
+        : cache_entry(pk, entry_type::ENTRY_FLOAT)
     {
         _storage._float_number = data;
     }
 
-    cache_entry(const sstring key, size_t hash, int64_t data) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_INT64)
+    cache_entry(const partition_key& pk, int64_t data) noexcept
+        : cache_entry(pk, entry_type::ENTRY_INT64)
     {
         _storage._integer_number = data;
     }
 
-    cache_entry(const sstring key, size_t hash, size_t origin_size) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_BYTES)
+    cache_entry(const partition_key& pk, size_t origin_size) noexcept
+        : cache_entry(pk, entry_type::ENTRY_BYTES)
     {
-        _storage._bytes = make_managed<managed_bytes>(origin_size, 0);
+        //_storage._bytes = make_managed<managed_bytes>(origin_size, 0);
     }
 
-    cache_entry(const sstring& key, size_t hash, const sstring& data) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_BYTES)
+    cache_entry(const partition_key& pk, const bytes& data) noexcept
+        : cache_entry(pk, entry_type::ENTRY_BYTES)
     {
         _storage._bytes = make_managed<managed_bytes>(bytes_view{reinterpret_cast<const signed char*>(data.data()), data.size()});
     }
     struct list_initializer {};
-    cache_entry(const sstring& key, size_t hash, list_initializer) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_LIST)
+    cache_entry(const partition_key& pk, list_initializer) noexcept
+        : cache_entry(pk, entry_type::ENTRY_LIST)
     {
         _storage._list = make_managed<list_lsa>();
     }
 
     struct dict_initializer {};
-    cache_entry(const sstring& key, size_t hash, dict_initializer) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_MAP)
+    cache_entry(const partition_key& pk, dict_initializer) noexcept
+        : cache_entry(pk, entry_type::ENTRY_MAP)
     {
         _storage._dict = make_managed<dict_lsa>();
     }
 
     struct set_initializer {};
-    cache_entry(const sstring& key, size_t hash, set_initializer) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_SET)
+    cache_entry(const partition_key& pk, set_initializer) noexcept
+        : cache_entry(pk, entry_type::ENTRY_SET)
     {
         _storage._dict = make_managed<dict_lsa>();
     }
 
     struct sset_initializer {};
-    cache_entry(const sstring& key, size_t hash, sset_initializer) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_SSET)
+    cache_entry(const partition_key& pk, sset_initializer) noexcept
+        : cache_entry(pk, entry_type::ENTRY_SSET)
     {
         _storage._sset = make_managed<sset_lsa>();
     }
 
     struct hll_initializer {};
-    cache_entry(const sstring& key, size_t hash, hll_initializer) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_HLL)
+    cache_entry(const partition_key& pk, hll_initializer) noexcept
+        : cache_entry(pk, entry_type::ENTRY_HLL)
     {
-        _storage._bytes = make_managed<managed_bytes>(HLL_BYTES_SIZE, 0);
+        //_storage._bytes = make_managed<managed_bytes>(HLL_BYTES_SIZE, 0);
     }
 
     cache_entry(cache_entry&& o) noexcept
@@ -230,28 +237,12 @@ public:
         }
     }
 
-    const sstring type_name() const
+    const bytes type_name() const
     {
-        switch (_type) {
-            case entry_type::ENTRY_FLOAT:
-            case entry_type::ENTRY_INT64:
-            case entry_type::ENTRY_BYTES:
-                return msg_type_string;
-            case entry_type::ENTRY_HLL:
-                return msg_type_hll;
-            case entry_type::ENTRY_LIST:
-                return msg_type_list;
-            case entry_type::ENTRY_MAP:
-                return msg_type_hash;
-            case entry_type::ENTRY_SET:
-                return msg_type_set;
-            case entry_type::ENTRY_SSET:
-                return msg_type_zset;
-        }
-        return msg_type_none;
+        return {};
     }
     friend inline bool operator == (const cache_entry &l, const cache_entry &r) {
-        return (l._key_hash == r._key_hash) && (*(l._key) == *(r._key));
+        return (l._key_hash == r._key_hash) && (l._key == r._key);
     }
 
     friend inline std::size_t hash_value(const cache_entry& e) {
@@ -261,15 +252,17 @@ public:
     struct compare {
     public:
         inline bool operator () (const cache_entry& l, const cache_entry& r) const {
-            const auto& lk = *(l._key);
-            const auto& rk = *(r._key);
+            const auto& lk = l._key;
+            const auto& rk = r._key;
             return (l.key_hash() == r.key_hash()) && (lk == rk);
         }
-        inline bool operator () (const redis_key& k, const cache_entry& e) const {
-            return (k.hash() == e.key_hash()) && (k.size() == e.key_size()) && (memcmp(k.data(), e.key_data(), k.size()) == 0);
+        inline bool operator () (const dht::decorated_key& dk, const cache_entry& e) const {
+            return std::hash<managed_bytes>()(dk.key().representation()) == e.key_hash() &&
+                   dk.key().representation() == e.key();
         }
-        inline bool operator () (const cache_entry& e, const redis_key& k) const {
-            return (k.hash() == e.key_hash()) && (k.size() == e.key_size()) && (memcmp(k.data(), e.key_data(), k.size()) == 0);
+        inline bool operator () (const cache_entry& e, const dht::decorated_key& dk) const {
+            return std::hash<managed_bytes>()(dk.key().representation()) == e.key_hash() &&
+                   dk.key().representation() == e.key();
         }
     };
 public:
@@ -311,17 +304,22 @@ public:
 
     inline size_t key_size() const
     {
-        return _key->size();
+        return _key.size();
     }
 
-    inline const bytes_view key() const
+    inline const bytes_view key_view() const
     {
-        return { _key->data(), _key->size() };
+        return { _key.data(), _key.size() };
+    }
+
+    inline const managed_bytes& key() const
+    {
+        return _key;
     }
 
     inline const char* key_data() const
     {
-        return reinterpret_cast<const char*>(_key->data());
+        return reinterpret_cast<const char*>(_key.data());
     }
     inline size_t value_bytes_size() const
     {
@@ -466,10 +464,12 @@ public:
         _store.erase_and_dispose(_store.begin(), _store.end(), current_deleter<cache_entry>());
     }
 
-    inline bool erase(const redis_key& key)
+    inline bool erase(const dht::decorated_key& dk)
     {
-        static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
-        auto it = _store.find(key, hash_fn, cache_entry::compare());
+        auto hash_fn = [] (const dht::decorated_key& dk) -> size_t {
+            return std::hash<managed_bytes>()(dk.key().representation());
+        };
+        auto it = _store.find(dk, hash_fn, cache_entry::compare());
         if (it != _store.end()) {
             if (it->ever_expires()) {
                 _alive.remove(*it);
@@ -491,7 +491,7 @@ public:
     {
         bool res = true;
         if (entry) {
-            static auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
+            auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
             auto it = _store.find(*entry, hash_fn, cache_entry::compare());
             if (it != _store.end()) {
                 if (it->ever_expires()) {
@@ -509,7 +509,7 @@ public:
     {
         bool res = true;
         if (entry) {
-            static auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
+            auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
             auto it = _store.find(*entry, hash_fn, cache_entry::compare());
             if (it != _store.end()) {
                 if (it->ever_expires()) {
@@ -529,7 +529,7 @@ public:
         if (!entry) {
             return false;
         }
-        static auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
+        static thread_local auto hash_fn = [] (const cache_entry& e) -> size_t { return e.key_hash(); };
         auto it = _store.find(*entry, hash_fn, cache_entry::compare());
         if (it != _store.end() && (xx || (!xx && !nx))) {
             if (it->ever_expires()) {
@@ -562,9 +562,11 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(const cache_entry* e)> with_entry_run(const redis_key& rk, Func&& func) const {
-        static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
-        auto it = _store.find(rk, hash_fn, cache_entry::compare());
+    inline std::result_of_t<Func(const cache_entry* e)> with_entry_run(const dht::decorated_key& dk, Func&& func) const {
+        auto hash_fn = [] (const dht::decorated_key& dk) -> size_t {
+            return std::hash<managed_bytes>()(dk.key().representation());
+        };
+        auto it = _store.find(dk, hash_fn, cache_entry::compare());
         if (it != _store.end()) {
             const auto& e = *it;
             return func(&e);
@@ -575,9 +577,11 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(cache_entry* e)> with_entry_run(const redis_key& rk, Func&& func) {
-        static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
-        auto it = _store.find(rk, hash_fn, cache_entry::compare());
+    inline std::result_of_t<Func(cache_entry* e)> with_entry_run(const dht::decorated_key& dk, Func&& func) {
+        auto hash_fn = [] (const dht::decorated_key& dk) -> size_t {
+            return std::hash<managed_bytes>()(dk.key().representation());
+        };
+        auto it = _store.find(dk, hash_fn, cache_entry::compare());
         if (it != _store.end()) {
             auto& e = *it;
             return func(&e);
@@ -588,10 +592,12 @@ public:
     }
 
 
-    inline bool exists(const redis_key& rk)
+    inline bool exists(const dht::decorated_key& dk)
     {
-        static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
-        auto it = _store.find(rk, hash_fn, cache_entry::compare());
+        auto hash_fn = [] (const dht::decorated_key& dk) -> size_t {
+            return std::hash<managed_bytes>()(dk.key().representation());
+        };
+        auto it = _store.find(dk, hash_fn, cache_entry::compare());
         return it != _store.end();
     }
 
@@ -621,11 +627,13 @@ public:
         return _store.empty();
     }
 
-    bool expire(const redis_key& rk, long expired)
+    bool expire(const dht::decorated_key& dk, long expired)
     {
         bool result = false;
-        static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
-        auto it = _store.find(rk, hash_fn, cache_entry::compare());
+        auto hash_fn = [] (const dht::decorated_key& dk) -> size_t {
+            return std::hash<managed_bytes>()(dk.key().representation());
+        };
+        auto it = _store.find(dk, hash_fn, cache_entry::compare());
         if (it != _store.end()) {
             auto expiry = expiration(expired);
             it->set_expiry(expiry);
@@ -651,11 +659,13 @@ public:
         _timer.arm(_alive.get_next_timeout());
     }
 
-    bool never_expired(const redis_key& rk)
+    bool never_expired(const dht::decorated_key& dk)
     {
         bool result = false;
-        static auto hash_fn = [] (const redis_key& k) -> size_t { return k.hash(); };
-        auto it = _store.find(rk, hash_fn, cache_entry::compare());
+        auto hash_fn = [] (const dht::decorated_key& dk) -> size_t {
+            return std::hash<managed_bytes>()(dk.key().representation());
+        };
+        auto it = _store.find(dk, hash_fn, cache_entry::compare());
         if (it != _store.end() && it->ever_expires()) {
             it->set_never_expired();
             auto& ref = *it;

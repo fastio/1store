@@ -23,6 +23,7 @@
 #include "utils/allocation_strategy.hh"
 #include "utils/managed_ref.hh"
 #include "utils/managed_bytes.hh"
+#include "bytes.hh"
 namespace redis {
 class list_lsa {
     struct internal_node {
@@ -58,7 +59,7 @@ public:
         clear();
     }
     // Inserts the value in the front of the list.
-    inline void insert_head(const sstring& data)
+    inline void insert_head(const bytes& data)
     {
         bytes_view v {reinterpret_cast<const signed char*>(data.data()), data.size()};
         auto entry = current_allocator().construct<internal_node>(v);
@@ -66,14 +67,14 @@ public:
     }
 
     // Inserts the value in the back of the list.
-    inline void insert_tail(const sstring& data)
+    inline void insert_tail(const bytes& data)
     {
         bytes_view v {reinterpret_cast<const signed char*>(data.data()), data.size()};
         auto entry = current_allocator().construct<internal_node>(v);
         _list.push_back(*entry);
     }
 
-    inline void insert_at(size_t index, const sstring& data)
+    inline void insert_at(size_t index, const bytes& data)
     {
         assert(index < _list.size());
         bytes_view v {reinterpret_cast<const signed char*>(data.data()), data.size()};
@@ -82,7 +83,7 @@ public:
         _list.insert(p, *entry);
     }
 
-    inline size_t index_of(const std::string& pivot)
+    inline size_t index_of(const bytes& pivot)
     {
         size_t result = _list.size();
         for (auto i = _list.begin(); i != _list.end(); ++i, --result) {
@@ -145,13 +146,13 @@ public:
     }
 
     // Erase the elements from the list.
-    inline void erase(const sstring& data)
+    inline void erase(const bytes& data)
     {
         trem<false, true>(data, size_t{1});
     }
 
     template<bool RemoveAllEqual, bool FromHeadToTail>
-    inline size_t trem(const std::string& data, size_t count)
+    inline size_t trem(const bytes& data, size_t count)
     {
         size_t erased = 0;
         if (FromHeadToTail) {
@@ -229,7 +230,7 @@ private:
         return i;
     }
 
-    inline bool equal(const internal_node& n, const sstring& data) const
+    inline bool equal(const internal_node& n, const bytes& data) const
     {
         auto mb = n._data;
         bytes_view b {mb.data(), mb.size()} ;
@@ -237,7 +238,7 @@ private:
         return b == a;
     }
 
-    inline bool equal(const sstring& data, const internal_node& n) const
+    inline bool equal(const bytes& data, const internal_node& n) const
     {
         return equal(data, n);
     }

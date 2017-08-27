@@ -1,0 +1,60 @@
+#!/bin/bash -e
+#
+#  Copyright (C) 2015 ScyllaDB
+
+. /usr/lib/scylla/scylla_lib.sh
+
+print_usage() {
+    echo "scylla_ntp_setup --subdomain centos"
+    echo "  --subdomain specify subdomain of pool.ntp.org (ex: centos, fedora or amazon)"
+    exit 1
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        "--subdomain")
+            DOMAIN="$2"
+            shift 2
+            ;;
+        *)
+            print_usage
+            ;;
+    esac
+done
+
+if is_debian_variant; then
+    apt-get install -y ntp ntpdate
+    service ntp stop
+    count=$(egrep '^server' /etc/ntp.conf|wc -l)
+    if [ $count -eq 0 ]; then
+        cp /etc/ntp.conf /etc/ntp.conf_orig
+        grep -v "pool" /etc/ntp.conf > /etc/ntp.conf_new
+        cp /etc/ntp.conf_new /etc/ntp.conf
+        rm -rf /etc/ntp.conf_new
+        echo "server ntp.ubuntu.com iburst" >> /etc/ntp.conf
+    fi
+    ntpdate `cat /etc/ntp.conf |egrep "^server"|head -n1|awk '{print $2}'`
+    service ntp start
+elif is_gentoo_variant; then
+    emerge -uq net-misc/ntp
+    pidof ntpd &>/dev/null || ntpdate `cat /etc/ntp.conf |grep "^server"|head -n1|awk '{print $2}'`
+    if is_systemd; then
+        systemctl enable sntpd.service
+        systemctl start sntpd.service
+    else
+        rc-update add ntpd default
+        service ntpd start
+    fi
+else
+    yum install -y ntp ntpdate || true
+    if [ "$DOMAIN" != "" ]; then
+        sed -e "s#\..*\.pool\.ntp\.org#.$DOMAIN.pool.ntp.org#" /etc/ntp.conf > /tmp/ntp.conf
+        mv /tmp/ntp.conf /etc/ntp.conf
+    fi
+    if [ "`systemctl is-active ntpd`" = "active" ]; then
+        systemctl stop ntpd.service
+    fi
+    ntpdate `cat /etc/ntp.conf |grep "^server"|head -n1|awk '{print $2}'`
+    systemctl enable ntpd.service
+    systemctl start ntpd.service
+fi

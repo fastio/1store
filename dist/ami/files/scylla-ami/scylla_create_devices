@@ -1,0 +1,162 @@
+#!/usr/bin/env python
+import urllib2
+import urllib
+import re
+import subprocess
+
+import logger
+import conf
+import os
+
+raid_script="/usr/lib/scylla/scylla_raid_setup"
+raid_device = "/dev/md%d"
+scylla_root = "/var/lib/scylla"
+
+def scylla_directory(role):
+    if role == "all":
+        return scylla_root
+    else:
+        return os.path.join(scylla_root, role)
+
+def curl_instance_data(url):
+    max_retries = 5
+    retries = 0
+    while True:
+        try:
+            req = urllib2.Request(url)
+            return urllib2.urlopen(req).read()
+        except urllib2.HTTPError:
+            logger.info("Failed to grab %s..." % url)
+            time.sleep(5)
+            retries += 1
+            if (retries >= max_retries):
+                raise
+
+def find_disk(disks, line):
+    for disk in disks:
+        if line.find(disk) == -1:
+            return False
+    return True
+
+def config_array(type, disks, role, mdidx):
+    # Is it already constucted
+    lines = file("/proc/mdstat", "ro").readlines()
+    disks.sort()
+    for l in lines:
+        if find_disk(disks, l):
+            dev = re.search(r"^md\w+", l).group()
+            logger.info("Found existing RAID %s, will mount it" % dev)
+            subprocess.check_call(["mount", "-o", "noatime",
+                                  "/dev/%s" % dev,
+                                  scylla_directory(role)])
+            return
+    logger.info("RAID Array containing %s not found. Creating..." % str(disks))
+    disk_devs = ['/dev/%s' % x for x in disks]
+    subprocess.check_call([raid_script, "--raiddev",
+                           raid_device % mdidx, "--disks", ",".join(disk_devs),
+                           "--root", scylla_root,
+                           "--volume-role", role ])
+
+def xenify(devname):
+    dev = curl_instance_data('http://169.254.169.254/latest/meta-data/block-device-mapping/' + devname)
+    return dev.replace("sd", "xvd")
+
+def read_role(t):
+    c = conf.get_config("AMI", t + "_role")
+    # compatibility with older AMI ds2 scripts. If ephemeral is not
+    # specified, assume all, if ebs not specified assume unused.. This
+    # shouldn't happen because ds2 and this script are supposed to be
+    # deployed in tandem - so warn.
+    if not c:
+        if t == "ephemeral":
+            c = "all"
+        else:
+            c = "unused"
+        logger.warn("Unspecified role for %s: assuming default (%s)"%(t, c))
+    return c
+
+def device_exists(dev):
+    return os.path.exists("/dev/%s" % dev)
+
+# While testing this, I found the following issue at AWS:
+#
+# $ ls /dev/nvme*
+# /dev/nvme0  /dev/nvme0n1  /dev/nvme1  /dev/nvme1n1
+#
+# $ curl http://169.254.169.254/latest/meta-data/block-device-mapping/
+# ami
+# ebs2
+# ephemeral0
+# root
+#
+# As one can see, only one of the ephemeral devices were listed.
+#
+# I saw this happening only on i3 machines, if EBS were listed before
+# ephemeral during creation time. However, in that scenario, I saw it
+# happening every time I tested.
+#
+# More info at:
+# https://forums.aws.amazon.com/thread.jspa?threadID=250553
+#
+# So for nvme devices, we'll just scan the device list and see what we
+# find. Since the goal is to differentiate between ephemeral and
+# non-ephemeral anyway, and NVMe are always ephemeral, this is
+# acceptable
+def get_disk_bundles():
+    # define preferred disk roles. We'll see soon if we can respect them.
+    role = {}
+    role["ebs"] = read_role("ebs")
+    role["ephemeral"] = read_role("ephemeral")
+
+    # Find disk assignments
+    devmap = curl_instance_data('http://169.254.169.254/latest/meta-data/block-device-mapping/')
+    typemap = {}
+    devname = re.compile("^\D+")
+    nvme_re = re.compile(r"nvme\d+n\d+$")
+    nvmes_present = filter(nvme_re.match, os.listdir("/dev"))
+    if nvmes_present:
+        typemap["ephemeral"] = nvmes_present;
+
+    for dev in devmap.splitlines():
+        if dev == "ami" or dev == "root":
+            continue
+
+        t = devname.match(dev).group()
+        if role[t] == "unused":
+            continue
+
+        if t == "ephemeral"  and nvmes_present:
+            continue;
+
+        if not typemap.has_key(t):
+            typemap[t] = []
+        if not device_exists(xenify(dev)):
+            continue
+        typemap[t] += [ xenify(dev) ]
+
+    # One of the desired types not found: The other type has it all
+    if not typemap.has_key("ebs") and not typemap.has_key("ephemeral"):
+        raise Exception("No disks found")
+    elif not typemap.has_key("ebs"):
+        role["ephemeral"] = "all"
+    elif not typemap.has_key("ephemeral"):
+        role["ebs"] = "all"
+
+    # Could happen even if properly invoked through ds2 if one of the
+    # types is not present, and the other is set to "unused"
+    if role["ebs"] == role["ephemeral"]:
+        raise Exception("Exception when parsing config. Both EBS and ephemeral are set to the same role (%s)"%(role["ebs"]))
+
+    # If one type configured for all, the other for a specifid role, and both present:
+    # That's valid and sane: respect that and mount one on top of the other. We just need
+    # make sure that the root is mounted first.
+    order = typemap.keys()
+    order.sort()
+
+    mdidx = 0
+    for t in order:
+        config_array(t, typemap[t], role[t], mdidx)
+        mdidx += 1
+
+if __name__ == "__main__":
+    get_disk_bundles()
