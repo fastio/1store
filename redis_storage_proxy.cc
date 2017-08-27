@@ -50,7 +50,7 @@
 #include "message/messaging_service.hh"
 #include "gms/failure_detector.hh"
 #include "gms/gossiper.hh"
-#include "storage_service.hh"
+#include "service/storage_service.hh"
 #include "core/future-util.hh"
 #include "db/read_repair_decision.hh"
 #include "db/config.hh"

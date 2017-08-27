@@ -1,8 +1,7 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
+ * Licensed to  the GNU Affero General Public Licens argreements. See the
+ * NOTICE file distributed with this work for additional information
+ * regarding copyright ownership.  The AGPL licenses this file
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
@@ -75,7 +74,7 @@ private:
     distributed<redis::redis_service> _redis;
     seastar::metrics::metric_groups _metrics;
 private:
-    void uninit_messaging_service();
+    void uninit_messaging_service() {}
     std::vector<gms::inet_address> get_live_endpoints(const dht::token& token);
     future<> proxy_command_to_endpoint(gms::inet_address addr, const redis::request_wrapper& req);
     dht::decorated_key construct_decorated_key_from(const bytes& key) const;

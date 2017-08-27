@@ -1,24 +1,3 @@
-/*
- * Copyright (C) 2014 ScyllaDB
- */
-
-/*
- * This file is part of Scylla.
- *
- * Scylla is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Scylla is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
- */
-
 #include "supervisor.hh"
 #include "database.hh"
 #include "core/app-template.hh"
@@ -88,7 +67,7 @@ read_config(bpo::variables_map& opts, db::config& cfg) {
     if (opts.count("options-file") > 0) {
         file = opts["options-file"].as<sstring>();
     } else {
-        file = relative_conf_dir("scylla.yaml").string();
+        file = relative_conf_dir("redis.yaml").string();
     }
     return check_direct_io_support(file).then([file, &cfg] {
         return cfg.read_from_file(file);
@@ -204,7 +183,7 @@ verify_rlimit(bool developer_mode) {
 
 static bool cpu_sanity() {
     if (!__builtin_cpu_supports("sse4.2")) {
-        std::cerr << "Scylla requires a processor with SSE 4.2 support\n";
+        std::cerr << "Redis requires a processor with SSE 4.2 support\n";
         return false;
     }
     return true;
@@ -230,7 +209,7 @@ verify_seastar_io_scheduler(bool has_max_io_requests, bool developer_mode) {
     auto note_bad_conf = [developer_mode] (sstring cause) {
         sstring msg = "I/O Scheduler is not properly configured! This is a non-supported setup, and performance is expected to be unpredictably bad.\n Reason found: "
                     + cause + "\n"
-                    + "To properly configure the I/O Scheduler, run the scylla_io_setup utility shipped with Scylla.\n";
+                    + "To properly configure the I/O Scheduler, run the redis_io_setup utility shipped with redis.\n";
 
         sstring devmode_msg = msg + "To ignore this, see the developer_mode configuration option.";
         if (developer_mode) {
@@ -280,7 +259,7 @@ int main(int ac, char** av) {
     runtime::init_uptime();
     std::setvbuf(stdout, nullptr, _IOLBF, 1000);
     app_template::config app_cfg;
-    app_cfg.name = "Scylla";
+    app_cfg.name = "Redis";
     app_cfg.default_task_quota = 500us;
     app_template app(std::move(app_cfg));
     auto opt_add = app.add_options();
@@ -290,7 +269,7 @@ int main(int ac, char** av) {
     bool help_version = false;
     cfg->add_options(opt_add)
         // TODO : default, always read?
-        ("options-file", bpo::value<sstring>(), "configuration file (i.e. <SCYLLA_HOME>/conf/scylla.yaml)")
+        ("options-file", bpo::value<sstring>(), "configuration file (i.e. <REDIS_HOME>/conf/redis.yaml)")
         ("help-loggers", bpo::bool_switch(&help_loggers), "print a list of logger names and exit")
         ("version", bpo::bool_switch(&help_version), "print version number and exit")
         ;
@@ -317,12 +296,12 @@ int main(int ac, char** av) {
             engine().exit(1);
             return make_ready_future<>();
         }
-        print("Scylla version %s starting ...\n", scylla_version());
+        print("Redis version %s starting ...\n", scylla_version());
         auto&& opts = app.configuration();
 
         namespace sm = seastar::metrics;
-        app_metrics.add_group("scylladb", {
-            sm::make_gauge("current_version", sm::description("Current ScyllaDB version."), { sm::label_instance("version", scylla_version()), sm::shard_label("") }, [] { return 0; })
+        app_metrics.add_group("redis", {
+            sm::make_gauge("current_version", sm::description("Current Redis version."), { sm::label_instance("version", scylla_version()), sm::shard_label("") }, [] { return 0; })
         });
 
         // Do this first once set log applied from command line so for example config
@@ -363,7 +342,7 @@ int main(int ac, char** av) {
             supervisor::notify("starting prometheus API server");
             uint16_t pport = cfg->prometheus_port();
             if (pport) {
-                pctx.metric_help = "Scylla server statistics";
+                pctx.metric_help = "Redis server statistics";
                 pctx.prefix = cfg->prometheus_prefix();
                 prometheus_server.start("prometheus").get();
                 prometheus::start(prometheus_server, pctx);
@@ -414,8 +393,8 @@ int main(int ac, char** av) {
             auto& ceo = cfg->client_encryption_options();
             if (is_true(get_or_default(ceo, "enabled", "false"))) {
                 ceo["enabled"] = "true";
-                ceo["certificate"] = get_or_default(ceo, "certificate", relative_conf_dir("scylla.crt").string());
-                ceo["keyfile"] = get_or_default(ceo, "keyfile", relative_conf_dir("scylla.key").string());
+                ceo["certificate"] = get_or_default(ceo, "certificate", relative_conf_dir("redis.crt").string());
+                ceo["keyfile"] = get_or_default(ceo, "keyfile", relative_conf_dir("redis.key").string());
                 ceo["require_client_auth"] = is_true(get_or_default(ceo, "require_client_auth", "false")) ? "true" : "false";
             } else {
                 ceo["enabled"] = "false";
@@ -440,7 +419,7 @@ int main(int ac, char** av) {
             ctx.http_server.start("API").get();
             api::set_server_init(ctx).get();
             ctx.http_server.listen(ipv4_addr{ip, api_port}).get();
-            startlog.info("Scylla API server listening on {}:{} ...", api_address, api_port);
+            startlog.info("Redis API server listening on {}:{} ...", api_address, api_port);
             supervisor::notify("initializing storage service");
             init_storage_service(db);
             supervisor::notify("starting per-shard database core");
@@ -498,8 +477,8 @@ int main(int ac, char** av) {
             auto tcp_nodelay_inter_dc = cfg->inter_dc_tcp_nodelay();
             auto encrypt_what = get_or_default(ssl_opts, "internode_encryption", "none");
             auto trust_store = get_or_default(ssl_opts, "truststore");
-            auto cert = get_or_default(ssl_opts, "certificate", relative_conf_dir("scylla.crt").string());
-            auto key = get_or_default(ssl_opts, "keyfile", relative_conf_dir("scylla.key").string());
+            auto cert = get_or_default(ssl_opts, "certificate", relative_conf_dir("redis.crt").string());
+            auto key = get_or_default(ssl_opts, "keyfile", relative_conf_dir("redis.key").string());
             auto prio = get_or_default(ssl_opts, "priority_string", sstring());
             auto clauth = is_true(get_or_default(ssl_opts, "require_client_auth", "false"));
             init_ms_fd_gossiper(listen_address

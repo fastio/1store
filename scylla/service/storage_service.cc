@@ -62,7 +62,7 @@
 #include "service/load_broadcaster.hh"
 #include "thrift/server.hh"
 #include "transport/server.hh"
-#include "transport/redis_server.hh"
+#include "redis_server.hh"
 #include <seastar/core/rwlock.hh>
 #include "db/batchlog_manager.hh"
 #include "db/commitlog/commitlog.hh"

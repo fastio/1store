@@ -1,25 +1,6 @@
 #!/usr/bin/python3
 #
-# Copyright (C) 2015 ScyllaDB
 #
-
-#
-# This file is part of Scylla.
-#
-# Scylla is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Scylla is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
-#
-
 import os, os.path, textwrap, argparse, sys, shlex, subprocess, tempfile, re
 from distutils.spawn import find_executable
 
@@ -239,7 +220,7 @@ scylla_tests = [
 ]
 
 apps = [
-    'scylla',
+    'pedis',
     ]
 
 tests = scylla_tests
@@ -250,7 +231,7 @@ other = [
 
 all_artifacts = apps + tests + other
 
-arg_parser = argparse.ArgumentParser('Configure Scylla')
+arg_parser = argparse.ArgumentParser('Configure Pedis')
 arg_parser.add_argument('--static', dest = 'static', action = 'store_const', default = '',
                         const = '-static',
                         help = 'Static link (useful for running on hosts outside the build environment')
@@ -334,7 +315,6 @@ scylla_core = (['scylla/database.cc',
                  'scylla/transport/event.cc',
                  'scylla/transport/event_notifier.cc',
                  'scylla/transport/server.cc',
-                 'scylla/transport/redis_server.cc',
                  'scylla/cql3/abstract_marker.cc',
                  'scylla/cql3/attributes.cc',
                  'scylla/cql3/cf_name.cc',
@@ -400,7 +380,6 @@ scylla_core = (['scylla/database.cc',
                  'scylla/service/priority_manager.cc',
                  'scylla/service/migration_manager.cc',
                  'scylla/service/storage_proxy.cc',
-                 'scylla/service/redis_storage_proxy.cc',
                  'scylla/cql3/operator.cc',
                  'scylla/cql3/relation.cc',
                  'scylla/cql3/column_identifier.cc',
@@ -534,6 +513,8 @@ scylla_core = (['scylla/database.cc',
                  'request_wrapper.cc',
                  'sset_lsa.cc',
                  'bits_operation.cc',
+                 'redis_server.cc',
+                 'redis_storage_proxy.cc',
                  ]
                 + [Antlr3Grammar('scylla/cql3/Cql.g')]
                 + [Thrift('scylla/interface/cassandra.thrift', 'Cassandra')]
@@ -610,7 +591,7 @@ scylla_tests_seastar_deps = [
 ]
 
 deps = {
-    'scylla': idls + ['main.cc'] + scylla_core + api,
+    'pedis': idls + ['main.cc'] + scylla_core + api,
 }
 
 pure_boost_tests = set([
@@ -760,7 +741,7 @@ scylla_version = file.read().strip()
 file = open('build/SCYLLA-RELEASE-FILE', 'r')
 scylla_release = file.read().strip()
 
-extra_cxxflags["release.cc"] = "-DSCYLLA_VERSION=\"\\\"" + scylla_version + "\\\"\" -DSCYLLA_RELEASE=\"\\\"" + scylla_release + "\\\"\""
+extra_cxxflags["scylla/release.cc"] = "-DSCYLLA_VERSION=\"\\\"" + scylla_version + "\\\"\" -DSCYLLA_RELEASE=\"\\\"" + scylla_release + "\\\"\""
 
 seastar_flags = []
 if args.dpdk:
@@ -869,7 +850,7 @@ with open(buildfile, 'w') as f:
     for mode in build_modes:
         modeval = modes[mode]
         f.write(textwrap.dedent('''\
-            cxxflags_{mode} = -I. -I./scylla -I $builddir/{mode}/gen -I seastar -I seastar/build/{mode}/gen
+            cxxflags_{mode} = -I. -I./scylla -I $builddir/{mode}/gen -I $builddir/{mode}/gen/scylla -I seastar -I seastar/build/{mode}/gen
             rule cxx.{mode}
               command = $cxx -MD -MT $out -MF $out.d {seastar_cflags} $cxxflags $cxxflags_{mode} -c -o $out $in
               description = CXX $out
