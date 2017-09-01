@@ -35,7 +35,6 @@
 #include "sset_lsa.hh"
 #include "hll.hh"
 #include "log.hh"
-#include "dht/i_partitioner.hh"
 #include "core/timer-set.hh"
 #include "hll.hh"
 #include "bytes.hh"
@@ -256,11 +255,11 @@ public:
             const auto& rk = r._key;
             return (l.key_hash() == r.key_hash()) && (lk == rk);
         }
-        inline bool operator () (const dht::decorated_key& dk, const cache_entry& e) const {
+        inline bool operator () (const decorated_key& dk, const cache_entry& e) const {
             return std::hash<managed_bytes>()(dk.key().representation()) == e.key_hash() &&
                    dk.key().representation() == e.key();
         }
-        inline bool operator () (const cache_entry& e, const dht::decorated_key& dk) const {
+        inline bool operator () (const cache_entry& e, const decorated_key& dk) const {
             return std::hash<managed_bytes>()(dk.key().representation()) == e.key_hash() &&
                    dk.key().representation() == e.key();
         }
@@ -464,9 +463,9 @@ public:
         _store.erase_and_dispose(_store.begin(), _store.end(), current_deleter<cache_entry>());
     }
 
-    inline bool erase(const dht::decorated_key& dk)
+    inline bool erase(const decorated_key& dk)
     {
-        auto hash_fn = [] (const dht::decorated_key& dk) -> size_t {
+        auto hash_fn = [] (const decorated_key& dk) -> size_t {
             return std::hash<managed_bytes>()(dk.key().representation());
         };
         auto it = _store.find(dk, hash_fn, cache_entry::compare());
@@ -562,8 +561,8 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(const cache_entry* e)> with_entry_run(const dht::decorated_key& dk, Func&& func) const {
-        auto hash_fn = [] (const dht::decorated_key& dk) -> size_t {
+    inline std::result_of_t<Func(const cache_entry* e)> run_with_entry(const decorated_key& dk, Func&& func) const {
+        auto hash_fn = [] (const decorated_key& dk) -> size_t {
             return std::hash<managed_bytes>()(dk.key().representation());
         };
         auto it = _store.find(dk, hash_fn, cache_entry::compare());
@@ -577,8 +576,8 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(cache_entry* e)> with_entry_run(const dht::decorated_key& dk, Func&& func) {
-        auto hash_fn = [] (const dht::decorated_key& dk) -> size_t {
+    inline std::result_of_t<Func(cache_entry* e)> run_with_entry(const decorated_key& dk, Func&& func) {
+        auto hash_fn = [] (const decorated_key& dk) -> size_t {
             return std::hash<managed_bytes>()(dk.key().representation());
         };
         auto it = _store.find(dk, hash_fn, cache_entry::compare());
@@ -592,9 +591,9 @@ public:
     }
 
 
-    inline bool exists(const dht::decorated_key& dk)
+    inline bool exists(const decorated_key& dk)
     {
-        auto hash_fn = [] (const dht::decorated_key& dk) -> size_t {
+        auto hash_fn = [] (const decorated_key& dk) -> size_t {
             return std::hash<managed_bytes>()(dk.key().representation());
         };
         auto it = _store.find(dk, hash_fn, cache_entry::compare());
@@ -627,10 +626,10 @@ public:
         return _store.empty();
     }
 
-    bool expire(const dht::decorated_key& dk, long expired)
+    bool expire(const decorated_key& dk, long expired)
     {
         bool result = false;
-        auto hash_fn = [] (const dht::decorated_key& dk) -> size_t {
+        auto hash_fn = [] (const decorated_key& dk) -> size_t {
             return std::hash<managed_bytes>()(dk.key().representation());
         };
         auto it = _store.find(dk, hash_fn, cache_entry::compare());
@@ -659,10 +658,10 @@ public:
         _timer.arm(_alive.get_next_timeout());
     }
 
-    bool never_expired(const dht::decorated_key& dk)
+    bool never_expired(const decorated_key& dk)
     {
         bool result = false;
-        auto hash_fn = [] (const dht::decorated_key& dk) -> size_t {
+        auto hash_fn = [] (const decorated_key& dk) -> size_t {
             return std::hash<managed_bytes>()(dk.key().representation());
         };
         auto it = _store.find(dk, hash_fn, cache_entry::compare());

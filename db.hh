@@ -29,8 +29,6 @@
 #include <iostream>
 #include <tuple>
 #include "cache.hh"
-#include "geo.hh"
-#include "bits_operation.hh"
 #include "reply_builder.hh"
 #include  <experimental/vector>
 #include "bytes.hh"
@@ -50,9 +48,9 @@ public:
     database();
     ~database();
 
-    future<scattered_message_ptr> set(const dht::decorated_key& dk, bytes& val, long expired, uint32_t flag);
-    future<scattered_message_ptr> del(const dht::decorated_key& key);
-    future<scattered_message_ptr> get(const dht::decorated_key& key);
+    future<scattered_message_ptr> set(const decorated_key& dk, bytes& val, long expired, uint32_t flag);
+    future<scattered_message_ptr> del(const decorated_key& key);
+    future<scattered_message_ptr> get(const decorated_key& key);
 private:
     static const int DEFAULT_DB_COUNT = 1;
     cache _cache_stores[DEFAULT_DB_COUNT];

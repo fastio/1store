@@ -1,27 +1,3 @@
-/*
- * This work is open source software, licensed under the terms of the
- * AGPL license as described in the LICENSE.AGPL file in the top-level directory.
- *
- * Modified by Peng Jian, pstack at 163.com
- */
-
-/*
- * This file is part of Pedis.
- *
- * Scylla is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Scylla is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
- */
-
 #include "supervisor.hh"
 #include "database.hh"
 #include "core/app-template.hh"
@@ -292,26 +268,18 @@ int main(int ac, char** av) {
     bool help_loggers = false;
     bool help_version = false;
     cfg->add_options(opt_add)
-        // TODO : default, always read?
         ("options-file", bpo::value<sstring>(), "configuration file (i.e. <REDIS_HOME>/conf/redis.yaml)")
         ("help-loggers", bpo::bool_switch(&help_loggers), "print a list of logger names and exit")
         ("version", bpo::bool_switch(&help_version), "print version number and exit")
         ;
 
-    distributed<database> db;
-    seastar::sharded<service::cache_hitrate_calculator> cf_cache_hitrate_calculator;
-    debug::db = &db;
-    auto& qp = cql3::get_query_processor();
-    auto& proxy = service::get_storage_proxy();
-    auto& mm = service::get_migration_manager();
-    api::http_context ctx(db, proxy);
     httpd::http_server_control prometheus_server;
     prometheus::config pctx;
     directories dirs;
 
     return app.run_deprecated(ac, av, [&] {
         if (help_version) {
-            print("%s\n", scylla_version());
+            print("%s\n", pedis_version());
             engine().exit(0);
             return make_ready_future<>();
         }
@@ -320,12 +288,12 @@ int main(int ac, char** av) {
             engine().exit(1);
             return make_ready_future<>();
         }
-        print("Redis version %s starting ...\n", scylla_version());
+        print("Redis version %s starting ...\n", pedis_version());
         auto&& opts = app.configuration();
 
         namespace sm = seastar::metrics;
         app_metrics.add_group("redis", {
-            sm::make_gauge("current_version", sm::description("Current Redis version."), { sm::label_instance("version", scylla_version()), sm::shard_label("") }, [] { return 0; })
+            sm::make_gauge("current_version", sm::description("Redis version."), { sm::label_instance("version", scylla_version()), sm::shard_label("") }, [] { return 0; })
         });
 
         // Do this first once set log applied from command line so for example config
@@ -341,19 +309,15 @@ int main(int ac, char** av) {
         }
 
         tcp_syncookies_sanity();
+        auto& proxy = redis::get_proxy();
 
-        return seastar::async([cfg, &db, &qp, &proxy, &mm, &ctx, &opts, &dirs, &pctx, &prometheus_server, &return_value, &cf_cache_hitrate_calculator] {
+        return seastar::async([cfg, &proxy, &ctx, &opts, &dirs, &pctx, &prometheus_server, &return_value] {
             read_config(opts, *cfg).get();
             apply_logger_settings(cfg->default_log_level(), cfg->logger_log_level(),
                     cfg->log_to_stdout(), cfg->log_to_syslog());
             verify_rlimit(cfg->developer_mode());
             verify_adequate_memory_per_shard(cfg->developer_mode());
-            if (cfg->partitioner() != "org.apache.cassandra.dht.Murmur3Partitioner") {
-                startlog.warn("The partitioner {} is deprecated and will be removed in a future version."
-                        "  Contact scylladb-users@googlegroups.com if you are using it in production", cfg->partitioner());
-            }
-            dht::set_global_partitioner(cfg->partitioner(), cfg->murmur3_partitioner_ignore_msb_bits());
-            auto start_thrift = cfg->start_rpc();
+            
             uint16_t api_port = cfg->api_port();
             ctx.api_dir = cfg->api_ui_dir();
             ctx.api_doc = cfg->api_doc_dir();
@@ -430,41 +394,18 @@ int main(int ac, char** av) {
             if (opts.count("developer-mode")) {
                 smp::invoke_on_all([] { engine().set_strict_dma(false); }).get();
             }
-            supervisor::notify("creating tracing");
-            tracing::tracing::create_tracing("trace_keyspace_helper").get();
-            supervisor::notify("creating snitch");
-            i_endpoint_snitch::create_snitch(cfg->endpoint_snitch()).get();
-            // #293 - do not stop anything
-            // engine().at_exit([] { return i_endpoint_snitch::stop_snitch(); });
             supervisor::notify("determining DNS name");
             auto e = seastar::net::dns::get_host_by_name(api_address).get0();
             supervisor::notify("starting API server");
             auto ip = e.addr_list.front();
-            ctx.http_server.start("API").get();
-            api::set_server_init(ctx).get();
-            ctx.http_server.listen(ipv4_addr{ip, api_port}).get();
-            startlog.info("Redis API server listening on {}:{} ...", api_address, api_port);
+
             supervisor::notify("initializing storage service");
-            init_storage_service(db);
-            supervisor::notify("starting per-shard database core");
-            // Note: changed from using a move here, because we want the config object intact.
-            db.start(std::ref(*cfg)).get();
-            engine().at_exit([&db, &return_value] {
-                // A shared sstable must be compacted by all shards before it can be deleted.
-                // Since we're stoping, that's not going to happen.  Cancel those pending
-                // deletions to let anyone waiting on them to continue.
-                sstables::cancel_atomic_deletions();
-                // #293 - do not stop anything - not even db (for real)
-                //return db.stop();
-                // call stop on each db instance, but leave the shareded<database> pointers alive.
-                return db.invoke_on_all([](auto& db) {
-                    return db.stop();
-                }).then([] {
-                        return sstables::await_background_jobs_on_all_shards();
-                }).then([&return_value] {
-                        ::_exit(return_value);
-                });
-            });
+            redis::get_storage_service().start().get();
+            auto ss = redis::get_local_storage_service();
+            ss.initialize().get();
+
+            /* initializing redis service */
+            //init_storage_service(db);
             verify_seastar_io_scheduler(opts.count("max-io-requests"), db.local().get_config().developer_mode()).get();
             supervisor::notify("creating data directories");
             dirs.touch_and_lock(db.local().get_config().data_file_directories()).get();
@@ -479,14 +420,7 @@ int main(int ac, char** av) {
                 return disk_sanity(pathname, db.local().get_config().developer_mode());
             }).get();
 
-            // Initialization of a keyspace is done by shard 0 only. For system
-            // keyspace, the procedure  will go through the hardcoded column
-            // families, and in each of them, it will load the sstables for all
-            // shards using distributed database object.
-            // Iteration through column family directory for sstable loading is
-            // done only by shard 0, so we'll no longer face race conditions as
-            // described here: https://github.com/scylladb/scylla/issues/1014
-            distributed_loader::init_system_keyspace(db).get();
+            //distributed_loader::init_system_keyspace(db).get();
 
             supervisor::notify("starting gossip");
             // Moved local parameters here, esp since with the
@@ -505,47 +439,15 @@ int main(int ac, char** av) {
             auto key = get_or_default(ssl_opts, "keyfile", relative_conf_dir("redis.key").string());
             auto prio = get_or_default(ssl_opts, "priority_string", sstring());
             auto clauth = is_true(get_or_default(ssl_opts, "require_client_auth", "false"));
-            init_ms_fd_gossiper(listen_address
-                    , storage_port
-                    , ssl_storage_port
-                    , tcp_nodelay_inter_dc
-                    , encrypt_what
-                    , trust_store
-                    , cert
-                    , key
-                    , prio
-                    , clauth
-                    , cfg->internode_compression()
-                    , seed_provider
-                    , cluster_name
-                    , phi
-                    , cfg->listen_on_broadcast_address());
-            supervisor::notify("starting messaging service");
-            supervisor::notify("starting storage proxy");
+
+            /* initializing message system */
+            /* initializing gossiper system */
+            /* initializing storage proxy */
             proxy.start(std::ref(db)).get();
-            // #293 - do not stop anything
-            // engine().at_exit([&proxy] { return proxy.stop(); });
-            supervisor::notify("starting migration manager");
-            mm.start().get();
-            // #293 - do not stop anything
-            // engine().at_exit([&mm] { return mm.stop(); });
-            supervisor::notify("starting query processor");
-            qp.start(std::ref(proxy), std::ref(db)).get();
-            // #293 - do not stop anything
+            /* initializing migration system */
             // engine().at_exit([&qp] { return qp.stop(); });
-            supervisor::notify("initializing batchlog manager");
-            db::get_batchlog_manager().start(std::ref(qp)).get();
-            // #293 - do not stop anything
-            // engine().at_exit([] { return db::get_batchlog_manager().stop(); });
-            sstables::init_metrics().get();
-
-            db::system_keyspace::minimal_setup(db, qp);
-
-            // schema migration, if needed, is also done on shard 0
-            db::legacy_schema_migrator::migrate(proxy, qp.local()).get();
 
             supervisor::notify("loading sstables");
-
             distributed_loader::ensure_system_table_directories(db).get();
 
             supervisor::notify("loading sstables");
@@ -554,79 +456,17 @@ int main(int ac, char** av) {
             db.invoke_on_all([] (database& db) {
                 db.register_connection_drop_notifier(netw::get_local_messaging_service());
             }).get();
-            supervisor::notify("setting up system keyspace");
-            db::system_keyspace::setup(db, qp).get();
-            supervisor::notify("starting commit log");
-            auto cl = db.local().commitlog();
-            if (cl != nullptr) {
-                auto paths = cl->get_segments_to_replay();
-                if (!paths.empty()) {
-                    supervisor::notify("replaying commit log");
-                    auto rp = db::commitlog_replayer::create_replayer(qp).get0();
-                    rp.recover(paths).get();
-                    supervisor::notify("replaying commit log - flushing memtables");
-                    db.invoke_on_all([] (database& db) {
-                        return db.flush_all_memtables();
-                    }).get();
-                    supervisor::notify("replaying commit log - removing old commitlog segments");
-                    for (auto& path : paths) {
-                        ::unlink(path.c_str());
-                    }
-                }
-            }
-            // If the same sstable is shared by several shards, it cannot be
-            // deleted until all shards decide to compact it. So we want to
-            // start thse compactions now. Note we start compacting only after
-            // all sstables in this CF were loaded on all shards - otherwise
-            // we will have races between the compaction and loading processes
-            // We also want to trigger regular compaction on boot.
-
-            for (auto& x : db.local().get_column_families()) {
-                column_family& cf = *(x.second);
-                distributed_loader::reshard(db, cf.schema()->ks_name(), cf.schema()->cf_name());
-            }
-            db.invoke_on_all([&proxy] (database& db) {
-                for (auto& x : db.get_column_families()) {
-                    column_family& cf = *(x.second);
-                    cf.trigger_compaction();
-                }
-            }).get();
             api::set_server_storage_service(ctx).get();
             api::set_server_gossip(ctx).get();
-            api::set_server_snitch(ctx).get();
             api::set_server_storage_proxy(ctx).get();
-            api::set_server_load_sstable(ctx).get();
-            supervisor::notify("initializing migration manager RPC verbs");
-            service::get_migration_manager().invoke_on_all([] (auto& mm) {
-                mm.init_messaging_service();
-            }).get();
-            supervisor::notify("initializing storage proxy RPC verbs");
             proxy.invoke_on_all([] (service::storage_proxy& p) {
                 p.init_messaging_service();
-            }).get();
-            supervisor::notify("starting streaming service");
-            streaming::stream_session::init_streaming_service(db).get();
-            api::set_server_stream_manager(ctx).get();
-            // Start handling REPAIR_CHECKSUM_RANGE messages
-            netw::get_messaging_service().invoke_on_all([&db] (auto& ms) {
-                ms.register_repair_checksum_range([&db] (sstring keyspace, sstring cf, dht::token_range range, rpc::optional<repair_checksum> hash_version) {
-                    auto hv = hash_version ? *hash_version : repair_checksum::legacy;
-                    return do_with(std::move(keyspace), std::move(cf), std::move(range),
-                            [&db, hv] (auto& keyspace, auto& cf, auto& range) {
-                        return checksum_range(db, keyspace, cf, range, hv);
-                    });
-                });
             }).get();
             supervisor::notify("starting storage service", true);
             auto& ss = service::get_local_storage_service();
             ss.init_server().get();
             api::set_server_messaging_service(ctx).get();
             api::set_server_storage_service(ctx).get();
-            supervisor::notify("starting batchlog manager");
-            db::get_batchlog_manager().invoke_on_all([] (db::batchlog_manager& b) {
-                return b.start();
-            }).get();
-            supervisor::notify("starting load broadcaster");
             // should be unique_ptr, but then lambda passed to at_exit will be non copieable and
             // casting to std::function<> will fail to compile
             auto lb = make_shared<service::load_broadcaster>(db, gms::get_local_gossiper());
@@ -640,11 +480,7 @@ int main(int ac, char** av) {
             gms::get_local_gossiper().wait_for_gossip_to_settle().get();
             api::set_server_gossip_settle(ctx).get();
             supervisor::notify("starting native transport");
-            service::get_local_storage_service().start_native_transport().get();
             service::get_local_storage_service().start_redis_transport().get();
-            if (start_thrift) {
-                service::get_local_storage_service().start_rpc_server().get();
-            }
             if (cfg->defragment_memory_on_idle()) {
                 smp::invoke_on_all([] () {
                     engine().set_idle_cpu_handler([] (reactor::work_waiting_on_reactor check_for_work) {

@@ -41,35 +41,29 @@
 #include "net/packet-data-source.hh"
 #include <unistd.h>
 #include <cstdlib>
-#include "db.hh"
-#include "dht/i_partitioner.hh"
+#include "common.hh"
+#include "geo.hh"
 namespace redis {
-using namespace seastar;
-class service {
+class storage_service;
+extern distributed<storage_service> _the_service;
+inline distributed<storage_service>& get_storage_service() {
+    return _the_service;
+}
+inline storage_service& local_storage_service() {
+    return _the_service.local();
+}
+
+class storage_service {
 private:
-    inline unsigned get_cpu(const dht::decorated_key& dk) {
-        return std::hash<managed_bytes>()(dk.key().representation()) % smp::count;
-    }
 public:
-    service()
+    storage_service()
     {
     }
 
-    future<> set(const dht::decorated_key& dk, const sstring& value, output_stream<char>& out);
-    future<> del(const dht::decorated_key& dk, output_stream<char>& out);
-    future<> get(const dht::decorated_key& dk, output_stream<char>& out);
-
+    future<> initialize();
     future<> stop();
-private:
-    distributed<database> _db;
-    seastar::metrics::metric_groups _metrics;
+    void init_messaging_service();
+    // [TEST APIs]
 };
 
-extern distributed<service> _the_redis_srvice;
-inline distributed<service>& get_service() {
-    return _the_redis_srvice;
-}
-inline service& get_local_service() {
-    return _the_redis_srvice.local();
-}
 } /* namespace redis */

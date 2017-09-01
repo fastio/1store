@@ -228,7 +228,7 @@ void database::setup_metrics()
      });
 }
 
-future<scattered_message_ptr> database::set(const dht::decorated_key& dk, bytes& val, long expired, uint32_t flag)
+future<scattered_message_ptr> database::set(const decorated_key& dk, bytes& val, long expired, uint32_t flag)
 {
     ++_stat._set;
     return with_allocator(allocator(), [this, &dk, &val, expired, flag] {
@@ -245,38 +245,19 @@ future<scattered_message_ptr> database::set(const dht::decorated_key& dk, bytes&
     });
 }
 
-future<scattered_message_ptr> database::del(const dht::decorated_key& dk)
+future<scattered_message_ptr> database::del(const decorated_key& dk)
 {
     ++_stat._del;
-    return current_store().with_entry_run(dk, [this, &dk] (cache_entry* e) {
+    return current_store().run_with_entry(dk, [this, &dk] (cache_entry* e) {
         if (!e) return reply_builder::build(msg_zero);
-        if (e->type_of_bytes()) {
-            --_stat._total_string_entries;
-        }
-        else if (e->type_of_set()) {
-            --_stat._total_set_entries;
-        }
-        else if (e->type_of_list()) {
-            --_stat._total_list_entries;
-        }
-        else if (e->type_of_map()) {
-            --_stat._total_dict_entries;
-        }
-        else if (e->type_of_sset()) {
-            --_stat._total_zset_entries;
-        }
-        else if (e->type_of_hll()) {
-            --_stat._total_hll_entries;
-        }
-        else {
-            --_stat._total_counter_entries;
-        }
+        auto& meta = e->meta();
         auto result =  current_store().erase(*e);
+        _store.erase(dk);
         return reply_builder::build(result ? msg_one : msg_zero);
     });
 }
 
-future<scattered_message_ptr> database::get(const dht::decorated_key& dk)
+future<scattered_message_ptr> database::get(const decorated_key& dk)
 {
     ++_stat._read;
     ++_stat._get;
@@ -285,8 +266,6 @@ future<scattered_message_ptr> database::get(const dht::decorated_key& dk)
            return reply_builder::build(msg_type_err);
        }
        else {
-           if (e != nullptr) ++_stat._hit;
-           //return reply_builder::build<false, true>(e);
            return reply_builder::build(msg_type_err);
        }
     });
