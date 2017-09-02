@@ -15,9 +15,9 @@
 #pragma once
 #include <assert.h>
 #include <stddef.h>
-#include "core/sstring.hh"
 #include <string>
-
+#include "utils/bytes.hh" 
+#include "seastarx.hh"
 namespace store {
 
 class slice {
