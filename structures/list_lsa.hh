@@ -15,7 +15,7 @@
 * specific language governing permissions and limitations
 * under the License.
 *
-*  Copyright (c) 2016-2026, Peng Jian, pstack at 163.com.
+*  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
 #pragma once
@@ -23,7 +23,6 @@
 #include "utils/allocation_strategy.hh"
 #include "utils/managed_ref.hh"
 #include "utils/managed_bytes.hh"
-#include "bytes.hh"
 namespace redis {
 class list_lsa {
     struct internal_node {
@@ -59,31 +58,31 @@ public:
         clear();
     }
     // Inserts the value in the front of the list.
-    inline void insert_head(const bytes& data)
+    inline void insert_head(const sstring& data)
     {
-        bytes_view v {reinterpret_cast<const signed char*>(data.data()), data.size()};
+        bytes_view v {data.data(), data.size()};
         auto entry = current_allocator().construct<internal_node>(v);
         _list.push_front(*entry);
     }
 
     // Inserts the value in the back of the list.
-    inline void insert_tail(const bytes& data)
+    inline void insert_tail(const sstring& data)
     {
-        bytes_view v {reinterpret_cast<const signed char*>(data.data()), data.size()};
+        bytes_view v {data.data(), data.size()};
         auto entry = current_allocator().construct<internal_node>(v);
         _list.push_back(*entry);
     }
 
-    inline void insert_at(size_t index, const bytes& data)
+    inline void insert_at(size_t index, const sstring& data)
     {
         assert(index < _list.size());
-        bytes_view v {reinterpret_cast<const signed char*>(data.data()), data.size()};
+        bytes_view v {data.data(), data.size()};
         auto entry = current_allocator().construct<internal_node>(v);
         const_iterator p = iterator_to(index);
         _list.insert(p, *entry);
     }
 
-    inline size_t index_of(const bytes& pivot)
+    inline size_t index_of(const std::string& pivot)
     {
         size_t result = _list.size();
         for (auto i = _list.begin(); i != _list.end(); ++i, --result) {
@@ -146,13 +145,13 @@ public:
     }
 
     // Erase the elements from the list.
-    inline void erase(const bytes& data)
+    inline void erase(const sstring& data)
     {
         trem<false, true>(data, size_t{1});
     }
 
     template<bool RemoveAllEqual, bool FromHeadToTail>
-    inline size_t trem(const bytes& data, size_t count)
+    inline size_t trem(const std::string& data, size_t count)
     {
         size_t erased = 0;
         if (FromHeadToTail) {
@@ -230,15 +229,15 @@ private:
         return i;
     }
 
-    inline bool equal(const internal_node& n, const bytes& data) const
+    inline bool equal(const internal_node& n, const sstring& data) const
     {
         auto mb = n._data;
         bytes_view b {mb.data(), mb.size()} ;
-        bytes_view a {reinterpret_cast<const signed char*>(data.data()), data.size()};
+        bytes_view a {data.data(), data.size()};
         return b == a;
     }
 
-    inline bool equal(const bytes& data, const internal_node& n) const
+    inline bool equal(const sstring& data, const internal_node& n) const
     {
         return equal(data, n);
     }

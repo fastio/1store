@@ -23,9 +23,8 @@
 
 #include <cstdlib>
 #include <seastar/core/memory.hh>
-#include <memory>
 #include <malloc.h>
-
+#include <memory>
 // A function used by compacting collectors to migrate objects during
 // compaction. The function should reconstruct the object located at src
 // in the location pointed by dst. The object at old location should be

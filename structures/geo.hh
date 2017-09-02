@@ -19,34 +19,19 @@
 *
 */
 #pragma once
-#include "core/sstring.hh"
+#include "utils/bytes.hh"
 namespace redis {
-using namespace seastar;
-static constexpr const int GEORADIUS_ASC         = (1 << 0);
-static constexpr const int GEORADIUS_DESC        = (1 << 1);
-static constexpr const int GEORADIUS_WITHCOORD   = (1 << 2);
-static constexpr const int GEORADIUS_WITHSCORE   = (1 << 3);
-static constexpr const int GEORADIUS_WITHHASH    = (1 << 4);
-static constexpr const int GEORADIUS_WITHDIST    = (1 << 5);
-static constexpr const int GEORADIUS_COUNT       = (1 << 6);
-static constexpr const int GEORADIUS_STORE_SCORE = (1 << 7);
-static constexpr const int GEORADIUS_STORE_DIST  = (1 << 8);
-static constexpr const int GEO_UNIT_M      = (1 << 9);
-static constexpr const int GEO_UNIT_KM     = (1 << 10);
-static constexpr const int GEO_UNIT_MI     = (1 << 11);
-static constexpr const int GEO_UNIT_FT     = (1 << 12);
-
 class geo {
 public:
     static bool encode_to_geohash(const double& longitude, const double& latitude, double& geohash);
-    static bool encode_to_geohash_string(const double& geohash, sstring& geohashstr);
+    static bool encode_to_geohash_string(const double& geohash, bytes& geohashstr);
     static bool decode_from_geohash(const double& geohash, double& longitude, double& latitude);
     static bool dist(const double& lscore, const double& rscore, double& line);
     static bool dist(const double& llongitude, const double& llatitude, const double& rlongtitude, const double& rlatitude, double& line);
-    static sstring to_sstring(const long long& u);
+    static bytes to_bytes(const long long& u);
 
     //[key, dist, score, longitude, latitude]
-    using points_type = std::vector<std::tuple<sstring, double, double, double, double>>;
+    using points_type = std::vector<std::tuple<bytes, double, double, double, double>>;
     using fetch_point = std::function<size_t (uint64_t, uint64_t, const double, const double, const double, points_type& points)>;
     static bool fetch_points_from_location(double longitude, double latitude, double radius, fetch_point&& f, points_type& points);
     static bool to_meters(double& n, int flags);

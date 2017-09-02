@@ -41,35 +41,46 @@
 #include "net/packet-data-source.hh"
 #include <unistd.h>
 #include <cstdlib>
-#include "db.hh"
-#include "dht/i_partitioner.hh"
+#include "common.hh"
+#include "keys.hh"
+#include "structures/geo.hh"
 namespace redis {
-using namespace seastar;
-class service {
+
+namespace stdx = std::experimental;
+
+class redis_service;
+extern distributed<redis_service> _the_redis;
+inline distributed<redis_service>& get_redis_service() {
+    return _the_redis;
+}
+inline redis_service& local_redis_service() {
+    return _the_redis.local();
+}
+
+struct request_wrapper;
+class database;
+using message = scattered_message<char>;
+class redis_service {
 private:
-    inline unsigned get_cpu(const dht::decorated_key& dk) {
-        return std::hash<managed_bytes>()(dk.key().representation()) % smp::count;
+    inline unsigned get_cpu(const sstring& key) {
+        return std::hash<sstring>()(key) % smp::count;
+    }
+    inline unsigned get_cpu(const redis_key& key) {
+        return key.hash() % smp::count;
     }
 public:
-    service()
+    redis_service()
     {
     }
 
-    future<> set(const dht::decorated_key& dk, const sstring& value, output_stream<char>& out);
-    future<> del(const dht::decorated_key& dk, output_stream<char>& out);
-    future<> get(const dht::decorated_key& dk, output_stream<char>& out);
-
+    future<> start();
     future<> stop();
+
+    future<> set(request_wrapper& args, output_stream<char>& out);
+    future<> del(request_wrapper& args, output_stream<char>& out);
+    future<> get(request_wrapper& args, output_stream<char>& out);
 private:
-    distributed<database> _db;
-    seastar::metrics::metric_groups _metrics;
+    future<bool> remove_impl(bytes& key);
 };
 
-extern distributed<service> _the_redis_srvice;
-inline distributed<service>& get_service() {
-    return _the_redis_srvice;
-}
-inline service& get_local_service() {
-    return _the_redis_srvice.local();
-}
 } /* namespace redis */

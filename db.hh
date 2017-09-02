@@ -27,30 +27,46 @@
 #include "core/metrics_registration.hh"
 #include <sstream>
 #include <iostream>
+#include "common.hh"
+#include "structures/geo.hh"
+#include "structures/bits_operation.hh"
 #include <tuple>
 #include "cache.hh"
 #include "reply_builder.hh"
 #include  <experimental/vector>
-#include "bytes.hh"
+#include "config.hh"
+#include "utils/bytes.hh"
+namespace stdx = std::experimental;
 namespace redis {
-
-static constexpr uint32_t FLAG_SET_NO = 1 << 0;
-static constexpr uint32_t FLAG_SET_EX = 1 << 1;
-static constexpr uint32_t FLAG_SET_PX = 1 << 2;
-static constexpr uint32_t FLAG_SET_NX = 1 << 3;
-static constexpr uint32_t FLAG_SET_XX = 1 << 4;
-
-using namespace seastar;
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
 class sset_lsa;
+class database;
+extern distributed<database> _the_database;
+inline distributed<database>& get_database() {
+    return _the_database;
+}
+inline database& get_local_database() {
+    return _the_database.local();
+}
+
 class database final : private logalloc::region {
 public:
     database();
     ~database();
 
-    future<scattered_message_ptr> set(const decorated_key& dk, bytes& val, long expired, uint32_t flag);
-    future<scattered_message_ptr> del(const decorated_key& key);
-    future<scattered_message_ptr> get(const decorated_key& key);
+    future<scattered_message_ptr> set(const redis_key& rk, bytes& val, long expire, uint32_t flag);
+
+    future<scattered_message_ptr> del(const redis_key& key);
+
+
+    future<scattered_message_ptr> get(const redis_key& key);
+
+    future<> start();
+    future<> stop();
+
+    const redis::config& get_config() const {
+        return *_config;
+    }
 private:
     static const int DEFAULT_DB_COUNT = 1;
     cache _cache_stores[DEFAULT_DB_COUNT];
@@ -163,5 +179,6 @@ private:
     stats _stat;
     void setup_metrics();
     size_t sum_expiring_entries();
+    std::unique_ptr<redis::config> _config;
 };
 }

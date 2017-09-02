@@ -76,4 +76,16 @@ serialized_size(const T& object) {
     writer.close().get();
     return size;
 }
+
+future<file> make_file(const io_error_handler& error_handler, sstring name, open_flags flags) {
+    return open_checked_file_dma(error_handler, name, flags).handle_exception([name] (auto ep) {
+        return make_exception_future<file>(ep);
+    });
+}
+
+future<file> make_file(const io_error_handler& error_handler, sstring name, open_flags flags, file_open_options options) {
+    return open_checked_file_dma(error_handler, name, flags, options).handle_exception([name] (auto ep) {
+        return make_exception_future<file>(ep);
+    });
+}
 }

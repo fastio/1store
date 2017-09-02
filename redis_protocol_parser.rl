@@ -23,13 +23,13 @@
   which is the example in Seastar project.
 **/
 
-#include "ragel.hh"
+#include "utils/redis_ragel.hh"
 #include "redis_command_code.hh"
 #include <memory>
 #include <iostream>
 #include <algorithm>
 #include <functional>
-#include "bytes.hh"
+#include "utils/bytes.hh"
 using namespace seastar;
 using namespace redis;
 %%{
@@ -206,7 +206,7 @@ postpop {
 
 }%%
 
-class redis_protocol_parser : public ragel_parser_base<redis_protocol_parser> {
+class redis_protocol_parser : public redis_ragel_parser_base<redis_protocol_parser> {
     %% write data nofinal noprefix;
 public:
 

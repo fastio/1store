@@ -28,19 +28,9 @@
 #include "gms/inet_address.hh"
 #include "rpc/rpc_types.hh"
 #include <unordered_map>
-#include "query-request.hh"
-#include "mutation_query.hh"
-#include "range.hh"
-#include "repair/repair.hh"
-#include "tracing/tracing.hh"
-#include "digest_algorithm.hh"
-
 #include <seastar/net/tls.hh>
 
 // forward declarations
-namespace streaming {
-    class prepare_message;
-}
 
 namespace gms {
     class gossip_digest_syn;
@@ -52,49 +42,19 @@ namespace utils {
     class UUID;
 }
 
-namespace db {
-class seed_provider_type;
-}
-
-class frozen_mutation;
-class frozen_schema;
-class partition_checksum;
-
-namespace dht {
-    class token;
-}
-
-namespace redis {
-    class result;
-}
-
-namespace query {
-    using partition_range = dht::partition_range;
-    class read_command;
-    class result;
-}
-
-namespace compat {
-
-using wrapping_partition_range = wrapping_range<dht::ring_position>;
-
-}
-
 namespace netw {
 
 /* All verb handler identifiers */
 enum class messaging_verb : int32_t {
     CLIENT_ID = 0,
     // Used by gossip
-    GOSSIP_DIGEST_SYN = 1,
-    GOSSIP_DIGEST_ACK = 2,
-    GOSSIP_DIGEST_ACK2 = 3,
-    GOSSIP_ECHO = 4,
-    GOSSIP_SHUTDOWN = 5,
+    GOSSIP_DIGEST_SYN = 6,
+    GOSSIP_DIGEST_ACK = 7,
+    GOSSIP_DIGEST_ACK2 = 8,
+    GOSSIP_ECHO = 9,
+    GOSSIP_SHUTDOWN = 10,
     // end of gossip verb
-    // USED by REDIS
-    REDIS_INTERNAL_DATA_BUS = 6,
-    LAST = 7,
+    LAST = 24,
 };
 
 } // namespace netw

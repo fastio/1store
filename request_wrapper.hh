@@ -28,7 +28,7 @@
 #include <sstream>
 #include <functional>
 #include <vector>
-#include "bytes.hh"
+#include "utils/bytes.hh"
 #include  <experimental/vector>
 #include "redis_command_code.hh"
 namespace redis {

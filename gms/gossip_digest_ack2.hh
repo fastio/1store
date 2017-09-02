@@ -38,7 +38,7 @@
 
 #pragma once
 
-#include "types.hh"
+#include "utils/types.hh"
 #include "utils/serialization.hh"
 #include "gms/gossip_digest.hh"
 #include "gms/inet_address.hh"

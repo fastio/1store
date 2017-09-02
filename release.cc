@@ -23,12 +23,10 @@
 
 #include <seastar/core/print.hh>
 
-static const char pedis_version_str[] = PEDIS_VERSION;
-static const char pedis_release_str[] = PEDIS_RELEASE;
 
 std::string pedis_version()
 {
-    return sprint("%s-%s", pedis_version_str, pedis_release_str);
+    return sprint("0.0.1");
 }
 
 // get the version number into writeable memory, so we can grep for it if we get a core dump

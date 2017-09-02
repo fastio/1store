@@ -2,11 +2,11 @@
 #pragma once
 
 #include "core/distributed.hh"
-#include "db/consistency_level.hh"
-#include "db/write_type.hh"
 #include "utils/histogram.hh"
 #include "utils/estimated_histogram.hh"
 #include <seastar/core/metrics.hh>
+#include "gms/inet_address.hh"
+#include "keys.hh"
 namespace redis {
     class service;
     class request_wrapper;
@@ -20,9 +20,9 @@ private:
     seastar::metrics::metric_groups _metrics;
 private:
     void uninit_messaging_service() {}
-    std::vector<gms::inet_address> get_live_endpoints(const dht::token& token);
+    std::vector<gms::inet_address> get_live_endpoints(const redis::token& token);
     future<> proxy_command_to_endpoint(gms::inet_address addr, const redis::request_wrapper& req);
-    dht::decorated_key construct_decorated_key_from(const bytes& key) const;
+    redis::decorated_key construct_decorated_key_from(const bytes& key) const;
 
     future<foreign_ptr<lw_shared_ptr<redis::result>>> execute(const redis::request_wrapper& req);
     future<> execute_command_set(const redis::request_wrapper& req, output_stream<char>& out);

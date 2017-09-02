@@ -23,11 +23,13 @@
 #include "utils/allocation_strategy.hh"
 #include "utils/managed_ref.hh"
 #include "utils/managed_bytes.hh"
-#include "bytes.hh"
+#include "utils/bytes.hh"
 #include "utils/allocation_strategy.hh"
 #include "utils/logalloc.hh"
-#include "bytes.hh"
+#include "common.hh"
+#include "core/sstring.hh"
 #include  <experimental/vector>
+namespace stdx = std::experimental;
 namespace redis {
 
 class dict_lsa;
@@ -53,7 +55,7 @@ struct dict_entry
     };
     entry_type _type;
 
-    dict_entry(const bytes& key, const bytes& val) noexcept
+    dict_entry(const sstring& key, const sstring& val) noexcept
         : _link()
         , _key(std::move(*(current_allocator().construct<managed_bytes>(bytes_view {key.data(), key.size()}))))
         , _key_hash(std::hash<managed_bytes>()(_key))
@@ -62,7 +64,7 @@ struct dict_entry
         _u._data = std::move(*(current_allocator().construct<managed_bytes>(bytes_view {val.data(), val.size()})));
     }
 
-    dict_entry(const bytes& key) noexcept
+    dict_entry(const sstring& key) noexcept
         : _link()
         , _key(std::move(*(current_allocator().construct<managed_bytes>(bytes_view {key.data(), key.size()}))))
         , _key_hash(std::hash<managed_bytes>()(_key))
@@ -70,7 +72,7 @@ struct dict_entry
     {
     }
 
-    dict_entry(const bytes& key, double data) noexcept
+    dict_entry(const sstring& key, double data) noexcept
         : _link()
         , _key(std::move(*(current_allocator().construct<managed_bytes>(bytes_view {key.data(), key.size()}))))
         , _key_hash(std::hash<managed_bytes>()(_key))
@@ -79,7 +81,7 @@ struct dict_entry
         _u._float = data;
     }
 
-    dict_entry(const bytes& key, int64_t data) noexcept
+    dict_entry(const sstring& key, int64_t data) noexcept
         : _link()
         , _key(std::move(*(current_allocator().construct<managed_bytes>(bytes_view {key.data(), key.size()}))))
         , _key_hash(std::hash<managed_bytes>()(_key))
@@ -108,14 +110,23 @@ struct dict_entry
     }
 
     struct compare {
+        inline bool compare_impl(const char* d1, size_t s1, const char* d2, size_t s2) const noexcept {
+            const int len = std::min(s1, s2);
+            auto r = memcmp(d1, d2, len);
+            if (r == 0) {
+                if (s1 < s2) return true;
+                else if (s1 > s2) return false;
+            }
+            return r < 0;
+        }
         inline bool operator () (const dict_entry& l, const dict_entry& r) const noexcept {
-            return l._key == r._key;
+            return compare_impl(l.key_data(), l.key_size(), r.key_data(), r.key_size());
         }
-        inline bool operator () (const bytes& k, const dict_entry& e) const noexcept {
-            return bytes_view(k) == bytes_view(e.key_data(), e.key_size());
+        inline bool operator () (const sstring& k, const dict_entry& e) const noexcept {
+            return compare_impl(k.data(), k.size(), e.key_data(), e.key_size());
         }
-        inline bool operator () (const dict_entry& e, const bytes& k) const noexcept {
-            return bytes_view(k) == bytes_view(e.key_data(), e.key_size());
+        inline bool operator () (const dict_entry& e, const sstring& k) const noexcept {
+            return compare_impl(e.key_data(), e.key_size(), k.data(), k.size());
         }
     };
 
@@ -140,7 +151,7 @@ struct dict_entry
     managed_bytes& value() {
         return _u._data;
     }
-    inline const int8_t* key_data() const
+    inline const char* key_data() const
     {
         return _key.data();
     }
@@ -152,7 +163,7 @@ struct dict_entry
     {
         return _u._data.size();
     }
-    inline const int8_t* value_bytes_data() const
+    inline const char* value_bytes_data() const
     {
         return _u._data.data();
     }
@@ -206,7 +217,7 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(const dict_entry* e)> with_entry_run(const bytes& k, Func&& func) const {
+    inline std::result_of_t<Func(const dict_entry* e)> with_entry_run(const sstring& k, Func&& func) const {
         auto it = _dict.find(k, dict_entry::compare());
         if (it != _dict.end()) {
             const auto& e = *it;
@@ -218,7 +229,7 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(dict_entry* e)> with_entry_run(const bytes& k, Func&& func) {
+    inline std::result_of_t<Func(dict_entry* e)> with_entry_run(const sstring& k, Func&& func) {
         auto it = _dict.find(k, dict_entry::compare());
         if (it != _dict.end()) {
             auto& e = *it;
@@ -238,7 +249,7 @@ public:
         return false;
     }
 
-    inline bool erase(const bytes& key)
+    inline bool erase(const sstring& key)
     {
         auto it = _dict.find(key, dict_entry::compare());
         if (it != _dict.end()) {
@@ -260,7 +271,7 @@ public:
         flush_all();
     }
 
-    inline bool exists(const bytes& key) const
+    inline bool exists(const sstring& key) const
     {
         return _dict.find(key, dict_entry::compare()) != _dict.end();
     }
@@ -285,7 +296,7 @@ public:
         return _dict.cend();
     }
 
-    void fetch(const std::vector<bytes>& keys, std::vector<const dict_entry*>& entries) const {
+    void fetch(const std::vector<sstring>& keys, std::vector<const dict_entry*>& entries) const {
         for (const auto& key : keys) {
             auto it = _dict.find(key, dict_entry::compare());
             if (it != _dict.end()) {
@@ -305,12 +316,11 @@ public:
         }
     }
 
-    void fetch_keys(std::vector<bytes>& entries) const {
+    void fetch_keys(std::vector<sstring>& entries) const {
         for (auto it = _dict.begin(); it != _dict.end(); ++it) {
             const auto& e = *it;
-            entries.emplace_back(std::move(bytes(e.key_data(), e.key_size())));
+            entries.emplace_back(std::move(sstring(e.key_data(), e.key_size())));
         }
     }
 };
 }
-

@@ -224,7 +224,7 @@ public:
     }
 
     void write(const char* ptr, size_t size) {
-        write(bytes_view(reinterpret_cast<const signed char*>(ptr), size));
+        write(bytes_view(ptr, size));
     }
 
     bool is_linearized() const {

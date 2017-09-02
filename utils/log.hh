@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 ScyllaDB
+ * Copyright (C) 2014 ScyllaDB
  */
 
 /*
@@ -19,17 +19,20 @@
  * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-namespace query {
+#pragma once
 
-class result_digest final {
-    std::array<uint8_t, 16> get();
-};
+#include <seastar/util/log.hh>
 
-class result {
-    bytes buf();
-    std::experimental::optional<query::result_digest> digest();
-    api::timestamp_type last_modified() [ [version 1.2] ] = api::missing_timestamp;
-    query::short_read is_short_read() [[version 1.6]] = query::short_read::no;
-};
+namespace logging {
+
+using log_level = seastar::log_level;
+
+using logger = seastar::logger;
+using registry = seastar::log_registry;
+
+
+using seastar::pretty_type_name;
+using seastar::level_name;
+using seastar::logger_registry;
 
 }

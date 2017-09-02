@@ -18,7 +18,7 @@
 *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
-#include "service.hh"
+#include "redis.hh"
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
@@ -36,7 +36,7 @@
 #include "core/align.hh"
 #include "net/api.hh"
 #include "net/packet-data-source.hh"
-#include "log.hh"
+#include "util/log.hh"
 #include <unistd.h>
 #include <cstdlib>
 #include "redis_protocol.hh"
@@ -44,6 +44,7 @@
 #include "reply_builder.hh"
 #include  <experimental/vector>
 #include "core/metrics.hh"
+#include "request_wrapper.hh"
 using namespace net;
 namespace redis {
 
@@ -51,39 +52,125 @@ namespace redis {
 using logger =  seastar::logger;
 static logger redis_log ("redis");
 
-distributed<service> _the_redis_srvice;
+namespace stdx = std::experimental;
 
-future<> service::set(const dht::decorated_key& dk, const sstring& value, output_stream<char>& out)
+distributed<redis_service> _the_redis;
+
+future<> redis_service::start()
 {
     return make_ready_future<>();
+}
+
+future<> redis_service::stop()
+{
+    return make_ready_future<>();
+}
+
+future<> redis_service::set(request_wrapper& args, output_stream<char>& out)
+{
+    // parse args
+    if (args._args_count < 2) {
+        return out.write(msg_syntax_err);
+    }
+    bytes& key = args._args[0];
+    bytes& val = args._args[1];
+    long expir = 0;
+    uint8_t flag = FLAG_SET_NO;
+    // [EX seconds] [PS milliseconds] [NX] [XX]
+    if (args._args_count > 2) {
+        for (unsigned int i = 2; i < args._args_count; ++i) {
+            bytes* v = (i == args._args_count - 1) ? nullptr : &(args._args[i + 1]);
+            bytes& o = args._args[i];
+            if (o.size() != 2) {
+                return out.write(msg_syntax_err);
+            }
+            if ((o[0] == 'e' || o[0] == 'E') && (o[1] == 'x' || o[1] == 'X') && o[2] == '\0') {
+                flag |= FLAG_SET_EX;
+                if (v == nullptr) {
+                    return out.write(msg_syntax_err);
+                }
+                try {
+                    expir = std::atol(v->c_str()) * 1000;
+                } catch (const std::invalid_argument&) {
+                    return out.write(msg_syntax_err);
+                }
+                i++;
+            }
+            if ((o[0] == 'p' || o[0] == 'P') && (o[1] == 'x' || o[1] == 'X') && o[2] == '\0') {
+                flag |= FLAG_SET_PX;
+                if (v == nullptr) {
+                    return out.write(msg_syntax_err);
+                }
+                try {
+                    expir = std::atol(v->c_str());
+                } catch (const std::invalid_argument&) {
+                    return out.write(msg_syntax_err);
+                }
+                i++;
+            }
+            if ((o[0] == 'n' || o[0] == 'N') && (o[1] == 'x' || o[1] == 'X') && o[2] == '\0') {
+                flag |= FLAG_SET_NX;
+            }
+            if ((o[0] == 'x' || o[0] == 'X') && (o[1] == 'x' || o[1] == 'X') && o[2] == '\0') {
+                flag |= FLAG_SET_XX;
+            }
+        }
+    }
+    redis_key rk { key };
+    auto cpu = get_cpu(rk);
+    return get_database().invoke_on(cpu, &database::set, std::move(rk), std::ref(val), expir, flag).then([&out] (auto&& m) {
+        return out.write(std::move(*m));
+    });;
+}
+
+future<bool> redis_service::remove_impl(bytes& key) {
+    return make_ready_future<bool>();
+}
+
+future<> redis_service::del(request_wrapper& args, output_stream<char>& out)
+{
     /*
-    auto cpu = get_cpu(dk);
-    return _db.invoke_on(cpu, &database::set, std::ref(dk.key()), std::ref(value), 0, 0).then([&out] (auto&& m) {
-        return out.write(std::move(*m));
-    });;
+    if (args._args_count <= 0 || args._args.empty()) {
+        return out.write(msg_syntax_err);
+    }
+    if (args._args.size() == 1) {
+        bytes& key = args._args[0];
+        return remove_impl(key).then([&out] (auto r) {
+            return out.write( r ? msg_one : msg_zero);
+        });
+    }
+    else {
+        struct mdel_state {
+            std::vector<bytes>& keys;
+            size_t success_count;
+        };
+        for (size_t i = 0; i < args._args_count; ++i) {
+            args._tmp_keys.emplace_back(args._args[i]);
+        }
+        return do_with(mdel_state{args._tmp_keys, 0}, [this, &out] (auto& state) {
+            return parallel_for_each(std::begin(state.keys), std::end(state.keys), [this, &state] (auto& key) {
+                return this->remove_impl(key).then([&state] (auto r) {
+                    if (r) state.success_count++;
+                });
+            }).then([&state, &out] {
+                return reply_builder::build_local(out, state.success_count);
+            });
+        });
+    }
     */
-}
-
-future<> service::del(const dht::decorated_key& dk, output_stream<char>& out)
-{
     return make_ready_future<>();
-/*
-    auto cpu = get_cpu(dk);
-    return _db.invoke_on(cpu, &database::set, std::ref(dk.key())).then([&out] (auto&& m) {
-        return out.write(std::move(*m));
-    });;
-*/
 }
 
-future<> service::get(const dht::decorated_key& dk, output_stream<char>& out)
+future<> redis_service::get(request_wrapper& args, output_stream<char>& out)
 {
-    return make_ready_future<>();
-/*
-    auto cpu = get_cpu(dk);
-    return _db.invoke_on(cpu, &database::get, std::ref(dk.key())).then([&out] (auto&& m) {
+    if (args._args_count < 1) {
+        return out.write(msg_syntax_err);
+    }
+    bytes& key = args._args[0];
+    redis_key rk { key };
+    auto cpu = get_cpu(rk);
+    return get_database().invoke_on(cpu, &database::get, std::move(rk)).then([&out] (auto&& m) {
         return out.write(std::move(*m));
-    });;
-*/
+    });
 }
-
 }

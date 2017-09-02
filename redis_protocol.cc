@@ -23,7 +23,7 @@
 #include "util/log.hh"
 #include "redis_command_code.hh"
 namespace redis {
-
+using namespace seastar;
 static seastar::logger rlog("proto");
 redis_protocol::redis_protocol()
 {

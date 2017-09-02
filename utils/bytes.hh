@@ -21,29 +21,26 @@
 
 #pragma once
 
-#include "seastarx.hh"
 #include "core/sstring.hh"
 #include "hashing.hh"
 #include <experimental/optional>
 #include <iosfwd>
 #include <functional>
-#include "utils/mutable_view.hh"
 
-using bytes = basic_sstring<int8_t, uint32_t, 31>;
-using bytes_view = std::experimental::basic_string_view<int8_t>;
-using bytes_mutable_view = basic_mutable_view<bytes_view::value_type>;
+using bytes = basic_sstring<char, uint32_t, 31>;
+using bytes_view = std::experimental::basic_string_view<char>;
 using bytes_opt = std::experimental::optional<bytes>;
 using sstring_view = std::experimental::string_view;
 
 namespace std {
-
+/*
 template <>
 struct hash<bytes_view> {
     size_t operator()(bytes_view v) const {
         return hash<sstring_view>()({reinterpret_cast<const char*>(v.begin()), v.size()});
     }
 };
-
+*/
 }
 
 bytes from_hex(sstring_view s);

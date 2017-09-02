@@ -21,66 +21,25 @@
 
 #include "message/messaging_service.hh"
 #include "core/distributed.hh"
+#include "core/sleep.hh"
 #include "gms/failure_detector.hh"
 #include "gms/gossiper.hh"
-#include "service/storage_service.hh"
-#include "streaming/prepare_message.hh"
 #include "gms/gossip_digest_syn.hh"
 #include "gms/gossip_digest_ack.hh"
 #include "gms/gossip_digest_ack2.hh"
 #include "gms/gossiper.hh"
-#include "query-request.hh"
-#include "query-result.hh"
 #include "rpc/rpc.hh"
-#include "db/config.hh"
-#include "dht/i_partitioner.hh"
-#include "range.hh"
-#include "frozen_schema.hh"
-#include "repair/repair.hh"
-#include "digest_algorithm.hh"
-#include "idl/consistency_level.dist.hh"
-#include "idl/tracing.dist.hh"
-#include "idl/result.dist.hh"
-#include "idl/reconcilable_result.dist.hh"
-#include "idl/ring_position.dist.hh"
-#include "idl/keys.dist.hh"
-#include "idl/uuid.dist.hh"
-#include "idl/frozen_mutation.dist.hh"
-#include "idl/frozen_schema.dist.hh"
-#include "idl/streaming.dist.hh"
-#include "idl/token.dist.hh"
+#include "config.hh"
 #include "idl/gossip_digest.dist.hh"
-#include "idl/read_command.dist.hh"
-#include "idl/range.dist.hh"
-#include "idl/partition_checksum.dist.hh"
-#include "idl/query.dist.hh"
-#include "idl/cache_temperature.dist.hh"
-#include "serializer_impl.hh"
-#include "serialization_visitors.hh"
-#include "idl/consistency_level.dist.impl.hh"
-#include "idl/tracing.dist.impl.hh"
-#include "idl/result.dist.impl.hh"
-#include "idl/reconcilable_result.dist.impl.hh"
-#include "idl/ring_position.dist.impl.hh"
-#include "idl/keys.dist.impl.hh"
-#include "idl/uuid.dist.impl.hh"
-#include "idl/frozen_mutation.dist.impl.hh"
-#include "idl/frozen_schema.dist.impl.hh"
-#include "idl/streaming.dist.impl.hh"
-#include "idl/token.dist.impl.hh"
+#include "utils/serializer_impl.hh"
+#include "utils/serialization_visitors.hh"
 #include "idl/gossip_digest.dist.impl.hh"
-#include "idl/read_command.dist.impl.hh"
-#include "idl/range.dist.impl.hh"
-#include "idl/partition_checksum.dist.impl.hh"
-#include "idl/query.dist.impl.hh"
-#include "idl/cache_temperature.dist.impl.hh"
 #include "rpc/lz4_compressor.hh"
 #include "rpc/multi_algo_compressor_factory.hh"
-#include "partition_range_compat.hh"
-#include "stdx.hh"
+#include "utils/stdx.hh"
+#include "seastarx.hh"
 
 namespace netw {
-
 // thunk from rpc serializers to generate serializers
 template <typename T, typename Output>
 void write(serializer, Output& out, const T& data) {
@@ -324,7 +283,8 @@ messaging_service::messaging_service(gms::inet_address ip
     register_handler(this, messaging_verb::CLIENT_ID, [] (rpc::client_info& ci, gms::inet_address broadcast_address, uint32_t src_cpu_id, rpc::optional<uint64_t> max_result_size) {
         ci.attach_auxiliary("baddr", broadcast_address);
         ci.attach_auxiliary("src_cpu_id", src_cpu_id);
-        ci.attach_auxiliary("max_result_size", max_result_size.value_or(query::result_memory_limiter::maximum_result_size));
+        ci.attach_auxiliary("max_result_size", max_result_size.value_or(1024));
+        //ci.attach_auxiliary("max_result_size", max_result_size.value_or(query::result_memory_limiter::maximum_result_size));
         return rpc::no_wait;
     });
 
@@ -394,7 +354,7 @@ static unsigned get_rpc_client_idx(messaging_verb verb) {
     if (verb == messaging_verb::GOSSIP_DIGEST_SYN ||
         verb == messaging_verb::GOSSIP_DIGEST_ACK2 ||
         verb == messaging_verb::GOSSIP_SHUTDOWN ||
-        verb == messaging_verb::GOSSIP_ECHO) {
+        verb == messaging_verb::GOSSIP_ECHO) { 
         idx = 1;
     }
     return idx;
@@ -410,6 +370,7 @@ static unsigned get_rpc_client_idx(messaging_verb verb) {
  *         Otherwise 'ep' itself is returned.
  */
 gms::inet_address messaging_service::get_preferred_ip(gms::inet_address ep) {
+/*
     auto it = _preferred_ip_cache.find(ep);
 
     if (it != _preferred_ip_cache.end()) {
@@ -420,12 +381,13 @@ gms::inet_address messaging_service::get_preferred_ip(gms::inet_address ep) {
             return it->second;
         }
     }
-
+*/
     // If cache doesn't have an entry for this endpoint - return endpoint itself
     return ep;
 }
 
 future<> messaging_service::init_local_preferred_ip_cache() {
+/*
     return db::system_keyspace::get_preferred_ips().then([this] (auto ips_cache) {
         _preferred_ip_cache = ips_cache;
         //
@@ -441,6 +403,8 @@ future<> messaging_service::init_local_preferred_ip_cache() {
             this->remove_rpc_client(id);
         }
     });
+*/
+    return make_ready_future<>();
 }
 
 void messaging_service::cache_preferred_ip(gms::inet_address ep, gms::inet_address ip) {
@@ -461,6 +425,7 @@ shared_ptr<messaging_service::rpc_protocol_client_wrapper> messaging_service::ge
     }
 
     auto must_encrypt = [&id, this] {
+         /*
         if (_encrypt_what == encrypt_what::none) {
             return false;
         }
@@ -476,19 +441,21 @@ shared_ptr<messaging_service::rpc_protocol_client_wrapper> messaging_service::ge
         }
         return snitch_ptr->get_rack(id.addr)
                         != snitch_ptr->get_rack(utils::fb_utilities::get_broadcast_address());
+         */
+        return false;
     }();
 
     auto must_compress = [&id, this] {
         if (_compress_what == compress_what::none) {
             return false;
         }
-
+/*
         if (_compress_what == compress_what::dc) {
             auto& snitch_ptr = locator::i_endpoint_snitch::get_local_snitch_ptr();
             return snitch_ptr->get_datacenter(id.addr)
                             != snitch_ptr->get_datacenter(utils::fb_utilities::get_broadcast_address());
         }
-
+*/
         return true;
     }();
 
@@ -496,11 +463,13 @@ shared_ptr<messaging_service::rpc_protocol_client_wrapper> messaging_service::ge
         if (idx == 1) {
             return true; // gossip
         }
+        /*
         if (_tcp_nodelay_what == tcp_nodelay_what::local) {
             auto& snitch_ptr = locator::i_endpoint_snitch::get_local_snitch_ptr();
             return snitch_ptr->get_datacenter(id.addr)
                             == snitch_ptr->get_datacenter(utils::fb_utilities::get_broadcast_address());
         }
+        */
         return true;
     }();
 
@@ -522,9 +491,9 @@ shared_ptr<messaging_service::rpc_protocol_client_wrapper> messaging_service::ge
                                     remote_addr, local_addr);
 
     it = _clients[idx].emplace(id, shard_info(std::move(client))).first;
-    uint32_t src_cpu_id = engine().cpu_id();
-    _rpc->make_client<rpc::no_wait_type(gms::inet_address, uint32_t, uint64_t)>(messaging_verb::CLIENT_ID)(*it->second.rpc_client, utils::fb_utilities::get_broadcast_address(), src_cpu_id,
-                                                                                                           query::result_memory_limiter::maximum_result_size);
+    //uint32_t src_cpu_id = engine().cpu_id();
+    //_rpc->make_client<rpc::no_wait_type(gms::inet_address, uint32_t, uint64_t)>(messaging_verb::CLIENT_ID)(*it->second.rpc_client, utils::fb_utilities::get_broadcast_address(), src_cpu_id,
+     //                                                                                                      query::result_memory_limiter::maximum_result_size);
     return it->second.rpc_client;
 }
 
@@ -672,7 +641,7 @@ auto send_message_timeout_and_retry(messaging_service* ms, messaging_verb verb, 
                         return make_ready_future<stdx::optional<MsgInTuple>>(stdx::nullopt);
                     }).handle_exception([vb, id, retry] (std::exception_ptr ep) {
                         mlogger.debug("Retry verb={} to {}, retry={}: stop retrying: {}", vb, id, retry, ep);
-                        return make_exception_future<stdx::optional<MsgInTuple>>(ep);
+                        return make_exception_future<std::experimental::optional<MsgInTuple>>(ep);
                     });
                 } catch (...) {
                     throw;
@@ -757,4 +726,5 @@ void messaging_service::unregister_gossip_digest_ack2() {
 future<> messaging_service::send_gossip_digest_ack2(msg_addr id, gossip_digest_ack2 msg) {
     return send_message_oneway(this, messaging_verb::GOSSIP_DIGEST_ACK2, std::move(id), std::move(msg));
 }
+
 } // namespace net

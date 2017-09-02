@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 ScyllaDB
+ * Copyright (C) 2016 ScyllaDB
  */
 
 /*
@@ -19,27 +19,13 @@
  * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-namespace streaming {
+#pragma once
 
-class stream_request {
-    sstring keyspace;
-    // For compatibility with <= 1.5, we use wrapping ranges
-    // (though we never send wraparounds; only allow receiving them)
-    std::vector<range<dht::token>> ranges_compat();
-    std::vector<sstring> column_families;
-};
+namespace query {
 
-class stream_summary {
-    utils::UUID cf_id;
-    int files;
-    long total_size;
-};
-
-
-class prepare_message {
-    std::vector<streaming::stream_request> requests;
-    std::vector<streaming::stream_summary> summaries;
-    uint32_t dst_cpu_id;
+enum class digest_algorithm : uint8_t {
+    none = 0,  // digest not required
+    MD5 = 1,   // default algorithm
 };
 
 }

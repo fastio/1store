@@ -1,7 +1,5 @@
 # Pedis (Parallel Redis)
 
-**It's a new start for Pedis which will be constructed based on Scylla.**
-
 ## What's Pedis?
 
 Pedis is the NoSQL data store using the SEASTAR framework, compatible with REDIS. The name of Pedis is an acronym of **P**arallel r**edis**, which with high throughput and low latency.

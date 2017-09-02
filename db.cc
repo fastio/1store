@@ -23,9 +23,9 @@
 #include <chrono>
 #include <algorithm>
 #include "util/log.hh"
-#include "bits_operation.hh"
+#include "structures/bits_operation.hh"
 #include "core/metrics.hh"
-#include "hll.hh"
+#include "structures/hll.hh"
 
 using logger =  seastar::logger;
 static logger db_log ("db");
@@ -60,6 +60,8 @@ private:
     std::default_random_engine _re;
     std::uniform_int_distribution<size_t> _dist;
 };
+
+distributed<database> _the_database;
 
 database::database()
 {
@@ -228,11 +230,11 @@ void database::setup_metrics()
      });
 }
 
-future<scattered_message_ptr> database::set(const decorated_key& dk, bytes& val, long expired, uint32_t flag)
+future<scattered_message_ptr> database::set(const redis_key& rk, bytes& val, long expired, uint32_t flag)
 {
     ++_stat._set;
-    return with_allocator(allocator(), [this, &dk, &val, expired, flag] {
-        auto entry = current_allocator().construct<cache_entry>(dk.key(), val);
+    return with_allocator(allocator(), [this, &rk, &val, expired, flag] {
+        auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
         bool result = true;
         if (current_store().insert_if(entry, expired, flag & FLAG_SET_NX, flag & FLAG_SET_XX)) {
             ++_stat._total_string_entries;
@@ -245,29 +247,58 @@ future<scattered_message_ptr> database::set(const decorated_key& dk, bytes& val,
     });
 }
 
-future<scattered_message_ptr> database::del(const decorated_key& dk)
+future<scattered_message_ptr> database::del(const redis_key& rk)
 {
     ++_stat._del;
-    return current_store().run_with_entry(dk, [this, &dk] (cache_entry* e) {
+    return current_store().with_entry_run(rk, [this, &rk] (cache_entry* e) {
         if (!e) return reply_builder::build(msg_zero);
-        auto& meta = e->meta();
+        if (e->type_of_bytes()) {
+            --_stat._total_string_entries;
+        }
+        else if (e->type_of_set()) {
+            --_stat._total_set_entries;
+        }
+        else if (e->type_of_list()) {
+            --_stat._total_list_entries;
+        }
+        else if (e->type_of_map()) {
+            --_stat._total_dict_entries;
+        }
+        else if (e->type_of_sset()) {
+            --_stat._total_zset_entries;
+        }
+        else if (e->type_of_hll()) {
+            --_stat._total_hll_entries;
+        }
+        else {
+            --_stat._total_counter_entries;
+        }
         auto result =  current_store().erase(*e);
-        _store.erase(dk);
         return reply_builder::build(result ? msg_one : msg_zero);
     });
 }
 
-future<scattered_message_ptr> database::get(const decorated_key& dk)
+future<scattered_message_ptr> database::get(const redis_key& rk)
 {
     ++_stat._read;
     ++_stat._get;
-    return current_store().with_entry_run(dk, [this] (const cache_entry* e) {
+    return current_store().with_entry_run(rk, [this] (const cache_entry* e) {
        if (e && e->type_of_bytes() == false) {
            return reply_builder::build(msg_type_err);
        }
        else {
-           return reply_builder::build(msg_type_err);
+           if (e != nullptr) ++_stat._hit;
+           return reply_builder::build<false, true>(e);
        }
     });
+}
+future<> database::start()
+{
+    return make_ready_future<>();
+}
+
+future<> database::stop()
+{
+    return make_ready_future<>();
 }
 }

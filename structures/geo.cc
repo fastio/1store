@@ -19,25 +19,11 @@
 *
 */
 #include "geo.hh"
-#include "log.hh"
+#include "common.hh"
+#include "util/log.hh"
 using logger =  seastar::logger;
-static logger geo_log ("geo");
+static logger geo_log ("db");
 namespace redis {
-static constexpr const int GEO_HASH_STEP_MAX  = 26; /* 26*2 = 52 bits. */
-/* Limits from EPSG:900913 / EPSG:3785 / OSGEO:41001 */
-static constexpr const double GEO_LAT_MIN = -85.05112878;
-static constexpr const double GEO_LAT_MAX = 85.05112878;
-static constexpr const double GEO_LAT_SCALE = GEO_LAT_MAX - GEO_LAT_MIN;
-static constexpr const double GEO_LAT_MIN_STD = -90;
-static constexpr const double GEO_LAT_MAX_STD = 90;
-static constexpr const double GEO_LAT_STD_SCALE = GEO_LAT_MAX_STD - GEO_LAT_MIN_STD;
-static constexpr const double GEO_LONG_MIN = -180;
-static constexpr const double GEO_LONG_MAX = 180;
-static constexpr const double GEO_LONG_SCALE = GEO_LONG_MAX - GEO_LONG_MIN;
-// @brief Earth's quatratic mean radius for WGS-84
-static constexpr const double EARTH_RADIUS_IN_METERS = 6372797.560856;
-static constexpr const double MERCATOR_MAX = 20037726.37;
-static constexpr const double MERCATOR_MIN = -20037726.37;
 struct geo_hash
 {
     uint64_t _hash;
@@ -141,7 +127,7 @@ static inline uint64_t deinterleave64(uint64_t interleaved) {
 
     return x | (y << 32);
 }
-sstring geo::to_sstring(const long long& u) {
+bytes geo::to_bytes(const long long& u) {
     char s[21];
     size_t l;
     char *p, aux;
@@ -166,7 +152,7 @@ sstring geo::to_sstring(const long long& u) {
         ps++;
         p--;
     }
-    return std::move(sstring(s, l));
+    return std::move(bytes(s, l));
 }
 
 bool geo::encode_to_geohash(const double& longitude, const double& latitude, double& geohash)
@@ -184,7 +170,7 @@ bool geo::encode_to_geohash(const double& longitude, const double& latitude, dou
     bits = interleave64(lat_offset, long_offset);
 
     bits <<= (52 - GEO_HASH_STEP_MAX * 2);
-    auto bits_str = to_sstring(bits);
+    auto bits_str = to_bytes(bits);
     try {
         geohash = std::stod(bits_str.c_str());
     } catch (const std::invalid_argument&) {
@@ -193,7 +179,7 @@ bool geo::encode_to_geohash(const double& longitude, const double& latitude, dou
     return true;
 }
 
-bool geo::encode_to_geohash_string(const double& score, sstring& geohashstr)
+bool geo::encode_to_geohash_string(const double& score, bytes& geohashstr)
 {
     static const char* ALPHABET = "0123456789bcdefghjkmnpqrstuvwxyz";
     double longitude = 0, latitude = 0;
@@ -221,7 +207,7 @@ bool geo::encode_to_geohash_string(const double& score, sstring& geohashstr)
         b[i] = ALPHABET[idx];
     }
     b[11] = '\0';
-    geohashstr = std::move(sstring(b, 11));
+    geohashstr = std::move(bytes(b, 11));
     return true;
 }
 

@@ -29,7 +29,7 @@
 #include <seastar/core/unaligned.hh>
 #include <unordered_map>
 #include <type_traits>
-
+#include "seastarx.hh"
 struct blob_storage {
     struct [[gnu::packed]] ref_type {
         blob_storage* ptr;
@@ -334,11 +334,12 @@ public:
         return external() && _u.ptr->next;
     }
 
+    /*
     operator bytes_mutable_view() {
         assert(!is_fragmented());
         return { data(), size() };
     };
-
+    */
     bytes_view::value_type& operator[](size_type index) {
         return value_at_index(index);
     }

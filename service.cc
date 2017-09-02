@@ -18,7 +18,7 @@
 *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
-#pragma once
+#include "service.hh"
 #include <functional>
 #include "core/sharded.hh"
 #include "core/sstring.hh"
@@ -42,28 +42,17 @@
 #include <unistd.h>
 #include <cstdlib>
 #include "common.hh"
-#include "geo.hh"
 namespace redis {
-class storage_service;
-extern distributed<storage_service> _the_service;
-inline distributed<storage_service>& get_storage_service() {
-    return _the_service;
+
+distributed<service> _service;
+
+future<> service::start()
+{
+    return make_ready_future<>();
 }
-inline storage_service& local_storage_service() {
-    return _the_service.local();
+
+future<> service::stop()
+{
+    return make_ready_future<>();
 }
-
-class storage_service {
-private:
-public:
-    storage_service()
-    {
-    }
-
-    future<> initialize();
-    future<> stop();
-    void init_messaging_service();
-    // [TEST APIs]
-};
-
-} /* namespace redis */
+}

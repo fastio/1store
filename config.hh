@@ -1,5 +1,10 @@
 /*
- * This file is part of Pedis.
+ * Copyright (C) 2015 ScyllaDB
+ *
+ */
+
+/*
+ * This file is part of Scylla.
  *
  * Scylla is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -12,7 +17,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with Pedis.  If not, see <http://www.gnu.org/licenses/>.
+ * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #pragma once
@@ -127,9 +132,9 @@ public:
      *         according the environment variables definitions.
      */
     static boost::filesystem::path get_conf_dir();
-    using string_map = db::string_map;
+    using string_map = redis::string_map;
     typedef std::vector<sstring> string_list;
-    using seed_provider_type = db::seed_provider_type;
+    using seed_provider_type = redis::seed_provider_type;
 
     /*
      * All values and documentation taken from
@@ -241,6 +246,18 @@ public:
             "Related information: Network\n"    \
     )                                                   \
     val(rpc_interface, sstring, "eth1", Unused,     \
+            "The listen address for client connections. Interfaces must correspond to a single address, IP aliasing is not supported. See rpc_address." \
+    )   \
+    val(redis_rpc_address, sstring, "localhost", Used,     \
+            "The listen address for client connections (Redis RPC service and native transport).Valid values are:\n"    \
+            "\n"    \
+            "\tunset:   Resolves the address using the hostname configuration of the node. If left unset, the hostname must resolve to the IP address of this node using /etc/hostname, /etc/hosts, or DNS.\n"  \
+            "\t0.0.0.0 : Listens on all configured interfaces, but you must set the broadcast_rpc_address to a value other than 0.0.0.0.\n"   \
+            "\tIP address\n"    \
+            "\thostname\n"  \
+            "Related information: Network\n"    \
+    )                                                   \
+    val(redis_rpc_interface, sstring, "eth1", Unused,     \
             "The listen address for client connections. Interfaces must correspond to a single address, IP aliasing is not supported. See rpc_address." \
     )   \
     val(seed_provider, seed_provider_type, seed_provider_type("org.apache.cassandra.locator.SimpleSeedProvider"), Used, \
@@ -551,6 +568,16 @@ public:
     )   \
     val(native_transport_port_ssl, uint16_t, 9142, Used,                \
             "Port on which the CQL TLS native transport listens for clients."  \
+            "Enabling client encryption and keeping native_transport_port_ssl disabled will use encryption" \
+            "for native_transport_port. Setting native_transport_port_ssl to a different value" \
+            "from native_transport_port will use encryption for native_transport_port_ssl while"    \
+            "keeping native_transport_port unencrypted" \
+    )   \
+    val(native_redis_transport_port, uint16_t, 6379, Used,                \
+            "Port on which the REDIS transport listens for clients."  \
+    )   \
+    val(native_redis_transport_port_ssl, uint16_t, 6079, Used,                \
+            "Port on which the REDIS TLS native transport listens for clients."  \
             "Enabling client encryption and keeping native_transport_port_ssl disabled will use encryption" \
             "for native_transport_port. Setting native_transport_port_ssl to a different value" \
             "from native_transport_port will use encryption for native_transport_port_ssl while"    \

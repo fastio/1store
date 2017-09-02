@@ -47,5 +47,22 @@ inline bool operator>(const token& t1, const token& t2) { return std::rel_ops::o
 inline bool operator<=(const token& t1, const token& t2) { return std::rel_ops::operator<=(t1, t2); }
 inline bool operator>=(const token& t1, const token& t2) { return std::rel_ops::operator>=(t1, t2); }
 std::ostream& operator<<(std::ostream& out, const token& t);
+
 }
 
+namespace std {
+    template<> struct hash<redis::token> {
+        size_t operator()(const redis::token& t) const {
+            size_t ret = 0;
+            const auto& b = t._data;
+            if (b.size() <= sizeof(ret)) { // practically always
+                std::copy_n(b.data(), b.size(), reinterpret_cast<int8_t*>(&ret));
+            } else {
+                ret = hash_large_token(b);
+            }
+            return ret;
+        }
+    private:
+        size_t hash_large_token(const managed_bytes& b) const;
+    };
+}

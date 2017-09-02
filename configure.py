@@ -1,14 +1,10 @@
 #!/usr/bin/python3
 #
+# Copyright (C) 2015 ScyllaDB
 #
-# This work is open source software, licensed under the terms of the
-# AGPL license as described in the LICENSE.AGPL file in the top-level directory.
-#
-# Modified by Peng Jian, pstack at 163.com
-
 
 #
-# This file is part of Pedis.
+# This file is part of Scylla.
 #
 # Scylla is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -38,7 +34,7 @@ for line in open('/etc/os-release'):
         os_ids += value.split(' ')
 
 # distribution "internationalization", converting package names.
-# Fedora name is key, values is distro -> package name dict.
+# Fedora name is key, values is distro -> package name dict. 
 i18n_xlat = {
     'boost-devel': {
         'debian': 'libboost-dev',
@@ -52,7 +48,7 @@ def pkgname(name):
         for id in os_ids:
             if id in dict:
                 return dict[id]
-    return name
+    return name 
 
 def get_flags():
     with open('/proc/cpuinfo') as f:
@@ -170,76 +166,6 @@ modes = {
 }
 
 scylla_tests = [
-    'scylla/tests/mutation_test',
-    'scylla/tests/streamed_mutation_test',
-    'scylla/tests/schema_registry_test',
-    'scylla/tests/canonical_mutation_test',
-    'scylla/tests/range_test',
-    'scylla/tests/types_test',
-    'scylla/tests/keys_test',
-    'scylla/tests/partitioner_test',
-    'scylla/tests/frozen_mutation_test',
-    'scylla/tests/perf/perf_mutation',
-    'scylla/tests/lsa_async_eviction_test',
-    'scylla/tests/lsa_sync_eviction_test',
-    'scylla/tests/row_cache_alloc_stress',
-    'scylla/tests/perf_row_cache_update',
-    'scylla/tests/perf/perf_hash',
-    'scylla/tests/perf/perf_cql_parser',
-    'scylla/tests/perf/perf_simple_query',
-    'scylla/tests/perf/perf_fast_forward',
-    'scylla/tests/cache_streamed_mutation_test',
-    'scylla/tests/row_cache_stress_test',
-    'scylla/tests/memory_footprint',
-    'scylla/tests/perf/perf_sstable',
-    'scylla/tests/cql_query_test',
-    'scylla/tests/storage_proxy_test',
-    'scylla/tests/schema_change_test',
-    'scylla/tests/mutation_reader_test',
-    'scylla/tests/mutation_query_test',
-    'scylla/tests/row_cache_test',
-    'scylla/tests/test-serialization',
-    'scylla/tests/sstable_test',
-    'scylla/tests/sstable_mutation_test',
-    'scylla/tests/sstable_resharding_test',
-    'scylla/tests/memtable_test',
-    'scylla/tests/commitlog_test',
-    'scylla/tests/cartesian_product_test',
-    'scylla/tests/hash_test',
-    'scylla/tests/map_difference_test',
-    'scylla/tests/message',
-    'scylla/tests/gossip',
-    'scylla/tests/gossip_test',
-    'scylla/tests/compound_test',
-    'scylla/tests/config_test',
-    'scylla/tests/gossiping_property_file_snitch_test',
-    'scylla/tests/ec2_snitch_test',
-    'scylla/tests/snitch_reset_test',
-    'scylla/tests/network_topology_strategy_test',
-    'scylla/tests/query_processor_test',
-    'scylla/tests/batchlog_manager_test',
-    'scylla/tests/bytes_ostream_test',
-    'scylla/tests/UUID_test',
-    'scylla/tests/murmur_hash_test',
-    'scylla/tests/allocation_strategy_test',
-    'scylla/tests/logalloc_test',
-    'scylla/tests/log_histogram_test',
-    'scylla/tests/managed_vector_test',
-    'scylla/tests/crc_test',
-    'scylla/tests/flush_queue_test',
-    'scylla/tests/dynamic_bitset_test',
-    'scylla/tests/auth_test',
-    'scylla/tests/idl_test',
-    'scylla/tests/range_tombstone_list_test',
-    'scylla/tests/anchorless_list_test',
-    'scylla/tests/database_test',
-    'scylla/tests/nonwrapping_range_test',
-    'scylla/tests/input_stream_test',
-    'scylla/tests/sstable_atomic_deletion_test',
-    'scylla/tests/virtual_reader_test',
-    'scylla/tests/view_schema_test',
-    'scylla/tests/counter_test',
-    'scylla/tests/cell_locker_test',
 ]
 
 apps = [
@@ -254,7 +180,7 @@ other = [
 
 all_artifacts = apps + tests + other
 
-arg_parser = argparse.ArgumentParser('Configure Pedis')
+arg_parser = argparse.ArgumentParser('Configure scylla')
 arg_parser.add_argument('--static', dest = 'static', action = 'store_const', default = '',
                         const = '-static',
                         help = 'Static link (useful for running on hosts outside the build environment')
@@ -300,378 +226,87 @@ defines = []
 
 extra_cxxflags = {}
 
-cassandra_interface = Thrift(source = 'scylla/interface/cassandra.thrift', service = 'Cassandra')
+cassandra_interface = Thrift(source = 'interface/cassandra.thrift', service = 'Cassandra')
 
-scylla_core = (['scylla/database.cc',
-                 'scylla/schema.cc',
-                 'scylla/frozen_schema.cc',
-                 'scylla/schema_registry.cc',
-                 'scylla/bytes.cc',
-                 'scylla/mutation.cc',
-                 'scylla/streamed_mutation.cc',
-                 'scylla/partition_version.cc',
-                 'scylla/row_cache.cc',
-                 'scylla/canonical_mutation.cc',
-                 'scylla/frozen_mutation.cc',
-                 'scylla/memtable.cc',
-                 'scylla/schema_mutations.cc',
-                 'scylla/release.cc',
-                 'scylla/supervisor.cc',
-                 'scylla/utils/logalloc.cc',
-                 'scylla/utils/large_bitset.cc',
-                 'scylla/mutation_partition.cc',
-                 'scylla/mutation_partition_view.cc',
-                 'scylla/mutation_partition_serializer.cc',
-                 'scylla/mutation_reader.cc',
-                 'scylla/mutation_query.cc',
-                 'scylla/keys.cc',
-                 'scylla/counters.cc',
-                 'scylla/sstables/sstables.cc',
-                 'scylla/sstables/compress.cc',
-                 'scylla/sstables/row.cc',
-                 'scylla/sstables/partition.cc',
-                 'scylla/sstables/filter.cc',
-                 'scylla/sstables/compaction.cc',
-                 'scylla/sstables/compaction_strategy.cc',
-                 'scylla/sstables/compaction_manager.cc',
-                 'scylla/sstables/atomic_deletion.cc',
-                 'scylla/transport/event.cc',
-                 'scylla/transport/event_notifier.cc',
-                 'scylla/transport/server.cc',
-                 'scylla/cql3/abstract_marker.cc',
-                 'scylla/cql3/attributes.cc',
-                 'scylla/cql3/cf_name.cc',
-                 'scylla/cql3/cql3_type.cc',
-                 'scylla/cql3/operation.cc',
-                 'scylla/cql3/index_name.cc',
-                 'scylla/cql3/keyspace_element_name.cc',
-                 'scylla/cql3/lists.cc',
-                 'scylla/cql3/sets.cc',
-                 'scylla/cql3/maps.cc',
-                 'scylla/cql3/functions/functions.cc',
-                 'scylla/cql3/statements/cf_prop_defs.cc',
-                 'scylla/cql3/statements/cf_statement.cc',
-                 'scylla/cql3/statements/authentication_statement.cc',
-                 'scylla/cql3/statements/create_keyspace_statement.cc',
-                 'scylla/cql3/statements/create_table_statement.cc',
-                 'scylla/cql3/statements/create_view_statement.cc',
-                 'scylla/cql3/statements/create_type_statement.cc',
-                 'scylla/cql3/statements/create_user_statement.cc',
-                 'scylla/cql3/statements/drop_index_statement.cc',
-                 'scylla/cql3/statements/drop_keyspace_statement.cc',
-                 'scylla/cql3/statements/drop_table_statement.cc',
-                 'scylla/cql3/statements/drop_view_statement.cc',
-                 'scylla/cql3/statements/drop_type_statement.cc',
-                 'scylla/cql3/statements/schema_altering_statement.cc',
-                 'scylla/cql3/statements/ks_prop_defs.cc',
-                 'scylla/cql3/statements/modification_statement.cc',
-                 'scylla/cql3/statements/parsed_statement.cc',
-                 'scylla/cql3/statements/property_definitions.cc',
-                 'scylla/cql3/statements/update_statement.cc',
-                 'scylla/cql3/statements/delete_statement.cc',
-                 'scylla/cql3/statements/batch_statement.cc',
-                 'scylla/cql3/statements/select_statement.cc',
-                 'scylla/cql3/statements/use_statement.cc',
-                 'scylla/cql3/statements/index_prop_defs.cc',
-                 'scylla/cql3/statements/index_target.cc',
-                 'scylla/cql3/statements/create_index_statement.cc',
-                 'scylla/cql3/statements/truncate_statement.cc',
-                 'scylla/cql3/statements/alter_table_statement.cc',
-                 'scylla/cql3/statements/alter_view_statement.cc',
-                 'scylla/cql3/statements/alter_user_statement.cc',
-                 'scylla/cql3/statements/drop_user_statement.cc',
-                 'scylla/cql3/statements/list_users_statement.cc',
-                 'scylla/cql3/statements/authorization_statement.cc',
-                 'scylla/cql3/statements/permission_altering_statement.cc',
-                 'scylla/cql3/statements/list_permissions_statement.cc',
-                 'scylla/cql3/statements/grant_statement.cc',
-                 'scylla/cql3/statements/revoke_statement.cc',
-                 'scylla/cql3/statements/alter_type_statement.cc',
-                 'scylla/cql3/statements/alter_keyspace_statement.cc',
-                 'scylla/cql3/update_parameters.cc',
-                 'scylla/cql3/ut_name.cc',
-                 'scylla/cql3/user_options.cc',
-                 'scylla/thrift/handler.cc',
-                 'scylla/thrift/server.cc',
-                 'scylla/thrift/thrift_validation.cc',
-                 'scylla/utils/runtime.cc',
-                 'scylla/utils/murmur_hash.cc',
-                 'scylla/utils/uuid.cc',
-                 'scylla/utils/big_decimal.cc',
-                 'scylla/types.cc',
-                 'scylla/validation.cc',
-                 'scylla/service/priority_manager.cc',
-                 'scylla/service/migration_manager.cc',
-                 'scylla/service/storage_proxy.cc',
-                 'scylla/cql3/operator.cc',
-                 'scylla/cql3/relation.cc',
-                 'scylla/cql3/column_identifier.cc',
-                 'scylla/cql3/column_specification.cc',
-                 'scylla/cql3/constants.cc',
-                 'scylla/cql3/query_processor.cc',
-                 'scylla/cql3/query_options.cc',
-                 'scylla/cql3/single_column_relation.cc',
-                 'scylla/cql3/token_relation.cc',
-                 'scylla/cql3/column_condition.cc',
-                 'scylla/cql3/user_types.cc',
-                 'scylla/cql3/untyped_result_set.cc',
-                 'scylla/cql3/selection/abstract_function_selector.cc',
-                 'scylla/cql3/selection/simple_selector.cc',
-                 'scylla/cql3/selection/selectable.cc',
-                 'scylla/cql3/selection/selector_factories.cc',
-                 'scylla/cql3/selection/selection.cc',
-                 'scylla/cql3/selection/selector.cc',
-                 'scylla/cql3/restrictions/statement_restrictions.cc',
-                 'scylla/cql3/result_set.cc',
-                 'scylla/cql3/variable_specifications.cc',
-                 'scylla/db/consistency_level.cc',
-                 'scylla/db/system_keyspace.cc',
-                 'scylla/db/schema_tables.cc',
-                 'scylla/db/cql_type_parser.cc',
-                 'scylla/db/legacy_schema_migrator.cc',
-                 'scylla/db/commitlog/commitlog.cc',
-                 'scylla/db/commitlog/commitlog_replayer.cc',
-                 'scylla/db/commitlog/commitlog_entry.cc',
-                 'scylla/db/config.cc',
-                 'scylla/db/heat_load_balance.cc',
-                 'scylla/db/index/secondary_index.cc',
-                 'scylla/db/marshal/type_parser.cc',
-                 'scylla/db/batchlog_manager.cc',
-                 'scylla/db/view/view.cc',
-                 'scylla/index/secondary_index_manager.cc',
-                 'scylla/io/io.cc',
-                 'scylla/utils/utils.cc',
-                 'scylla/utils/UUID_gen.cc',
-                 'scylla/utils/i_filter.cc',
-                 'scylla/utils/bloom_filter.cc',
-                 'scylla/utils/bloom_calculations.cc',
-                 'scylla/utils/rate_limiter.cc',
-                 'scylla/utils/file_lock.cc',
-                 'scylla/utils/dynamic_bitset.cc',
-                 'scylla/utils/managed_bytes.cc',
-                 'scylla/utils/exceptions.cc',
-                 'scylla/gms/version_generator.cc',
-                 'scylla/gms/versioned_value.cc',
-                 'scylla/gms/gossiper.cc',
-                 'scylla/gms/failure_detector.cc',
-                 'scylla/gms/gossip_digest_syn.cc',
-                 'scylla/gms/gossip_digest_ack.cc',
-                 'scylla/gms/gossip_digest_ack2.cc',
-                 'scylla/gms/endpoint_state.cc',
-                 'scylla/gms/application_state.cc',
-                 'scylla/gms/inet_address.cc',
-                 'scylla/dht/i_partitioner.cc',
-                 'scylla/dht/murmur3_partitioner.cc',
-                 'scylla/dht/byte_ordered_partitioner.cc',
-                 'scylla/dht/random_partitioner.cc',
-                 'scylla/dht/boot_strapper.cc',
-                 'scylla/dht/range_streamer.cc',
-                 'scylla/unimplemented.cc',
-                 'scylla/query.cc',
-                 'scylla/query-result-set.cc',
-                 'scylla/locator/abstract_replication_strategy.cc',
-                 'scylla/locator/simple_strategy.cc',
-                 'scylla/locator/local_strategy.cc',
-                 'scylla/locator/network_topology_strategy.cc',
-                 'scylla/locator/everywhere_replication_strategy.cc',
-                 'scylla/locator/token_metadata.cc',
-                 'scylla/locator/locator.cc',
-                 'scylla/locator/snitch_base.cc',
-                 'scylla/locator/simple_snitch.cc',
-                 'scylla/locator/rack_inferring_snitch.cc',
-                 'scylla/locator/gossiping_property_file_snitch.cc',
-                 'scylla/locator/production_snitch_base.cc',
-                 'scylla/locator/ec2_snitch.cc',
-                 'scylla/locator/ec2_multi_region_snitch.cc',
-                 'scylla/message/messaging_service.cc',
-                 'scylla/service/client_state.cc',
-                 'scylla/service/migration_task.cc',
-                 'scylla/service/storage_service.cc',
-                 'scylla/service/misc_services.cc',
-                 'scylla/service/pager/paging_state.cc',
-                 'scylla/service/pager/query_pagers.cc',
-                 'scylla/streaming/stream_task.cc',
-                 'scylla/streaming/stream_session.cc',
-                 'scylla/streaming/stream_request.cc',
-                 'scylla/streaming/stream_summary.cc',
-                 'scylla/streaming/stream_transfer_task.cc',
-                 'scylla/streaming/stream_receive_task.cc',
-                 'scylla/streaming/stream_plan.cc',
-                 'scylla/streaming/progress_info.cc',
-                 'scylla/streaming/session_info.cc',
-                 'scylla/streaming/stream_coordinator.cc',
-                 'scylla/streaming/stream_manager.cc',
-                 'scylla/streaming/stream_result_future.cc',
-                 'scylla/streaming/stream_session_state.cc',
-                 'scylla/clocks-impl.cc',
-                 'scylla/partition_slice_builder.cc',
-                 'scylla/init.cc',
-                 'scylla/lister.cc',
-                 'scylla/repair/repair.cc',
-                 'scylla/exceptions/exceptions.cc',
-                 'scylla/auth/auth.cc',
-                 'scylla/auth/authenticated_user.cc',
-                 'scylla/auth/authenticator.cc',
-                 'scylla/auth/authorizer.cc',
-                 'scylla/auth/default_authorizer.cc',
-                 'scylla/auth/data_resource.cc',
-                 'scylla/auth/password_authenticator.cc',
-                 'scylla/auth/permission.cc',
-                 'scylla/tracing/tracing.cc',
-                 'scylla/tracing/trace_keyspace_helper.cc',
-                 'scylla/tracing/trace_state.cc',
-                 'scylla/range_tombstone.cc',
-                 'scylla/range_tombstone_list.cc',
-                 'scylla/disk-error-handler.cc',
-                 'redis_protocol_parser.rl',
-                 'redis_protocol.cc',
-                 'request_wrapper.cc',
-                 'cache.cc',
-                 'db.cc',
-                 'hll.cc',
-                 'geo.cc',
-                 'list_lsa.cc',
-                 'redis_service.cc',
-                 'reply_builder.cc',
-                 'request_wrapper.cc',
-                 'sset_lsa.cc',
-                 'bits_operation.cc',
-                 'redis_server.cc',
-                 'redis_storage_proxy.cc',
-                 ]
-                + [Antlr3Grammar('scylla/cql3/Cql.g')]
-                + [Thrift('scylla/interface/cassandra.thrift', 'Cassandra')]
-                )
-api = ['scylla/api/api.cc',
-       'scylla/api/api-doc/storage_service.json',
-       'scylla/api/api-doc/lsa.json',
-       'scylla/api/storage_service.cc',
-       'scylla/api/api-doc/commitlog.json',
-       'scylla/api/commitlog.cc',
-       'scylla/api/api-doc/gossiper.json',
-       'scylla/api/gossiper.cc',
-       'scylla/api/api-doc/failure_detector.json',
-       'scylla/api/failure_detector.cc',
-       'scylla/api/api-doc/column_family.json',
-       'scylla/api/column_family.cc',
-       'scylla/api/messaging_service.cc',
-       'scylla/api/api-doc/messaging_service.json',
-       'scylla/api/api-doc/storage_proxy.json',
-       'scylla/api/storage_proxy.cc',
-       'scylla/api/api-doc/cache_service.json',
-       'scylla/api/cache_service.cc',
-       'scylla/api/api-doc/collectd.json',
-       'scylla/api/collectd.cc',
-       'scylla/api/api-doc/endpoint_snitch_info.json',
-       'scylla/api/endpoint_snitch.cc',
-       'scylla/api/api-doc/compaction_manager.json',
-       'scylla/api/compaction_manager.cc',
-       'scylla/api/api-doc/hinted_handoff.json',
-       'scylla/api/hinted_handoff.cc',
-       'scylla/api/api-doc/utils.json',
-       'scylla/api/lsa.cc',
-       'scylla/api/api-doc/stream_manager.json',
-       'scylla/api/stream_manager.cc',
-       'scylla/api/api-doc/system.json',
-       'scylla/api/system.cc'
+scylla_core = ([
+        'utils/bytes.cc',
+        'utils/logalloc.cc',
+        'utils/large_bitset.cc',
+        'utils/runtime.cc',
+        'utils/murmur_hash.cc',
+        'utils/uuid.cc',
+        'utils/big_decimal.cc',
+        'utils/types.cc',
+        'utils/utils.cc',
+        'utils/UUID_gen.cc',
+        'utils/rate_limiter.cc',
+        'utils/file_lock.cc',
+        'utils/dynamic_bitset.cc',
+        'utils/managed_bytes.cc',
+        'utils/exceptions.cc',
+        'utils/unimplemented.cc',
+        'utils/gc_clock.cc',
+        'utils/disk-error-handler.cc',
+        'message/messaging_service.cc',
+        'exceptions/exceptions.cc',
+        'idl/gossip_digest.idl.hh',
+        'release.cc',
+        'io/io.cc',
+        'gms/application_state.cc',
+        'gms/versioned_value.cc',
+        'gms/endpoint_state.cc',
+        'gms/gossip_digest_ack2.cc',
+        'gms/gossip_digest_syn.cc',
+        'gms/version_generator.cc',
+        'gms/failure_detector.cc',
+        'gms/gossip_digest_ack.cc',
+        'gms/gossiper.cc',
+        'gms/inet_address.cc',
+      'common.cc',
+      'redis.cc',
+      'server.cc',
+      'db.cc',
+      'redis_protocol_parser.rl',
+      'redis_protocol.cc',
+      'structures/dict_lsa.cc',
+      'structures/geo.cc',
+      'structures/hll.cc',
+      'structures/bits_operation.cc',
+      'structures/list_lsa.cc',
+      'cache.cc',
+      'reply_builder.cc',
+      'ring.cc',
+      'storage_proxy.cc',
+      'service.cc',
+      'config.cc',
+      'init.cc',
+      'token.cc',
+      'keys.cc',
+               ]
+               )
+
+api = [
        ]
 
-idls = ['scylla/idl/gossip_digest.idl.hh',
-        'scylla/idl/uuid.idl.hh',
-        'scylla/idl/range.idl.hh',
-        'scylla/idl/keys.idl.hh',
-        'scylla/idl/read_command.idl.hh',
-        'scylla/idl/token.idl.hh',
-        'scylla/idl/ring_position.idl.hh',
-        'scylla/idl/result.idl.hh',
-        'scylla/idl/frozen_mutation.idl.hh',
-        'scylla/idl/reconcilable_result.idl.hh',
-        'scylla/idl/streaming.idl.hh',
-        'scylla/idl/paging_state.idl.hh',
-        'scylla/idl/frozen_schema.idl.hh',
-        'scylla/idl/partition_checksum.idl.hh',
-        'scylla/idl/replay_position.idl.hh',
-        'scylla/idl/truncation_record.idl.hh',
-        'scylla/idl/mutation.idl.hh',
-        'scylla/idl/query.idl.hh',
-        'scylla/idl/idl_test.idl.hh',
-        'scylla/idl/commitlog.idl.hh',
-        'scylla/idl/tracing.idl.hh',
-        'scylla/idl/consistency_level.idl.hh',
-        'scylla/idl/cache_temperature.idl.hh',
-        ]
-
-scylla_tests_dependencies = scylla_core + api + idls + [
-    'scylla/tests/cql_test_env.cc',
-    'scylla/tests/cql_assertions.cc',
-    'scylla/tests/result_set_assertions.cc',
-    'scylla/tests/mutation_source_test.cc',
+scylla_tests_dependencies = scylla_core + api +  [
 ]
 
 scylla_tests_seastar_deps = [
-    'seastar/tests/test-utils.cc',
-    'seastar/tests/test_runner.cc',
 ]
 
 deps = {
-    'pedis': idls + ['main.cc'] + scylla_core + api,
+    'pedis': ['main.cc'] + scylla_core + api,
 }
 
 pure_boost_tests = set([
-    'scylla/tests/partitioner_test',
-    'scylla/tests/map_difference_test',
-    'scylla/tests/keys_test',
-    'scylla/tests/compound_test',
-    'scylla/tests/range_tombstone_list_test',
-    'scylla/tests/anchorless_list_test',
-    'scylla/tests/nonwrapping_range_test',
-    'scylla/tests/test-serialization',
-    'scylla/tests/range_test',
-    'scylla/tests/crc_test',
-    'scylla/tests/managed_vector_test',
-    'scylla/tests/dynamic_bitset_test',
-    'scylla/tests/idl_test',
-    'scylla/tests/cartesian_product_test',
 ])
 
 tests_not_using_seastar_test_framework = set([
-    'scylla/tests/perf/perf_mutation',
-    'scylla/tests/lsa_async_eviction_test',
-    'scylla/tests/lsa_sync_eviction_test',
-    'scylla/tests/row_cache_alloc_stress',
-    'scylla/tests/perf_row_cache_update',
-    'scylla/tests/perf/perf_hash',
-    'scylla/tests/perf/perf_cql_parser',
-    'scylla/tests/message',
-    'scylla/tests/perf/perf_simple_query',
-    'scylla/tests/perf/perf_fast_forward',
-    'scylla/tests/row_cache_stress_test',
-    'scylla/tests/memory_footprint',
-    'scylla/tests/gossip',
-    'scylla/tests/perf/perf_sstable',
 ]) | pure_boost_tests
 
 for t in tests_not_using_seastar_test_framework:
     if not t in scylla_tests:
         raise Exception("Test %s not found in scylla_tests" % (t))
-
-for t in scylla_tests:
-    deps[t] = [t + '.cc']
-    if t not in tests_not_using_seastar_test_framework:
-        deps[t] += scylla_tests_dependencies
-        deps[t] += scylla_tests_seastar_deps
-    else:
-        deps[t] += scylla_core + api + idls + ['scylla/tests/cql_test_env.cc']
-
-deps['scylla/tests/sstable_test'] += ['scylla/tests/sstable_datafile_test.cc']
-
-deps['scylla/tests/bytes_ostream_test'] = ['scylla/tests/bytes_ostream_test.cc', 'scylla/utils/managed_bytes.cc', 'scylla/utils/logalloc.cc', 'scylla/utils/dynamic_bitset.cc']
-deps['scylla/tests/input_stream_test'] = ['scylla/tests/input_stream_test.cc']
-deps['scylla/tests/UUID_test'] = ['scylla/utils/UUID_gen.cc', 'scylla/tests/UUID_test.cc', 'scylla/utils/uuid.cc', 'scylla/utils/managed_bytes.cc', 'scylla/utils/logalloc.cc', 'scylla/utils/dynamic_bitset.cc']
-deps['scylla/tests/murmur_hash_test'] = ['scylla/bytes.cc', 'scylla/utils/murmur_hash.cc', 'scylla/tests/murmur_hash_test.cc']
-deps['scylla/tests/allocation_strategy_test'] = ['scylla/tests/allocation_strategy_test.cc', 'scylla/utils/logalloc.cc', 'scylla/utils/dynamic_bitset.cc']
-deps['scylla/tests/log_histogram_test'] = ['scylla/tests/log_histogram_test.cc']
-deps['scylla/tests/anchorless_list_test'] = ['scylla/tests/anchorless_list_test.cc']
 
 warnings = [
     '-Wno-mismatched-tags',  # clang-only
@@ -754,17 +389,17 @@ link_pool_depth = max(int(total_memory / 7e9), 1)
 build_modes = modes if args.mode == 'all' else [args.mode]
 build_artifacts = all_artifacts if not args.artifacts else args.artifacts
 
-status = subprocess.call("./scylla/SCYLLA-VERSION-GEN")
+status = subprocess.call("./PEDIS-VERSION-GEN")
 if status != 0:
     print('Version file generation failed')
     sys.exit(1)
 
-file = open('build/SCYLLA-VERSION-FILE', 'r')
-scylla_version = file.read().strip()
-file = open('build/SCYLLA-RELEASE-FILE', 'r')
-scylla_release = file.read().strip()
+file = open('build/PEDIS-VERSION-FILE', 'r')
+pedis_version = file.read().strip()
+file = open('build/PEDIS-RELEASE-FILE', 'r')
+pedis_release = file.read().strip()
 
-extra_cxxflags["scylla/release.cc"] = "-DSCYLLA_VERSION=\"\\\"" + scylla_version + "\\\"\" -DSCYLLA_RELEASE=\"\\\"" + scylla_release + "\\\"\""
+extra_cxxflags["release.cc"] = "-DPEDIS_VERSION=\"\\\"" + pedis_version + "\\\"\" -DPEDIS_RELEASE=\"\\\"" + pedis_release + "\\\"\""
 
 seastar_flags = []
 if args.dpdk:
@@ -873,7 +508,7 @@ with open(buildfile, 'w') as f:
     for mode in build_modes:
         modeval = modes[mode]
         f.write(textwrap.dedent('''\
-            cxxflags_{mode} = -I. -I./scylla -I $builddir/{mode}/gen -I $builddir/{mode}/gen/scylla -I seastar -I seastar/build/{mode}/gen
+            cxxflags_{mode} = -I. -I $builddir/{mode}/gen -I seastar -I seastar/build/{mode}/gen
             rule cxx.{mode}
               command = $cxx -MD -MT $out -MF $out.d {seastar_cflags} $cxxflags $cxxflags_{mode} -c -o $out $in
               description = CXX $out
@@ -936,7 +571,7 @@ with open(buildfile, 'w') as f:
                 if binary.startswith('tests/'):
                     local_libs = '$libs'
                     if binary not in tests_not_using_seastar_test_framework or binary in pure_boost_tests:
-                        local_libs += ' ' + maybe_static(args.staticboost, '-lboost_unit_test_framework')
+                        local_libs += ' ' + maybe_static(args.staticboost, '-lboost_unit_test_framework') 
                     if has_thrift:
                         local_libs += ' ' + thrift_libs + ' ' + maybe_static(args.staticboost, '-lboost_system')
                     # Our code's debugging information is huge, and multiplied

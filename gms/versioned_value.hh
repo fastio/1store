@@ -38,15 +38,13 @@
 
 #pragma once
 
-#include "types.hh"
+#include "utils/types.hh"
 #include "core/sstring.hh"
 #include "utils/serialization.hh"
 #include "utils/UUID.hh"
 #include "version_generator.hh"
 #include "gms/inet_address.hh"
-#include "dht/i_partitioner.hh"
-#include "to_string.hh"
-#include "version.hh"
+#include "utils/to_string.hh"
 #include <unordered_set>
 #include <vector>
 #include <boost/range/adaptor/transformed.hpp>
@@ -77,9 +75,6 @@ public:
     static constexpr const char* STATUS_LEAVING = "LEAVING";
     static constexpr const char* STATUS_LEFT = "LEFT";
     static constexpr const char* STATUS_MOVING = "MOVING";
-
-    static constexpr const char* REMOVING_TOKEN = "removing";
-    static constexpr const char* REMOVED_TOKEN = "removed";
 
     static constexpr const char* HIBERNATE = "hibernate";
     static constexpr const char* SHUTDOWN = "shutdown";
@@ -129,33 +124,11 @@ public:
 
 public:
     class factory {
-        using token = dht::token;
     public:
-        sstring make_full_token_string(const std::unordered_set<token>& tokens) {
-            return ::join(";", tokens | boost::adaptors::transformed([] (const token& t) {
-                return dht::global_partitioner().to_sstring(t); })
-            );
-        }
-        sstring make_token_string(const std::unordered_set<token>& tokens) {
-            if (tokens.empty()) {
-                return "";
-            }
-            return dht::global_partitioner().to_sstring(*tokens.begin());
-        }
-
         versioned_value clone_with_higher_version(const versioned_value& value) {
             return versioned_value(value.value);
         }
 
-        versioned_value bootstrapping(const std::unordered_set<token>& tokens) {
-            return versioned_value(version_string({sstring(versioned_value::STATUS_BOOTSTRAPPING),
-                                                   make_token_string(tokens)}));
-        }
-
-        versioned_value normal(const std::unordered_set<token>& tokens) {
-            return versioned_value(version_string({sstring(versioned_value::STATUS_NORMAL),
-                                                   make_token_string(tokens)}));
-        }
 
         versioned_value load(double load) {
             return versioned_value(to_sstring(load));
@@ -165,39 +138,8 @@ public:
             return versioned_value(new_version.to_sstring());
         }
 
-        versioned_value leaving(const std::unordered_set<token>& tokens) {
-            return versioned_value(version_string({sstring(versioned_value::STATUS_LEAVING),
-                                                   make_token_string(tokens)}));
-        }
-
-        versioned_value left(const std::unordered_set<token>& tokens, int64_t expire_time) {
-            return versioned_value(version_string({sstring(versioned_value::STATUS_LEFT),
-                                                   make_token_string(tokens),
-                                                   std::to_string(expire_time)}));
-        }
-
-        versioned_value moving(token t) {
-            std::unordered_set<token> tokens = {t};
-            return versioned_value(version_string({sstring(versioned_value::STATUS_MOVING),
-                                                   make_token_string(tokens)}));
-        }
-
         versioned_value host_id(const utils::UUID& host_id) {
             return versioned_value(host_id.to_sstring());
-        }
-
-        versioned_value tokens(const std::unordered_set<token>& tokens) {
-            return versioned_value(make_full_token_string(tokens));
-        }
-
-        versioned_value removing_nonlocal(const utils::UUID& host_id) {
-            return versioned_value(sstring(REMOVING_TOKEN) +
-                sstring(DELIMITER_STR) + host_id.to_sstring());
-        }
-
-        versioned_value removed_nonlocal(const utils::UUID& host_id, int64_t expire_time) {
-            return versioned_value(sstring(REMOVED_TOKEN) + sstring(DELIMITER_STR) +
-                host_id.to_sstring() + sstring(DELIMITER_STR) + to_sstring(expire_time));
         }
 
         versioned_value removal_coordinator(const utils::UUID& host_id) {
@@ -225,10 +167,6 @@ public:
             return versioned_value(sprint("%s", endpoint));
         }
 
-        versioned_value release_version() {
-            return versioned_value(version::release());
-        }
-
         versioned_value network_version();
 
         versioned_value internal_ip(const sstring &private_ip) {
@@ -242,11 +180,6 @@ public:
         versioned_value supported_features(const sstring& features) {
             return versioned_value(features);
         }
-
-        versioned_value cache_hitrates(const sstring& hitrates) {
-            return versioned_value(hitrates);
-        }
-
     };
 }; // class versioned_value
 

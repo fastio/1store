@@ -23,18 +23,19 @@
 #include "core/memory.hh"
 #include "core/shared_ptr.hh"
 #include "core/sharded.hh"
-#include "keys.hh"
-#include "log.hh"
+#include "core/sstring.hh"
+#include "util/log.hh"
+#include "common.hh"
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/set.hpp>
 #include "utils/managed_bytes.hh"
 #include "utils/managed_ref.hh"
-#include "bytes.hh"
+#include "utils/bytes.hh"
 #include "utils/allocation_strategy.hh"
 #include "utils/logalloc.hh"
-#include <experimental/vector>
+#include  <experimental/vector>
 #include <experimental/optional>
-#include <vector>
+#include  <vector>
 
 using logger =  seastar::logger;
 static logger sset_log ("sset");
@@ -50,7 +51,7 @@ struct sset_entry
     size_t _key_hash;
     double _score;
 
-    sset_entry(const bytes& key, const double score) noexcept
+    sset_entry(const sstring& key, const double score) noexcept
         : _list_link()
         , _set_link()
         , _key(std::move(*(current_allocator().construct<managed_bytes>(bytes_view {key.data(), key.size()}))))
@@ -72,14 +73,23 @@ struct sset_entry
     {
     }
     struct compare {
+        inline bool compare_impl(const char* d1, size_t s1, const char* d2, size_t s2) const noexcept {
+            const int len = std::min(s1, s2);
+            auto r = memcmp(d1, d2, len);
+            if (r == 0) {
+                if (s1 < s2) return true;
+                else if (s1 > s2) return false;
+            }
+            return r < 0;
+        }
         inline bool operator () (const sset_entry& l, const sset_entry& r) const noexcept {
-            return l._key == r._key;
+            return compare_impl(l.key_data(), l.key_size(), r.key_data(), r.key_size());
         }
-        inline bool operator () (const bytes& k, const sset_entry& e) const noexcept {
-            return bytes_view(k.data(), k.size()) == bytes_view(e.key_data(), e.key_size());
+        inline bool operator () (const sstring& k, const sset_entry& e) const noexcept {
+            return compare_impl(k.data(), k.size(), e.key_data(), e.key_size());
         }
-        inline bool operator () (const sset_entry& e, const bytes& k) const noexcept {
-            return bytes_view(k.data(), k.size()) == bytes_view(e.key_data(), e.key_size());
+        inline bool operator () (const sset_entry& e, const sstring& k) const noexcept {
+            return compare_impl(e.key_data(), e.key_size(), k.data(), k.size());
         }
         inline bool operator () (const double& score, const sset_entry& e) const noexcept {
             return score < e.score();
@@ -92,7 +102,7 @@ struct sset_entry
     const managed_bytes& key() const {
         return _key;
     }
-    inline const int8_t* key_data() const
+    inline const char* key_data() const
     {
         return _key.data();
     }
@@ -148,7 +158,7 @@ public:
         return false;
     }
 
-    size_t insert_if_not_exists(std::unordered_map<bytes, double>& members)
+    size_t insert_if_not_exists(std::unordered_map<sstring, double>& members)
     {
         size_t inserted = 0;
         for (auto& member : members) {
@@ -167,7 +177,7 @@ public:
         return inserted;
     }
 
-    size_t update_if_only_exists(std::unordered_map<bytes, double>& members)
+    size_t update_if_only_exists(std::unordered_map<sstring, double>& members)
     {
         size_t inserted = 0;
         for (auto& member : members) {
@@ -187,7 +197,7 @@ public:
         return inserted;
     }
 
-    double insert_or_update(bytes& key, double delta)
+    double insert_or_update(sstring& key, double delta)
     {
         double result = delta;
         auto it = _dict.find(key, sset_entry::compare());
@@ -203,7 +213,7 @@ public:
         return result;
     }
 
-    size_t insert_or_update(std::unordered_map<bytes, double>& members)
+    size_t insert_or_update(std::unordered_map<sstring, double>& members)
     {
         size_t inserted = 0;
         for (auto& member : members) {
@@ -226,7 +236,7 @@ public:
         return inserted;
     }
 
-    void fetch_by_rank(long begin, long end, std::vector<std::pair<bytes, double>>& entries) const
+    void fetch_by_rank(long begin, long end, std::vector<std::pair<sstring, double>>& entries) const
     {
         if (_list.empty()) {
             return;
@@ -254,7 +264,7 @@ public:
             }
             else {
                 const auto& e = *it;
-                entries.emplace_back(std::pair<bytes, double>(bytes(e.key_data(), e.key_size()), e.score()));
+                entries.emplace_back(std::pair<sstring, double>(sstring(e.key_data(), e.key_size()), e.score()));
             }
         }
     }
@@ -321,7 +331,7 @@ public:
         }
     }
 
-    void fetch_by_key(const std::vector<bytes>& keys, std::vector<const sset_entry*>& entries) const
+    void fetch_by_key(const std::vector<sstring>& keys, std::vector<const sset_entry*>& entries) const
     {
         for (size_t i = 0; i < keys.size(); ++i) {
            auto it = _dict.find(keys[i], sset_entry::compare());
@@ -332,7 +342,7 @@ public:
         }
     }
 
-    bool update_score(const bytes& key, double delta)
+    bool update_score(const sstring& key, double delta)
     {
         auto it = _dict.find(key, sset_entry::compare());
         if (it != _dict.end()) {
@@ -355,7 +365,7 @@ public:
         return entries.size();
     }
 
-    size_t erase(std::vector<bytes>& keys)
+    size_t erase(std::vector<sstring>& keys)
     {
         size_t removed = 0;
         for (size_t i = 0; i < keys.size(); ++i) {
@@ -396,7 +406,7 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(const sset_entry* e)> with_entry_run(const bytes& k, Func&& func) const {
+    inline std::result_of_t<Func(const sset_entry* e)> with_entry_run(const sstring& k, Func&& func) const {
         auto it = _dict.find(k, sset_entry::compare());
         if (it != _dict.end()) {
             const auto& e = *it;
@@ -408,7 +418,7 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(sset_entry* e)> with_entry_run(const bytes& k, Func&& func) {
+    inline std::result_of_t<Func(sset_entry* e)> with_entry_run(const sstring& k, Func&& func) {
         auto it = _dict.find(k, sset_entry::compare());
         if (it != _dict.end()) {
             auto& e = *it;
@@ -429,7 +439,7 @@ public:
         return _list.empty();
     }
 
-    void erase(const bytes& key)
+    void erase(const sstring& key)
     {
         auto removed = _dict.erase(_dict.find(key, sset_entry::compare()));
         if (removed != _dict.end()) {
@@ -437,7 +447,7 @@ public:
         }
     }
 
-    std::experimental::optional<size_t> rank(const bytes& key) const
+    std::experimental::optional<size_t> rank(const sstring& key) const
     {
         size_t rank = 0;
         auto it = _dict.find(key, sset_entry::compare());
@@ -449,7 +459,7 @@ public:
         return  std::experimental::optional<size_t>();
     }
 
-    std::experimental::optional<double> score(const bytes& key) const
+    std::experimental::optional<double> score(const sstring& key) const
     {
         auto it = _dict.find(key, sset_entry::compare());
         if (it != _dict.end()) {

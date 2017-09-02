@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 ScyllaDB
+ * Copyright (C) 2015 ScyllaDB
  */
 
 /*
@@ -19,9 +19,6 @@
  * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-namespace utils {
-class UUID final {
-    int64_t get_most_significant_bits();
-    int64_t get_least_significant_bits();
-};
-}
+#include "gc_clock.hh"
+
+std::atomic<int64_t> clocks_offset;

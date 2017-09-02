@@ -21,13 +21,14 @@
 #include "bits_operation.hh"
 #include "core/stream.hh"
 #include "core/memory.hh"
+#include "core/sstring.hh"
 #include "core/shared_ptr.hh"
 #include "core/sharded.hh"
+#include "common.hh"
 namespace redis {
 // 512M bytes
 static const size_t MAX_BYTE_COUNT = 1024 * 1024 * 512 - 1;
 static const size_t RESIZE_STEP    = 16;
-static constexpr const size_t BITMAP_MAX_OFFSET  = (1 << 31);
 
 bool bits_operation::set(managed_bytes& o, size_t offset, bool value)
 {
@@ -38,7 +39,7 @@ bool bits_operation::set(managed_bytes& o, size_t offset, bool value)
         if (append_size < 64) {
             append_size = 64;
         }
-   //     o.extend(append_size, 0);
+        //o.extend(append_size, 0);
     }
     uint8_t byte_val = uint8_t(o[index]);
     auto bit = 7 - (offset & 0x7);
