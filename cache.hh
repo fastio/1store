@@ -44,7 +44,22 @@ static logger logc ("cache");
 namespace redis {
 namespace bi = boost::intrusive;
 using clock_type = lowres_clock;
+static constexpr clock_type::time_point never_expire_timepoint = clock_type::time_point(clock_type::duration::min());
 class cache;
+
+enum {
+    REDIS_RAW_UINT64,
+    REDIS_RAW_INT64,
+    REDIS_RAW_DOUBLE,
+    REDIS_RAW_STRING,
+    REDIS_RAW_OBJECT, // for data struct
+    REDIS_RAW_ITEM,   // for data item
+    REDIS_LIST,
+    REDIS_DICT,
+    REDIS_SET,
+    REDIS_ZSET,
+    REDIS_BITMAP,
+};
 
 struct expiration {
     using time_point = clock_type::time_point;
