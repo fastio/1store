@@ -88,4 +88,31 @@ future<file> make_file(const io_error_handler& error_handler, sstring name, open
         return make_exception_future<file>(ep);
     });
 }
+
+struct write_file_options {
+    size_t _buffer_size = 8192;
+    const io_priority_class& _io_priority_class;
+    read_file_options(const io_priority_class& pc) : _io_priority_class(pc) {}
+    read_file_options(read_file_options&& o)
+        : _buffer_size (std::move(o._buffer_size))
+        , _read_ahead(std::move(o._read_ahead))
+        , _io_priority_class(o._io_priority_class)
+    {
+    }
+};
+
+template <typename T>
+future<> write_file(const bytes& fn, const T& component, write_file_options&& options) {
+    auto file_path = fn;
+    file f = make_file(get_local_service().write_io_error_handler(), file_path, open_flags::wo | open_flags::create | open_flags::exclusive).get0();
+    file_output_stream_options options;
+    options.buffer_size = options._buffer_size;
+    options.io_priority_class = options._io_priority_class;
+    auto w = file_writer(std::move(f), std::move(options));
+    encode_to(w, component);
+    w.flush().get();
+    w.close().get();
+    return make_ready_future<>();
+}
+
 }

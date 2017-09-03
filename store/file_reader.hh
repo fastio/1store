@@ -11,10 +11,12 @@
 #include "core/do_with.hh"
 #include "core/thread.hh"
 #include <core/align.hh>
+#include <core/file.hh>
 #include <seastar/core/shared_future.hh>
 #include <seastar/core/byteorder.hh>
 #include <iterator>
 #include "store/checked-file-impl.hh"
+#include "seastarx.hh"
 
 namespace store {
 future<file> make_file(const io_error_handler& error_handler, sstring name, open_flags flags) {
@@ -78,4 +80,43 @@ public:
         });
     }
 };
+
+struct read_file_options {
+    size_t _buffer_size = 8192;
+    unsigned _read_ahead = 4;
+    const io_priority_class& _io_priority_class;
+    read_file_options(const io_priority_class& pc) : _io_priority_class(pc) {}
+    read_file_options(read_file_options&& o)
+        : _buffer_size (std::move(o._buffer_size))
+        , _read_ahead(std::move(o._read_ahead))
+        , _io_priority_class(o._io_priority_class)
+    {
+    }
+};
+
+template <typename T>
+future<> read_file(const bytes& filename, T& component, read_file_options&& options) {
+    auto file_path = filename;
+    return open_file_dma(file_path, open_flags::ro).then([this, &component, options = std::move(options)] (file f) {
+        auto fut = f.size();
+        return fut.then([this, &component, fi = std::move(fi)] (uint64_t size) {
+             auto f = make_checked_file(_read_error_handler, fi);
+             auto r = make_lw_shared<file_random_access_reader>(std::move(f), size, options._buffer_size);
+             auto fut = decode_from(*r, component);
+             return fut.finally([r] {
+                 return r->close();
+             }).then([r] {});
+        });
+    }).then_wrapped([this, file_path] (future<> f) {
+        try {
+            f.get();
+        } catch (std::system_error& e) {
+            if (e.code() == std::error_code(ENOENT, std::system_category())) {
+                throw malformed_sstable_exception(file_path + ": file not found");
+            }
+            throw;
+        }
+        return make_ready_future<>();
+    });
+}
 }
