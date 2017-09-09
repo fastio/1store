@@ -5,9 +5,11 @@
 #include "store/table/filter_block.hh"
 #include "store/table/format.hh"
 #include "store/util/coding.hh"
+#include "store/reader.hh"
 
 namespace store {
 
+lw_shared_ptr<reader> make_block_reader(lw_shared_ptr<table> ptable, block_handle index);
 struct sstable::rep {
   ~rep() {
     delete filter;
@@ -89,7 +91,7 @@ future<> table::read_meta(lw_shared_ptr<file_random_access_reader> reader, block
         auto data = meta_block_reader->current().data();
         block_handle filter_handle;
         if (filter_handle.decode_from(data)) {
-            return read_block(reader, filter_handle).then([this] (auto&& data) mutable { 
+            return read_block(reader, filter_handle).then([this] (auto&& data) mutable {
                 // we do not put filter block into cache.
                 rep_->_filter = make_lw_shared<filter_block_reader> (rep_->_options._filter_policy, std::move(data));
                 return make_ready_future<>();
@@ -103,52 +105,128 @@ table::~table() {
 }
 
 class block_reader : public reader::impl {
-    lw_shared_ptr<table> _table;
     lw_shared_ptr<block> _block;
-    block_handle _index;
-    size_t _buffer_size;
-    lw_shared_ptr<file_random_access_reader> _reader;
-    read_block_from_table();
+    sstable_options _optons;
+    uint32_t _restarts_offset = 0;
+    uint32_t _num_restarts = 0;
+    uint32_t _restart_index = 0;
+    uint32_t _current_offset = 0;
+    partition _current;
+    bytes_view _data_view;
+    bytes_view _value_view;
     bool _eof = false;
 public:
-    block_reader(lw_shared_ptr<table> ptable, block_handle index, size_t buffer_size = 4096)
-        : _ptable(ptable)
-        , _block(nullptr)
-        , _index(index)
-        , _buffer_size(buffer_size)
-        , _reader(nullptr)
+    block_reader(lw_shared_ptr<block> b, sstable_options opt)
+        , _block(b)
+        , _options(opt)
+        , _data_view ({b->data(), b->size()})
+        , _value_view ()
+        , _restarts_offset (0)
+        , _num_restarts (b->num_restarts())
+        , _restart_index(0)
+        , _current_offset(0)
+        , _eof(false)
     {
-        auto index_handle_key = convert_to_handle_key(index);
-        auto cached_block = _ptable->cache()->find(index_handle_key);
-        if (cached_block != nullptr) {
-            _block = cached_block;
-        }
-        else {
-            _reader = make_lw_shared<file_random_access_reader>(_ptable->get_file(), _ptable->file_size(), opts.sstable_buffer_size);
-        };
     }
     future<> seek_to_first() {
+        seek_to_restart_point(0);
+        parse_next_key();
         return make_ready_future<>();
     }
+
     future<> seek_to_last() {
+        seek_to_restart_point(num_restarts_ - 1);
+        while (parse_next_key() && next_entry_offset() < restarts_) { }
         return make_ready_future<>();
     }
+
     future<> seek(bytes key) {
-        return make_ready_future<>();
+        // binary search the target restart point.
+        uint32_t left = 0;
+        uint32_t right = num_restarts_ - 1;
+        while (left < right) {
+            uint32_t mid = (left + right + 1) / 2;
+            uint32_t region_offset = get_restart_point(mid);
+            uint32_t shared, non_shared, value_length;
+            const char* key_ptr = decode_entry(data_ + region_offset, data_ + restarts_, &shared, &non_shared, &value_length);
+            if (key_ptr == nullptr || (shared != 0)) {
+                _eof = true;
+                return make_ready_future<>();
+            }
+            auto mid_key = bytes_view { key_ptr, non_shared };
+            if (compare(mid_key, target) < 0) {
+                left = mid;
+            } else {
+                right = mid - 1;
+            }
+        }
+        seek_to_restart_point(left);
+        // leaner search the target key
+        while (true) {
+            if (!parse_next_key()) {
+                return make_ready_future<>();
+            }
+            if (compare(_curent_key(), key) >= 0) {
+                return make_ready_future<>();
+            }
+        }
     }
+
     future<> next() {
+        parse_next_key();
         return make_ready_future<>();
     }
     partition current() const {
         return _current;
     }
     bool eof() const {
-        return _eof;
+        return _current_offset >= restarts_ || _eof;
+    }
+private:
+    inline uint32_t next_entry_offset() const {
+        return static_cast<uint32_t>((_value_view.data() + _value_view.size()) - _data_view.data());
+    }
+
+    uint32_t get_restart_point(uint32_t index) {
+        assert (index < _num_restarts);
+        return decode_fixed32(data_ + restarts_ + index * sizeof(uint32_t));
+    }
+
+    void seek_to_restart_point(uint32_t index) {
+        _current.key().clear();
+        restart_index_ = index;
+        uint32_t offset = get_restart_point(index);
+        _value_view = bytes_view { _data_view.data() + offset, 0 };
+    }
+
+    bool parse_next_key() {
+        _current_offset = next_entry_offset();
+        const char* p = _data_view.data() + _current_offset;
+        const char* limit = data_ + restarts_offset;
+        if (p >= limit) {
+            current_ = restarts_offset;
+            restart_index_ = num_restarts_;
+            return false;
+        }
+
+        uint32_t shared, non_shared, value_length;
+        p = decode_entry(p, limit, &shared, &non_shared, &value_length);
+        if (p == nullptr || key_.size() < shared) {
+            return false;
+        } else {
+            _current.key().resize(shared);
+            _current.key().append(p, non_shared);
+            _value_view = { p + non_shared, value_length };
+            while (restart_index_ + 1 < num_restarts_ && get_restart_point(restart_index_ + 1) < _current_offset) {
+                ++restart_index_;
+            }
+            return true;
+        }
     }
 };
 
-lw_shared_ptr<reader> make_block_reader(lw_shared_ptr<table> ptable, block_handle index) {
-    return make_lw_shared<reader>(std::make_unique<block_reader>(ptable, std::move(index)));
+lw_shared_ptr<reader> make_block_reader(lw_shared_ptr<block> b, sstables_options opt) {
+    return make_lw_shared<reader>(std::make_unique<block_reader>(b, std::move(opt)));
 }
 
 class sstable_reader : public reader::impl {
@@ -156,56 +234,60 @@ class sstable_reader : public reader::impl {
    lw_shared_ptr<block_reader> _index_block_reader;
    lw_shared_ptr<block_reader> _data_block_reader;
    lw_shared_ptr<file_random_access_reader> _reader;
-   partition _current;
+   bool _initialized = false;
 public:
    sstable_reader(lw_shared_ptr<table> ptable) : _table(ptable) {}
    future<> seek_to_first() {
        return _index_block_reader->seek_to_first().then([this] {
+            _initialized = true;
             block_handle data_handle;
             data_handle.decode_from(_index_block_reader->current().data());
             auto handle_key = convert_to_handle_key(data_handle);
             auto b  = _table->cache()->find(handle_key);
             if (b != nullptr) {
-                _data_block_reader = make_shared_ptr<block_reader>(b);
+                _data_block_reader = make_block_reader(b, _table->options());
                 return _data_block_reader.seek_to_first();
             }
             return read_block(_reader, data_handle).then([this, key = std::move(handle_key)] (auto&& data) {
+                // cache the block. the block in the cache will be evicted by LRU or the file was deleted.
                 auto b = _table->cache()->create(std::move(key), std::move(data));
-                 _data_block_reader = make_block_reader(b);
+                 _data_block_reader = make_block_reader(b, _table->options());
                 return _data_block_reader->seek_to_first();
             });
        });
    }
    future<> seek_to_last() {
        return _index_block_reader->seek_to_last().then([this] {
+            _initialized = true;
             block_handle data_handle;
             data_handle.decode_from(_index_block_reader->current().data());
             auto handle_key = convert_to_handle_key(data_handle);
             auto b  = _table->cache()->find(handle_key);
             if (b != nullptr) {
-                _data_block_reader = make_shared_ptr<block_reader>(b);
+                _data_block_reader = make_block_reader(b, _table->options());
                 return _data_block_reader.seek_to_last();
             }
             return read_block(_reader, data_handle).then([this, key = std::move(handle_key)] (auto&& data) {
                 auto b = _table->cache()->create(std::move(key), std::move(data));
-                 _data_block_reader = make_block_reader(b);
+                 _data_block_reader = make_block_reader(b, _table->options());
                 return _data_block_reader->seek_to_last();
             });
        });
    }
    future<> seek(bytes key) {
        return _index_block_reader->seek(key).then([this, key] {
+            _initialized = true;
             block_handle data_handle;
             data_handle.decode_from(_index_block_reader->current().data());
             auto handle_key = convert_to_handle_key(data_handle);
             auto b  = _table->cache()->find(handle_key);
             if (b != nullptr) {
-                _data_block_reader = make_shared_ptr<block_reader>(b);
+                _data_block_reader = make_block_reader(b, _table->options());
                 return _data_block_reader.seek(key);
             }
             return read_block(_reader, data_handle).then([this, key = std::move(handle_key)] (auto&& data) {
                 auto b = _table->cache()->create(std::move(key), std::move(data));
-                 _data_block_reader = make_block_reader(b);
+                 _data_block_reader = make_block_reader(b, _table->options());
                 return _data_block_reader->seek(ikey);
             });
        });
@@ -220,12 +302,12 @@ public:
                    auto handle_key = convert_to_handle_key(data_handle);
                    auto b  = _table->cache()->find(handle_key);
                    if (b != nullptr) {
-                       _data_block_reader = make_shared_ptr<block_reader>(b);
+                       _data_block_reader = make_block_reader(b, _table->options());
                        return _data_block_reader->seek_to_first();
                    }
                    return read_block(_reader, data_handle).then([this, key = std::move(handle_key)] (auto&& data) {
                        auto b = _table->cache()->create(std::move(key), std::move(data));
-                        _data_block_reader = make_block_reader(b);
+                        _data_block_reader = make_block_reader(b, _table->options());
                        return _data_block_reader->seek_to_first();
                    });
                });
@@ -234,7 +316,7 @@ public:
        });
    }
    partition current() {
-       return _current;
+       return _data_block_reader->current();
    }
    bool eof() {
        return _index_block_reader->eof() && _data_block_reader->eof();
@@ -244,4 +326,5 @@ public:
 lw_shared_ptr<reader> make_sstable_reader(lw_shared_ptr<table> ptable) {
     return make_lw_shared<reader>(std::make_unique<block_reader>(ptable, std::move(index)));
 }
+
 }

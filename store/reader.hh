@@ -30,7 +30,6 @@ public:
 class table;
 struct block_handle;
 
-extern lw_shared_ptr<reader> make_block_reader(lw_shared_ptr<table> ptable, block_handle index);
 extern lw_shared_ptr<reader> make_sstable_reader(lw_shared_ptr<table> ptable);
 extern lw_shared_ptr<reader> make_combined_sstables_reader(std::vector<lw_shared_ptr<table>> sstables);
 
