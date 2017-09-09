@@ -3,6 +3,7 @@
 #include "core/shared_ptr.hh"
 #include "utils/bytes.hh"
 #include "store/file_reader.hh"
+#include <memory>
 namespace store {
 
 class block_cache;
@@ -26,9 +27,9 @@ class sstable {
 
  private:
   struct rep;
-  rep* rep_;
+  std::unique_ptr<rep> rep_;
 
-  explicit sstable(sep* rep) { rep_ = rep; }
+  explicit sstable(std::unique_ptr<rep> rep) { rep_ = rep; }
 
   // No copying allowed
   sstable(const table&) = delete;

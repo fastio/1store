@@ -61,7 +61,7 @@ future<lw_shared_ptr<table>> table::open(bytes fname, sstable_options opts) {
                 return fut.then([this, r = std::move(r), _footer = std::move(_footer)] (auto&& data) {
                     auto block_handle_key = convert_to_handle_key(footer_.index_handle());
                     auto index_block = cache->find_and_create(std::move(block_handle_key));
-                    auto rep_ = make_lw_shared<table::rep>(r, footer_.metaindex_handle(), index_block);
+                    auto rep_ = std::make_unique<table::rep>(r, footer_.metaindex_handle(), index_block);
                     auto table_instance = make_lw_shared<table>(rep_);
                     // read meta block
                     return rep_->read_meta(footer_.metaindex_handle()).then([this, table_instance] {
@@ -109,23 +109,42 @@ class block_reader : public reader::impl {
     size_t _buffer_size;
     lw_shared_ptr<file_random_access_reader> _reader;
     read_block_from_table();
+    bool _eof = false;
 public:
-block_reader::block_reader(lw_shared_ptr<table> ptable, block_handle index, size_t buffer_size = 4096)
-    : _ptable(ptable)
-    , _block(nullptr)
-    , _index(index)
-    , _buffer_size(buffer_size)
-    , _reader(nullptr)
-{
-    auto index_handle_key = convert_to_handle_key(index);
-    auto cached_block = _ptable->cache()->find(index_handle_key);
-    if (cached_block != nullptr) {
-        _block = cached_block;
+    block_reader(lw_shared_ptr<table> ptable, block_handle index, size_t buffer_size = 4096)
+        : _ptable(ptable)
+        , _block(nullptr)
+        , _index(index)
+        , _buffer_size(buffer_size)
+        , _reader(nullptr)
+    {
+        auto index_handle_key = convert_to_handle_key(index);
+        auto cached_block = _ptable->cache()->find(index_handle_key);
+        if (cached_block != nullptr) {
+            _block = cached_block;
+        }
+        else {
+            _reader = make_lw_shared<file_random_access_reader>(_ptable->get_file(), _ptable->file_size(), opts.sstable_buffer_size);
+        };
     }
-    else {
-        _reader = make_lw_shared<file_random_access_reader>(_ptable->get_file(), _ptable->file_size(), opts.sstable_buffer_size);
-    };
-}
+    future<> seek_to_first() {
+        return make_ready_future<>();
+    }
+    future<> seek_to_last() {
+        return make_ready_future<>();
+    }
+    future<> seek(bytes key) {
+        return make_ready_future<>();
+    }
+    future<> next() {
+        return make_ready_future<>();
+    }
+    partition current() const {
+        return _current;
+    }
+    bool eof() const {
+        return _eof;
+    }
 };
 
 lw_shared_ptr<reader> make_block_reader(lw_shared_ptr<table> ptable, block_handle index) {
@@ -218,6 +237,7 @@ public:
        return _current;
    }
    bool eof() {
+       return _index_block_reader->eof() && _data_block_reader->eof();
    }
 };
 
