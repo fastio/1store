@@ -324,7 +324,42 @@ public:
 };
 
 lw_shared_ptr<reader> make_sstable_reader(lw_shared_ptr<table> ptable) {
-    return make_lw_shared<reader>(std::make_unique<block_reader>(ptable, std::move(index)));
+    return make_lw_shared<reader>(std::make_unique<block_reader>(ptable));
 }
 
+class combined_sstables_reader : public reader::impl {
+    std::vector<lw_shared_ptr<table>> _sstables;
+    std::vector<partition> _currents;
+    bool _eof;
+public:
+    combined_sstables_reader(std::vector<lw_shared_ptr<table>> sstables)
+        : _sstables(std::move(sstables))
+        , _eof(false)
+    {
+    }
+
+    ~combined_sstables_reader()
+    {
+    }
+    // mock
+    future<> seek_to_first() {
+        return make_ready_future<>();
+    }
+    future<> seek_to_last() {
+        return make_ready_future<>();
+    }
+    future<> seek(bytes key) {
+        return make_ready_future<>();
+    }
+    future<> next() {
+        return make_ready_future<>();
+    }
+    partition current() {
+        return partition {};
+    }
+};
+
+lw_shared_ptr<reader> make_combined_sstables_reader(std::vector<lw_shared_ptr<table>> sstables) {
+    return make_lw_shared<reader>(std::make_unique<block_reader>(ptable));
+}
 }
