@@ -403,6 +403,9 @@ public:
     }
 
     bool eof() const {
+        if (_eof) {
+            return _eof;
+        }
         bool all_eof = false;
         for (auto& sstable : _sstables) {
             all_eof &= sstable->eof();
