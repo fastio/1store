@@ -6,8 +6,6 @@
 #include <memory>
 namespace store {
 
-class block_cache;
-class table_cache;
 struct sstable_options {
     size_t _sstable_buffer_size = 4096;
     lw_shared_ptr<block_cache> _block_cache;
@@ -24,7 +22,6 @@ class sstable {
 
   uint64_t approximate_offset_of(const slice& key) const;
 
-
  private:
   struct rep;
   std::unique_ptr<rep> rep_;
@@ -35,8 +32,4 @@ class sstable {
   sstable(const table&) = delete;
   void operator=(const table&) = delete;
 };
-
-class file_random_access_reader;
-struct block_handle;
-extern future<temporary_buffer<char>> read_block(lw_shared_ptr<file_random_access_reader> r, block_handle index);
 }

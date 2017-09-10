@@ -9,23 +9,37 @@
 
 namespace store {
 
+future<temporary_buffer<char>> read_block(lw_shared_ptr<file_random_access_reader> r, block_handle index);
 lw_shared_ptr<reader> make_block_reader(lw_shared_ptr<table> ptable, block_handle index);
+
 struct sstable::rep {
   ~rep() {
-    delete filter;
-    delete [] filter_data;
-    delete index_block;
   }
 
-  options _options;
-  status _status;
-  lw_shared_ptr<file_reader> _file_reader;
-  lw_shared_ptr<filter_block_reader> _filter;
-  managed_bytes _fileter_data;
-  lw_shared_ptr<block_cache> _cache;
+  rep(lw_shared_ptr<file_reader> freader,
+      lw_shared_ptr<block_cache> bcache,
+      block_handle metaindex,
+      lw_shared_ptr<block> index_block,
+      sstable_options opt)
+      : _file_reader (freader)
+      , _filter (nullptr)
+      , _fileter_data()
+      , _block_cache (bcache)
+      , _file_name ()
+      , _metaindex_handle ()
+      , _index_block (index_block)
+      , _options(opt)
+  {
+  }
 
+  lw_shared_ptr<file_reader> _file_reader;
+  lw_shared_ptr<filter_block_reader> _filter = nullptr;
+  managed_bytes _fileter_data;
+  lw_shared_ptr<block_cache> _block_cache;
+  bytes _file_name;
   block_handle _metaindex_handle;  // Handle to metaindex_block: saved from footer
-  lw_shared_ptr<block> _index_block;
+  lw_shared_ptr<block> _index_block = nullptr;
+  sstable_options _options;
   future<> read_meta(const footer& footer);
   future<> read_filter(const slice& filter_handle_value);
 };
@@ -42,6 +56,10 @@ future<temporary_buffer<char>> read_block(lw_shared_ptr<file_random_access_reade
 
 future<lw_shared_ptr<table>> table::open(bytes fname, sstable_options opts) {
     return open_file_dma(fname, open_flags::ro).then([this, options = std::move(opts)] (file file_) mutable {
+        auto cached_table = opts.get_table_cache()->find(fname);
+        if (cached_table) {
+            return make_ready_future<table> (cached_table);
+        }
         return file_.size().then([this, file_ = std::move(file_), opts = std::move(opts)] (uint64_t size) {
             if (size < footer::kEncodedLength) {
                 return make_exception_future<>(lw_shared_ptr<table>({}));
@@ -49,7 +67,7 @@ future<lw_shared_ptr<table>> table::open(bytes fname, sstable_options opts) {
             auto f = make_checked_file(opts._read_error_handler, file_);
             auto r = make_lw_shared<file_random_access_reader>(std::move(f), size, opts.sstable_buffer_size);
             reader->seek(size - Footer::kEncodedLength);
-            return r->read_exactly(Footer::kEncodedLength).then([this, r] (auto buffer) mutable {
+            return r->read_exactly(Footer::kEncodedLength).then([this, r, opts = std::move(opts)] (auto buffer) mutable {
                 if (buffer.size() != footer::kEncodedLength) {
                     return make_exception_future<>(lw_shared_ptr<table>({}));
                 }
@@ -60,13 +78,14 @@ future<lw_shared_ptr<table>> table::open(bytes fname, sstable_options opts) {
                 }
                 // read index block, and do not parse the index block now.
                 auto fut = read_block(r, footer_.index_handle());
-                return fut.then([this, r = std::move(r), _footer = std::move(_footer)] (auto&& data) {
+                return fut.then([this, r = std::move(r), _footer = std::move(_footer), opts = std::move(opts)] (auto&& data) {
                     auto block_handle_key = convert_to_handle_key(footer_.index_handle());
-                    auto index_block = cache->find_and_create(std::move(block_handle_key));
-                    auto rep_ = std::make_unique<table::rep>(r, footer_.metaindex_handle(), index_block);
+                    auto index_block = cache->find_and_create(std::move(block_handle_key), std::move(data));
+                    auto rep_ = std::make_unique<table::rep>(r, opts.get_block_cache(), footer_.metaindex_handle(), index_block, opts);
                     auto table_instance = make_lw_shared<table>(rep_);
                     // read meta block
                     return rep_->read_meta(footer_.metaindex_handle()).then([this, table_instance] {
+                        rep_->insert(table_instance);
                         return make_ready_future<lw_shared_ptr<table>> ({table_instance});
                     });
                 });
@@ -287,7 +306,7 @@ public:
             }
             return read_block(_reader, data_handle).then([this, key = std::move(handle_key)] (auto&& data) {
                 auto b = _table->cache()->create(std::move(key), std::move(data));
-                 _data_block_reader = make_block_reader(b, _table->options());
+                _data_block_reader = make_block_reader(b, _table->options());
                 return _data_block_reader->seek(ikey);
             });
        });
@@ -307,7 +326,7 @@ public:
                    }
                    return read_block(_reader, data_handle).then([this, key = std::move(handle_key)] (auto&& data) {
                        auto b = _table->cache()->create(std::move(key), std::move(data));
-                        _data_block_reader = make_block_reader(b, _table->options());
+                       _data_block_reader = make_block_reader(b, _table->options());
                        return _data_block_reader->seek_to_first();
                    });
                });
@@ -329,37 +348,92 @@ lw_shared_ptr<reader> make_sstable_reader(lw_shared_ptr<table> ptable) {
 
 class combined_sstables_reader : public reader::impl {
     std::vector<lw_shared_ptr<table>> _sstables;
-    std::vector<partition> _currents;
-    bool _eof;
+    std::vector<lw_shared_ptr<reader> _readers;
+    lw_shared_ptr<reader> _current = nullptr;
+    bool _eof = false;
+
 public:
     combined_sstables_reader(std::vector<lw_shared_ptr<table>> sstables)
         : _sstables(std::move(sstables))
+        , _readers(sstables.size())
+        , _current(nullptr)
         , _eof(false)
     {
+        for (size_t i = 0; i < sstables.size(); ++i) {
+            _readers[i] = make_sstable_reader(sstables[i]);
+        }
     }
 
     ~combined_sstables_reader()
     {
     }
-    // mock
+
     future<> seek_to_first() {
-        return make_ready_future<>();
+        return parallel_for_each(_sstables, [this] (auto sstable) mutable {
+            sstable->seek_to_first();
+        }).then(this] mutable {
+            return find_smallest_one();
+        });
     }
+
     future<> seek_to_last() {
-        return make_ready_future<>();
+        return parallel_for_each(_sstables, [this] (auto sstable) mutable {
+            sstable->seek_to_last();
+        }).then(this] mutable {
+            return find_smallest_one();
+        });
     }
+
     future<> seek(bytes key) {
-        return make_ready_future<>();
+        return parallel_for_each(_sstables, [this, key] (auto sstable) mutable {
+            sstable->seek(key);
+        }).then(this] mutable {
+            return find_smallest_one();
+        });
     }
+
     future<> next() {
-        return make_ready_future<>();
+        return parallel_for_each(_sstables, [this] (auto sstable) mutable {
+            if (sstable == _current) {
+                sstable->next();
+            }
+        }).then([this] mutable {
+            return find_smallest_one();
+        });
     }
-    partition current() {
-        return partition {};
+
+    bool eof() const {
+        bool all_eof = false;
+        for (auto& sstable : _sstables) {
+            all_eof &= sstable->eof();
+        }
+        return all_eof;
+    }
+
+    partition current() const {
+        return _current->current();
+    }
+private:
+    future<> find_smallest_one() {
+       auto less_comparator = [] (const lw_shared_ptr<table> a, const lw_shared_ptr<table> b) {
+           return a->current().key() < b->current().key();
+       };
+       lw_shared_ptr<table> smallest = _sstables[0];
+       for (size_t i = 1; i < _sstables.size(); ++i) {
+           if (less_comparator(_sstables[i], smallest)) {
+               smallest = _sstables[i];
+           }
+       }
+       _current = smallest;
+       if (_current == nullptr) {
+           _eof = true;
+       }
+       return make_ready_future<>();
     }
 };
 
 lw_shared_ptr<reader> make_combined_sstables_reader(std::vector<lw_shared_ptr<table>> sstables) {
-    return make_lw_shared<reader>(std::make_unique<block_reader>(ptable));
+    return make_lw_shared<reader>(std::make_unique<combined_sstables_reader>(std::move(stables)));
 }
+
 }
