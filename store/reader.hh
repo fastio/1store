@@ -28,9 +28,9 @@ public:
 };
 
 class table;
-struct block_handle;
+class memtable;
 
-extern lw_shared_ptr<reader> make_sstable_reader(lw_shared_ptr<table> ptable);
+extern lw_shared_ptr<reader> make_sstable_reader(lw_shared_ptr<table> sstable);
 extern lw_shared_ptr<reader> make_combined_sstables_reader(std::vector<lw_shared_ptr<table>> sstables);
-
+extern lw_shared_ptr<reader> make_memtable_reader(lw_shared_ptr<memtable> mtable);
 }
