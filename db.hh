@@ -27,7 +27,6 @@
 #include "core/metrics_registration.hh"
 #include <sstream>
 #include <iostream>
-#include "common.hh"
 #include "structures/geo.hh"
 #include "structures/bits_operation.hh"
 #include <tuple>
@@ -48,6 +47,14 @@ inline distributed<database>& get_database() {
 inline database& get_local_database() {
     return _the_database.local();
 }
+
+enum {
+    FLAG_SET_NO = 1 << 0,
+    FLAG_SET_EX = 1 << 1,
+    FLAG_SET_PX = 1 << 2,
+    FLAG_SET_NX = 1 << 3,
+    FLAG_SET_XX = 1 << 4,
+};
 
 class database final : private logalloc::region {
 public:

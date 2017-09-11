@@ -25,13 +25,15 @@
 #include "server.hh"
 #include "util/log.hh"
 //#include "core/prometheus.hh"
-#include "storage_proxy.hh"
+#include "proxy.hh"
 #include "service.hh"
 #include "init.hh"
 #include "release.hh"
 #include "gms/gossiper.hh"
 #include "gms/inet_address.hh"
 #include "utils/fb_utilities.hh"
+#include "core/thread.hh"
+#include "seastarx.hh"
 #define PLATFORM "seastar"
 #define VERSION "v1.0"
 #define VERSION_STRING PLATFORM " " VERSION
@@ -80,18 +82,18 @@ int main(int ac, char** av) {
 
                 auto& db = redis::get_database();
                 auto& server = redis::get_server();
-                auto& redis = redis::get_redis_service();
-                auto& proxy = redis::get_storage_proxy();
+                auto& redis = redis::get_service();
+                auto& px = redis::get_proxy();
                 auto& ss = redis::get_service();
 
                 engine().at_exit([&] { return db.stop(); });
                 engine().at_exit([&] { return server.stop(); });
                 engine().at_exit([&] { return redis.stop(); });
-                engine().at_exit([&] { return proxy.stop(); });
+                engine().at_exit([&] { return px.stop(); });
                 engine().at_exit([&] { return ss.stop(); });
                 //engine().at_exit([&] { return prometheus_server.stop(); });
 
-                auto port = cfg->storage_port();
+                //auto port = cfg->storage_port();
                 //auto pport = cfg->prometheus_port();
                 // start databse
                 db.start().get();
@@ -136,7 +138,7 @@ int main(int ac, char** av) {
                         , cfg->listen_on_broadcast_address()
                 ).get();
 
-                proxy.start().get();
+                px.start().get();
                 ss.start().get();
 
                 gms::get_local_gossiper().wait_for_gossip_to_settle().get();
@@ -148,8 +150,8 @@ int main(int ac, char** av) {
                 //listen_options lo;
                 //lo.reuse_address = true;
                 //prometheus_server.listen(make_ipv4_address({pport})).get();
-                server.start(port).get();
-                server.invoke_on_all(&redis::server::start).get();
+                //server.start(port).get();
+                //server.invoke_on_all(&redis::server::start).get();
                 print(" [SUCCESS]\n");
             }).then_wrapped([&return_value] (auto && f) {
                 try {

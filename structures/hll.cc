@@ -19,9 +19,14 @@
 *
 */
 #include "hll.hh"
-#include "common.hh"
-
+#include <cmath>
 namespace redis {
+
+static constexpr const int HLL_P = 14;
+static constexpr const int HLL_BITS = 6;
+static constexpr const int HLL_CARD_CACHE_SIZE = 8;
+static constexpr const int HLL_BUCKET_COUNT = (1 << HLL_P);
+static constexpr const int HLL_BYTES_SIZE = HLL_CARD_CACHE_SIZE + (HLL_BUCKET_COUNT * HLL_BITS + 7) / 8;
 
 static constexpr const int HLL_BUCKET_COUNT_MAX = (1 << HLL_BITS) - 1;
 static constexpr const int HLL_BUCKET_COUNT_MASK = HLL_BUCKET_COUNT - 1; 

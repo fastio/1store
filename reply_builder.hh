@@ -37,8 +37,45 @@
 #include "structures/dict_lsa.hh"
 #include "structures/sset_lsa.hh"
 #include "structures/geo.hh"
+#include "utils/bytes.hh"
 namespace redis {
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
+
+static const bytes msg_crlf {"\r\n"};
+static const bytes msg_ok {"+OK\r\n"};
+static const bytes msg_pong {"+PONG\r\n"};
+static const bytes msg_err = {"-ERR\r\n"};
+static const bytes msg_zero = {":0\r\n"};
+static const bytes msg_one = {":1\r\n"};
+static const bytes msg_neg_one = {":-1\r\n"};
+static const bytes msg_neg_two = {":-2\r\n"};
+static const bytes msg_null_blik = {"$-1\r\n"};
+static const bytes msg_null_multi_bulk = {"*-1\r\n"};
+static const bytes msg_empty_multi_bulk = {"*0\r\n"};
+static const bytes msg_type_err = {"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"};
+static const bytes msg_nokey_err = {"-ERR no such key\r\n"};
+static const bytes msg_syntax_err = {"-ERR syntax error\r\n"};
+static const bytes msg_same_object_err = {"-ERR source and destination objects are the same\r\n"};
+static const bytes msg_out_of_range_err = {"-ERR index out of range\r\n"};
+static const bytes msg_not_integer_err = {"-ERR ERR hash value is not an integer\r\n" };
+static const bytes msg_not_float_err = {"-ERR ERR hash value is not an float\r\n" };
+static const bytes msg_str_tag = {"+"};
+static const bytes msg_num_tag = {":"};
+static const bytes msg_sigle_tag = {"*"};
+static const bytes msg_batch_tag = {"$"};
+static const bytes msg_not_found = {"+(nil)\r\n"};
+static const bytes msg_nil = {"+(nil)\r\n"};
+static constexpr const int REDIS_OK = 0;
+static constexpr const int REDIS_ERR = 1;
+static constexpr const int REDIS_NONE = -1;
+static constexpr const int REDIS_WRONG_TYPE = -2;
+static const bytes msg_type_string {"+string\r\n"};
+static const bytes msg_type_none {"+none\r\n"};
+static const bytes msg_type_list {"+list\r\n"};
+static const bytes msg_type_hll {"+hyperloglog\r\n"};
+static const bytes msg_type_set {"+set\r\n"};
+static const bytes msg_type_zset {"+zset\r\n"};
+static const bytes msg_type_hash {"+hash\r\n"};
 
 class reply_builder final {
 public:

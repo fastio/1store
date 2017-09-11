@@ -41,7 +41,6 @@
 #include "net/packet-data-source.hh"
 #include <unistd.h>
 #include <cstdlib>
-#include "common.hh"
 namespace redis {
 
 distributed<service> _service;

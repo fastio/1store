@@ -26,7 +26,6 @@
 #include "utils/bytes.hh"
 #include "utils/allocation_strategy.hh"
 #include "utils/logalloc.hh"
-#include "common.hh"
 #include "core/sstring.hh"
 #include  <experimental/vector>
 namespace stdx = std::experimental;

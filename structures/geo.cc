@@ -19,11 +19,25 @@
 *
 */
 #include "geo.hh"
-#include "common.hh"
 #include "util/log.hh"
 using logger =  seastar::logger;
 static logger geo_log ("db");
 namespace redis {
+static constexpr const int GEO_HASH_STEP_MAX  = 26; /* 26*2 = 52 bits. */
+/* Limits from EPSG:900913 / EPSG:3785 / OSGEO:41001 */
+static constexpr const double GEO_LAT_MIN = -85.05112878;
+static constexpr const double GEO_LAT_MAX = 85.05112878;
+static constexpr const double GEO_LAT_SCALE = GEO_LAT_MAX - GEO_LAT_MIN;
+static constexpr const double GEO_LAT_MIN_STD = -90;
+static constexpr const double GEO_LAT_MAX_STD = 90;
+static constexpr const double GEO_LAT_STD_SCALE = GEO_LAT_MAX_STD - GEO_LAT_MIN_STD;
+static constexpr const double GEO_LONG_MIN = -180;
+static constexpr const double GEO_LONG_MAX = 180;
+static constexpr const double GEO_LONG_SCALE = GEO_LONG_MAX - GEO_LONG_MIN;
+// @brief Earth's quatratic mean radius for WGS-84
+static constexpr const double EARTH_RADIUS_IN_METERS = 6372797.560856;
+static constexpr const double MERCATOR_MAX = 20037726.37;
+static constexpr const double MERCATOR_MIN = -20037726.37;
 struct geo_hash
 {
     uint64_t _hash;

@@ -18,14 +18,36 @@
 *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
-#pragma once
-#include "utils/managed_bytes.hh"
+#include "proxy.hh"
+#include <functional>
+#include "core/sharded.hh"
+#include "core/sstring.hh"
+#include <experimental/optional>
+#include <iomanip>
+#include <sstream>
+#include "core/app-template.hh"
+#include "core/future-util.hh"
+#include "core/timer-set.hh"
+#include "core/shared_ptr.hh"
+#include "core/stream.hh"
+#include "core/memory.hh"
+#include "core/units.hh"
+#include "core/distributed.hh"
+#include "core/vector-data-sink.hh"
+#include "core/bitops.hh"
+#include "core/slab.hh"
+#include "core/align.hh"
+#include "net/api.hh"
+#include "net/packet-data-source.hh"
+#include <unistd.h>
+#include <cstdlib>
 namespace redis {
-static constexpr const size_t BITMAP_MAX_OFFSET  = (1 << 31);
-struct bits_operation
+
+distributed<proxy> _the_redis_proxy;
+
+future<> proxy::stop()
 {
-    static bool set(managed_bytes& o, size_t offset, bool value);
-    static bool get(const managed_bytes& o, size_t offset);
-    static size_t count(const managed_bytes& o, long start, long end);
-};
+    return make_ready_future<>();
+}
+
 }

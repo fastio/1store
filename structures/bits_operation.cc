@@ -24,7 +24,6 @@
 #include "core/sstring.hh"
 #include "core/shared_ptr.hh"
 #include "core/sharded.hh"
-#include "common.hh"
 namespace redis {
 // 512M bytes
 static const size_t MAX_BYTE_COUNT = 1024 * 1024 * 512 - 1;

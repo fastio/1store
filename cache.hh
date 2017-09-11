@@ -24,7 +24,6 @@
 #include <boost/intrusive_ptr.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/optional.hpp>
-#include "common.hh"
 #include "utils/managed_ref.hh"
 #include "utils/managed_bytes.hh"
 #include "utils/allocation_strategy.hh"

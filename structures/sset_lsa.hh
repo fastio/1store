@@ -25,7 +25,6 @@
 #include "core/sharded.hh"
 #include "core/sstring.hh"
 #include "util/log.hh"
-#include "common.hh"
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/set.hpp>
 #include "utils/managed_bytes.hh"
@@ -41,6 +40,16 @@ using logger =  seastar::logger;
 static logger sset_log ("sset");
 
 namespace redis {
+
+static const int ZADD_NONE = 0;
+static constexpr const int ZADD_INCR = (1 << 0); // increment the score instead of setting it.
+static constexpr const int ZADD_NX   = (1 << 1); // don't touch elements not already existing.
+static constexpr const int ZADD_XX   = (1 << 2); // only touch elements already exisitng.
+static constexpr const int ZADD_CH   = (1 << 3); // number elementes were changed.
+
+static constexpr const int ZAGGREGATE_MIN = (1 << 0);
+static constexpr const int ZAGGREGATE_MAX = (1 << 1);
+static constexpr const int ZAGGREGATE_SUM = (1 << 2);
 struct sset_entry
 {
     using set_hook_type = boost::intrusive::set_member_hook<>;

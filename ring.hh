@@ -26,7 +26,6 @@
 #include <unordered_map>
 #include <vector>
 #include "gms/inet_address.hh"
-#include "common.hh"
 #include "token.hh"
 #include "keys.hh"
 namespace redis {
