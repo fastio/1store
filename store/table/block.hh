@@ -1,33 +1,64 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
-#include "iterator.h"
+#include "utils/managed_bytes.hh"
+#include "core/temporary_buffer.hh"
+#include "base_cache.hh"
+#include "seastarx.hh"
 
-namespace leveldb {
+namespace store {
 
-struct block_contents;
-class comparator;
+class block_cache;
 
 class block {
- public:
-  explicit block(const block_contents& contents);
+    managed_bytes _cache_key;     // used to lookup
+    managed_bytes _data; 
+    uint32_t _size;
+    uint32_t _restart_offset;     // Offset in data_ of restart array
+    uint32_t num_restarts() const;
+public:
+    explicit block(managed_bytes cache_key, temporary_buffer<char> data);
+    explicit block(bytes cache_key, temporary_buffer<char> data) 
+        : block(managed_bytes { cache_key.data(), cache_key.size() }, std::move(data))
+    {
+    }
 
-  ~block();
+    block(block&& o)
+        : _cache_key(std::move(o._cache_key))
+        , _data(std::move(o._data))
+        , _size(o._size)
+        , _restart_offset(std::move(o._restart_offset))
+    {
+    }
+    block& operator = (block&& o)
+    {
+        if (this != &o) {
+            _cache_key = std::move(o._cache_key);
+            _data = std::move(o._data);
+            _size = o._size;
+            _restart_offset = std::move(o._restart_offset);
+        }
+        return *this;
+    }
 
-  size_t size() const { return size_; }
-  iterator* new_iterator(const comparator* comparator);
-  block(const block&) = delete;
-  void operator=(const block&);
+    ~block() {}
 
- private:
-  uint32_t num_restarts() const;
+    size_t size() const { return size_; }
+    block(const block&) = delete;
+    void operator=(const block&) = delete;
+    friend class block_cache;
+};
 
-  const char* data_;
-  size_t size_;
-  uint32_t restart_offset_;     // Offset in data_ of restart array
-  bool owned_;                  // Block owns data_[]
-
-  class Iter;
+class block_cache : public redis::base_cache<managed_bytes, lw_shared_ptr<block>> { 
+public:
+    block_cache()
+        : redis::base_cache<managed_bytes, lw_shared_ptr<block>> (redis::global_cache_tracker<managed_bytes, lw_shared_ptr<block>>())
+    {
+    }
+    block_cache(block_cache&&) = delete;
+    block_cache(const block_cache&) = delete;
+    block_cache& operator = (const block_cache&) = delete;
+    block_cache& operator = (block_cache&&) = delete;
 };
 
 }
