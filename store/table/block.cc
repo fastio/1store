@@ -21,11 +21,9 @@ inline uint32_t block::num_restarts() const {
   //return DecodeFixed32(data_ + size_ - sizeof(uint32_t));
 }
 
-block::block(managed_bytes cache_key, const managed_bytes data)
-    : _lru_link()
-    , _cache_link()
-    : _key(std::move(cached_key))
-    , _data(std::move(data))
+block::block(managed_bytes cache_key, temporary_buffer<char> buffer)
+    : _cache_key(std::move(cache_key))
+    , _data(std::move(managed_bytes { bytes_view {buffer.get(), buffer.size()} }))
     , _size(static_cast<uint32_t>(_data.size()))
 {
   if (_size < sizeof(uint32_t)) {
@@ -39,9 +37,6 @@ block::block(managed_bytes cache_key, const managed_bytes data)
       _restart_offset = _size - (1 + num_restarts()) * sizeof(uint32_t);
     }
   }
-}
-
-block::~block() {
 }
 
 }

@@ -4,14 +4,14 @@
 
 #include <ctype.h>
 #include <stdio.h>
-#include "db/_file_name.h"
-#include "db/dbformat.h"
-#include "util/logging.h"
+#include "store/filename.hh"
+#include "store/dbformat.hh"
+#include "store/util/logging.hh"
 
 namespace store {
 
 // A utility routine: write "data" to the named file and Sync() it.
-extern future<status> write_string_to_file_sync(const slice& data,
+extern future<status> write_string_to_file_sync(const bytes_view data,
                                     const bytes& fname);
 
 static bytes make_file_name(const bytes& name, uint64_t number,
@@ -68,8 +68,9 @@ bytes temp_file_name(const bytes& dbname, uint64_t number) {
 //    dbname/[0-9]+.(log|sst|ldb)
 bool parse_file_name(const bytes& fname,
                    uint64_t* number,
-                   FileType* type) {
-  slice rest(fname);
+                   file_type* type) {
+  bytes_view rest{fname};
+  bytes_view mainfest_prefix { fname.data(), fname.size() < 9 ? fname.size() : 9 };
   if (rest == "CURRENT") {
     *number = 0;
     *type = kCurrentFile;
@@ -79,10 +80,10 @@ bool parse_file_name(const bytes& fname,
   } else if (rest == "LOG" || rest == "LOG.old") {
     *number = 0;
     *type = kInfoLogFile;
-  } else if (rest.starts_with("MANIFEST-")) {
-    rest.remove_prefix(strlen("MANIFEST-"));
+  } else if (mainfest_prefix == bytes_view {"MANIFEST-"}) {
+    rest.remove_prefix(mainfest_prefix.size());
     uint64_t num;
-    if (!ConsumeDecimalNumber(&rest, &num)) {
+    if (!consume_decimal_number(rest, num)) {
       return false;
     }
     if (!rest.empty()) {
@@ -94,15 +95,15 @@ bool parse_file_name(const bytes& fname,
     // Avoid strtoull() to keep _file_name format independent of the
     // current locale
     uint64_t num;
-    if (!ConsumeDecimalNumber(&rest, &num)) {
+    if (!consume_decimal_number(rest, num)) {
       return false;
     }
-    slice suffix = rest;
-    if (suffix == slice(".log")) {
+    bytes_view suffix = rest;
+    if (suffix == bytes_view(".log")) {
       *type = kLogFile;
-    } else if (suffix == slice(".sst") || suffix == slice(".ldb")) {
+    } else if (suffix == bytes_view(".sst") || suffix == bytes_view(".ldb")) {
       *type = kTableFile;
-    } else if (suffix == slice(".dbtmp")) {
+    } else if (suffix == bytes_view(".dbtmp")) {
       *type = kTempFile;
     } else {
       return false;
@@ -112,9 +113,10 @@ bool parse_file_name(const bytes& fname,
   return true;
 }
 
-future<status> set_current_file(const bytes& dbname,
+future<> set_current_file(const bytes& dbname,
                       uint64_t descriptor_number) {
   // Remove leading "dbname/" and add newline to manifest file name
+  /*
   bytes manifest = descriptor_file_name(dbname, descriptor_number);
   slice contents = manifest;
   assert(contents.starts_with(dbname + "/"));
@@ -128,6 +130,8 @@ future<status> set_current_file(const bytes& dbname,
         return delete_file(tmp);
       }
   });    
+  */
+    return make_ready_future<>();
 }
 
-}  // namespace leveldb
+}

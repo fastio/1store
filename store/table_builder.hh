@@ -12,8 +12,11 @@
 
 #pragma once
 #include <stdint.h>
-#include "include/options.h"
-#include "include/status.h"
+#include "store/options.hh"
+#include "store/status.hh"
+#include "core/future.hh"
+#include "core/file.hh"
+#include "seastarx.hh"
 
 namespace store {
 
@@ -41,7 +44,7 @@ class table_builder {
   // Add key,value to the table being constructed.
   // REQUIRES: key is after any previously added key according to comparator.
   // REQUIRES: Finish(), Abandon() have not been called
-  future<status> add(const slice& key, const slice& value);
+  future<> add(const bytes_view key, const bytes_view value);
 
   // Advanced operation: flush any buffered key/value pairs to file.
   // Can be used to ensure that two adjacent entries never live in
@@ -50,12 +53,12 @@ class table_builder {
   void flush();
 
   // Return non-ok iff some error has been detected.
-  status status() const;
+  status get_status() const;
 
   // Finish building the table.  Stops using the file passed to the
   // constructor after this function returns.
   // REQUIRES: Finish(), Abandon() have not been called
-  future<status> finish();
+  future<> finish();
 
   // Indicate that the contents of this builder should be abandoned.  Stops
   // using the file passed to the constructor after this function returns.
@@ -74,7 +77,7 @@ class table_builder {
  private:
   bool ok() const { return status().ok(); }
   void write_block(block_builder* block, block_handle* handle);
-  void write_raw_block(const slice& data, compression_type, block_handle* handle);
+  void write_raw_block(bytes_view data, compression_type, block_handle* handle);
 
   struct rep;
   rep* rep_;
@@ -84,6 +87,4 @@ class table_builder {
   void operator=(const table_builder&) = delete;
 };
 
-}  // namespace leveldb
-
-#endif  // STORAGE_LEVELDB_INCLUDE_TABLE_BUILDER_H_
+}  // namespace store 

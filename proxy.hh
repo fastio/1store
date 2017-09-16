@@ -1,6 +1,4 @@
-//FIXME: Copyright header
 #pragma once
-
 #include "core/distributed.hh"
 #include "utils/histogram.hh"
 #include "utils/estimated_histogram.hh"

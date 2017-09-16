@@ -8,7 +8,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "store/slice.hh"
 #include "utils/bytes.hh"
 #include <string>
 
@@ -20,7 +19,7 @@ void append_number_to(bytes* str, uint64_t num) {
     str->append(buf, size);
 }
 
-void append_escaped_string_to(bytes* str, const slice& value) {
+void append_escaped_string_to(bytes* str, const bytes_view value) {
     std::string b; 
     for (size_t i = 0; i < value.size(); i++) {
         char c = value[i];
@@ -42,17 +41,17 @@ bytes number_to_string(uint64_t num) {
     return r;
 }
 
-bytes escape_string(const slice& value) {
+bytes escape_string(bytes_view value) {
     bytes r;
     append_escaped_string_to(&r, value);
     return r;
 }
 
-bool consume_decimal_number(slice* in, uint64_t* val) {
+bool consume_decimal_number(bytes_view& in, uint64_t& val) {
     uint64_t v = 0;
     int digits = 0;
-    while (!in->empty()) {
-        char c = (*in)[0];
+    while (!in.empty()) {
+        char c = in[0];
         if (c >= '0' && c <= '9') {
             ++digits;
             // |delta| intentionally unit64_t to avoid Android crash (see log).
@@ -64,12 +63,12 @@ bool consume_decimal_number(slice* in, uint64_t* val) {
                 return false;
             }
             v = (v * 10) + delta;
-            in->remove_prefix(1);
+            in.remove_prefix(1);
         } else {
             break;
         }
     }
-    *val = v;
+    val = v;
     return (digits > 0);
 }
 

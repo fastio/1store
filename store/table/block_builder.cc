@@ -26,85 +26,91 @@
 //     num_restarts: uint32
 // restarts[i] contains the offset within the block of the ith restart point.
 
-// Modified by Pedis.
-#include "table/block_builder.h"
+/**
+ *
+ * Modified by Peng Jian, pstack@163.com.
+ *
+ **/
+#include "store/table/block_builder.hh"
 
 #include <algorithm>
 #include <assert.h>
-#include "leveldb/comparator.h"
-#include "leveldb/table_builder.h"
-#include "util/coding.h"
+#include "store/comparator.hh"
+#include "store/util/coding.hh"
 
 namespace store {
 
-block_builder::block_builder(const Options* options)
-    : options_(options),
-      restarts_(),
-      counter_(0),
-      finished_(false) {
-  assert(options->block_restart_interval >= 1);
-  restarts_.push_back(0);       // First restart point is at offset 0
+block_builder::block_builder(const block_options& options)
+    :_options(options)
+    ,_restarts{}
+    ,_counter(0)
+    ,_finished(false)
+{
+    assert(options._block_restart_interval >= 1);
+    _restarts.push_back(0);       // First restart point is at offset 0
 }
 
-void block_builder::reset() {
-  buffer_.clear();
-  restarts_.clear();
-  restarts_.push_back(0);       // First restart point is at offset 0
-  counter_ = 0;
-  finished_ = false;
-  last_key_.clear();
+void block_builder::reset()
+{
+    _buffer = {};
+    _restarts.clear();
+    _restarts.push_back(0);       // First restart point is at offset 0
+    _counter = 0;
+    _finished = false;
+    _last_key = {};
 }
 
-size_t block_builder::current_size_estimate() const {
-  return (buffer_.size() +                        // Raw data buffer
-          restarts_.size() * sizeof(uint32_t) +   // Restart array
-          sizeof(uint32_t));                      // Restart array length
+size_t block_builder::current_size_estimate() const
+{
+    return (_buffer.size() +                        // Raw data buffer
+            _restarts.size() * sizeof(uint32_t) +   // Restart array
+            sizeof(uint32_t));                      // Restart array length
 }
 
-slice block_builder::finish() {
-  // Append restart array
-  for (size_t i = 0; i < restarts_.size(); i++) {
-    PutFixed32(&buffer_, restarts_[i]);
-  }
-  PutFixed32(&buffer_, restarts_.size());
-  finished_ = true;
-  return slice(buffer_);
-}
-
-void block_builder::add(const slice& key, const slice& value) {
-  slice last_key_piece(last_key_);
-  assert(!finished_);
-  assert(counter_ <= options_->block_restart_interval);
-  assert(buffer_.empty() // No values yet?
-         || options_->comparator->Compare(key, last_key_piece) > 0);
-  size_t shared = 0;
-  if (counter_ < options_->block_restart_interval) {
-    // See how much sharing to do with previous string
-    const size_t min_length = std::min(last_key_piece.size(), key.size());
-    while ((shared < min_length) && (last_key_piece[shared] == key[shared])) {
-      shared++;
+const bytes& block_builder::finish()
+{
+    // Append restart array
+    for (size_t i = 0; i < _restarts.size(); i++) {
+      put_fixed32(_buffer, _restarts[i]);
     }
-  } else {
-    // Restart compression
-    restarts_.push_back(buffer_.size());
-    counter_ = 0;
-  }
-  const size_t non_shared = key.size() - shared;
-
-  // Add "<shared><non_shared><value_size>" to buffer_
-  PutVarint32(&buffer_, shared);
-  PutVarint32(&buffer_, non_shared);
-  PutVarint32(&buffer_, value.size());
-
-  // Add string delta to buffer_ followed by value
-  buffer_.append(key.data() + shared, non_shared);
-  buffer_.append(value.data(), value.size());
-
-  // Update state
-  last_key_.resize(shared);
-  last_key_.append(key.data() + shared, non_shared);
-  assert(slice(last_key_) == key);
-  counter_++;
+    put_fixed32(_buffer, _restarts.size());
+    _finished = true;
+    return _buffer;
 }
 
-}  // namespace leveldb
+void block_builder::add(const bytes& key, const bytes& value) {
+    assert(!_finished);
+    assert(_counter <= _options._block_restart_interval);
+    assert(_buffer.empty() // No values yet?
+            || _options._comparator.compare(key, _last_key) > 0);
+    size_t shared = 0;
+    if (_counter < _options._block_restart_interval) {
+        // See how much sharing to do with previous string
+        auto min_length = std::min(_last_key.size(), key.size());
+        while ((shared < min_length) && (_last_key[shared] == key[shared])) {
+            shared++;
+        }
+    } else {
+        // Restart compression
+        _restarts.push_back(_buffer.size());
+        _counter = 0;
+    }
+    const size_t non_shared = key.size() - shared;
+
+    // Add "<shared><non_shared><value_size>" to buffer_
+    put_varint32(_buffer, shared);
+    put_varint32(_buffer, non_shared);
+    put_varint32(_buffer, value.size());
+
+    // Add string delta to buffer_ followed by value
+    _buffer.append(key.data() + shared, non_shared);
+    _buffer.append(value.data(), value.size());
+
+    // Update state
+    _last_key.resize(shared);
+    _last_key.append(key.data() + shared, non_shared);
+    assert(_last_key == key);
+    _counter++;
+}
+
+}

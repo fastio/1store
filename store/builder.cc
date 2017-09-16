@@ -45,8 +45,7 @@ future<status> build_table(const std::string& dbname,
         });
     }
     else {
-        //FIXME: exception
-        return make_ready_future<status> ({});
+        return make_exception_future<status> ({});
     }
 }
 

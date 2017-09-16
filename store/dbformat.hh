@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include "store/comparator.hh"
 #include "store/filter_policy.hh"
-#include "store/slice.hh"
 #include "store/table_builder.hh"
 #include "store/util/coding.hh"
 #include "utils/bytes.hh"
@@ -66,12 +65,12 @@ static const sequence_number kMaxsequence_number =
     ((0x1ull << 56) - 1);
 
 struct parsed_internal_key {
-  slice user_key;
+  bytes_view user_key;
   sequence_number sequence;
   value_type type;
 
   parsed_internal_key() { }  // Intentionally left uninitialized (for speed)
-  parsed_internal_key(const slice& u, const sequence_number& seq, value_type t)
+  parsed_internal_key(const bytes_view& u, const sequence_number& seq, value_type t)
       : user_key(u), sequence(seq), type(t) { }
   bytes debug_string() const;
 };
@@ -89,19 +88,19 @@ extern void append_internal_key(bytes* result,
 // stores the parsed data in "*result", and returns true.
 //
 // On error, returns false, leaves "*result" in an undefined state.
-extern bool parse_internal_key(const slice& internal_key,
+extern bool parse_internal_key(const bytes_view& internal_key,
                              parsed_internal_key* result);
 
 // Returns the user key portion of an internal key.
-inline slice extract_user_key(const slice& internal_key) {
+inline bytes_view extract_user_key(const bytes_view& internal_key) {
   assert(internal_key.size() >= 8);
-  return slice(internal_key.data(), internal_key.size() - 8);
+  return bytes_view {internal_key.data(), internal_key.size() - 8};
 }
 
-inline value_type extract_value_type(const slice& internal_key) {
+inline value_type extract_value_type(const bytes_view& internal_key) {
   assert(internal_key.size() >= 8);
   const size_t n = internal_key.size();
-  uint64_t num = DecodeFixed64(internal_key.data() + n - 8);
+  uint64_t num = decode_fixed64(internal_key.data() + n - 8);
   unsigned char c = num & 0xff;
   return static_cast<value_type>(c);
 }
@@ -114,10 +113,10 @@ class internal_key_comparator : public comparator {
  public:
   explicit internal_key_comparator(const comparator* c) : user_comparator_(c) { }
   virtual const char* name() const;
-  virtual int compare(const slice& a, const slice& b) const;
+  virtual int compare(const bytes_view& a, const bytes_view& b) const;
   virtual void find_shortest_separator(
       bytes* start,
-      const slice& limit) const;
+      const bytes_view& limit) const;
   virtual void find_short_successor(bytes* key) const;
 
   const comparator* user_comparator() const { return user_comparator_; }
@@ -132,8 +131,8 @@ class internal_filter_policy : public filter_policy {
  public:
   explicit internal_filter_policy(const filter_policy* p) : user_policy_(p) { }
   virtual const char* name() const;
-  virtual void create_filter(const slice* keys, int n, bytes* dst) const;
-  virtual bool key_may_match(const slice& key, const slice& filter) const;
+  virtual void create_filter(const bytes_view keys, int n, bytes* dst) const;
+  virtual bool key_may_match(const bytes_view key, const bytes_view& filter) const;
 };
 
 // Modules in this directory should keep internal keys wrapped inside
@@ -144,17 +143,17 @@ class internal_key {
   bytes rep_;
  public:
   internal_key() { }   // Leave rep_ as empty to indicate it is invalid
-  internal_key(const slice& user_key, sequence_number s, value_type t) {
+  internal_key(const bytes_view& user_key, sequence_number s, value_type t) {
     append_internal_key(&rep_, parsed_internal_key(user_key, s, t));
   }
 
-  void decode_from(const slice& s) { rep_ = {s.data(), s.size()}; }
-  slice encode() const {
+  void decode_from(const bytes_view& s) { rep_ = {s.data(), s.size()}; }
+  bytes_view encode() const {
     assert(!rep_.empty());
     return { rep_.data(), rep_.size() };
   }
 
-  slice user_key() const { return extract_user_key({ rep_.data(), rep_.size() }); }
+  bytes_view user_key() const { return extract_user_key({ rep_.data(), rep_.size() }); }
 
   void set_from(const parsed_internal_key& p) {
     rep_ = {};
@@ -171,15 +170,15 @@ inline int internal_key_comparator::compare(
   return compare(a.encode(), b.encode());
 }
 
-inline bool parse_internal_key(const slice& internal_key,
+inline bool parse_internal_key(const bytes_view& internal_key,
                              parsed_internal_key* result) {
-  const size_t n = internal_key.size();
+  auto n = internal_key.size();
   if (n < 8) return false;
-  uint64_t num = DecodeFixed64(internal_key.data() + n - 8);
+  uint64_t num = decode_fixed64(internal_key.data() + n - 8);
   unsigned char c = num & 0xff;
   result->sequence = num >> 8;
   result->type = static_cast<value_type>(c);
-  result->user_key = slice(internal_key.data(), n - 8);
+  result->user_key = bytes_view { internal_key.data(), static_cast<uint32_t>(n - 8) };
   return (c <= static_cast<unsigned char>(kTypeValue));
 }
 
@@ -188,18 +187,18 @@ class lookup_key {
  public:
   // Initialize *this for looking up user_key at a snapshot with
   // the specified sequence number.
-  lookup_key(const slice& user_key, sequence_number sequence);
+  lookup_key(const bytes_view& user_key, sequence_number sequence);
 
   ~lookup_key();
 
   // Return a key suitable for lookup in a MemTable.
-  slice memtable_key() const { return slice(start_, end_ - start_); }
+  bytes_view memtable_key() const { return bytes_view {start_, static_cast<uint32_t> (end_ - start_)}; }
 
   // Return an internal key (suitable for passing to an internal iterator)
-  slice internal_key() const { return slice(kstart_, end_ - kstart_); }
+  bytes_view internal_key() const { return bytes_view {kstart_, static_cast<uint32_t>(end_ - kstart_)}; }
 
   // Return the user key
-  slice user_key() const { return slice(kstart_, end_ - kstart_ - 8); }
+  bytes_view user_key() const { return bytes_view {kstart_, static_cast<uint32_t>(end_ - kstart_ - 8)}; }
 
  private:
   // We construct a char array of the form:
@@ -215,8 +214,8 @@ class lookup_key {
   char space_[200];      // Avoid allocation for short keys
 
   // No copying allowed
-  lookup_key(const lookup_key&);
-  void operator=(const lookup_key&);
+  lookup_key(const lookup_key&) = delete;
+  void operator=(const lookup_key&) = delete;
 };
 
 inline lookup_key::~lookup_key() {

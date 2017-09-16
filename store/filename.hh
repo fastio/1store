@@ -7,10 +7,9 @@
 #pragma once
 #include <stdint.h>
 #include <string>
-#include "store/slice.hh"
-#include "store/status.hh"
 #include "core/future.hh"
 #include "seastarx.hh"
+#include "utils/bytes.hh"
 namespace store {
 
 enum file_type {

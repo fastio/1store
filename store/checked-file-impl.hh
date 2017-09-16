@@ -17,9 +17,11 @@
 
 #pragma once
 
-#include "seastar/core/file.hh"
-#include "disk-error-handler.hh"
-
+#include "core/file.hh"
+#include "core/reactor.hh"
+#include "utils/disk-error-handler.hh"
+#include "seastarx.hh"
+namespace store {
 class checked_file_impl : public file_impl {
 public:
 
@@ -155,4 +157,5 @@ inline open_checked_directory(const io_error_handler& error_handler,
             return make_ready_future<file>(make_checked_file(error_handler, f));
         });
     });
+}
 }

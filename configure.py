@@ -262,7 +262,6 @@ scylla_core = ([
         'gms/gossip_digest_ack.cc',
         'gms/gossiper.cc',
         'gms/inet_address.cc',
-      'common.cc',
       'redis.cc',
       'server.cc',
       'db.cc',
@@ -276,18 +275,27 @@ scylla_core = ([
       'cache.cc',
       'reply_builder.cc',
       'ring.cc',
-      'storage_proxy.cc',
+      'proxy.cc',
       'service.cc',
       'config.cc',
       'init.cc',
       'token.cc',
       'keys.cc',
+      'store/table/block.cc',
+      'store/table/block_builder.cc',
+      'store/comparator.cc',
                ]
                )
 
 api = [
        ]
 
+store = [
+        'store/filename.cc',
+        'store/util/logging.cc',
+        'store/file_writer.cc',
+        'store/file_reader.cc',
+        ]
 scylla_tests_dependencies = scylla_core + api +  [
 ]
 
@@ -295,7 +303,7 @@ scylla_tests_seastar_deps = [
 ]
 
 deps = {
-    'pedis': ['main.cc'] + scylla_core + api,
+    'pedis': ['main.cc'] + scylla_core + store + api,
 }
 
 pure_boost_tests = set([

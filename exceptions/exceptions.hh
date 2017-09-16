@@ -10,11 +10,11 @@ enum class exception_code : int32_t {
     SERVER_ERROR    = 0x0000,
     PROTOCOL_ERROR  = 0x000A,
 
-    // 3xx: io error
     IO_ERROR    = 0x3000,
+    REQUEST_ERROR    = 0x3001,
 };
 
-class io_exception : public std::exception {
+class base_exception : public std::exception {
 private:
     exception_code _code;
     sstring _msg;
@@ -28,8 +28,8 @@ protected:
         }
     }
 public:
-    io_exception(sstring msg) noexcept
-        : _code(exception_code::IO_ERROR)
+    base_exception(exception_code code, sstring msg) noexcept
+        : _code(code)
         , _msg(std::move(msg))
     { }
     virtual const char* what() const noexcept override { return _msg.begin(); }
@@ -37,4 +37,13 @@ public:
     sstring get_message() const { return what(); }
 };
 
+class io_exception : public base_exception {
+public:
+    io_exception(sstring msg) : base_exception(exception_code::IO_ERROR, std::move(msg)) {}
+};
+
+class request_exception : public base_exception {
+public:
+    request_exception(sstring msg) : base_exception(exception_code::REQUEST_ERROR, std::move(msg)) {}
+};
 }

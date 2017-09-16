@@ -13,8 +13,7 @@
 #pragma once
 
 #include <string>
-#include "store/slice.hh"
-
+#include "utils/bytes.hh"
 namespace store {
 
 class status {
@@ -31,19 +30,19 @@ class status {
   static status OK() { return status(); }
 
   // Return error status of an appropriate type.
-  static status not_found(const slice& msg, const slice& msg2 = slice()) {
+  static status not_found(const bytes_view& msg, const bytes_view& msg2 = bytes_view()) {
     return status(kNotFound, msg, msg2);
   }
-  static status corruption(const slice& msg, const slice& msg2 = slice()) {
+  static status corruption(const bytes_view& msg, const bytes_view& msg2 = bytes_view()) {
     return status(kCorruption, msg, msg2);
   }
-  static status not_supported(const slice& msg, const slice& msg2 = slice()) {
+  static status not_supported(const bytes_view& msg, const bytes_view& msg2 = bytes_view()) {
     return status(kNotSupported, msg, msg2);
   }
-  static status invalid_argument(const slice& msg, const slice& msg2 = slice()) {
+  static status invalid_argument(const bytes_view& msg, const bytes_view& msg2 = bytes_view()) {
     return status(kInvalidArgument, msg, msg2);
   }
-  static status io_error(const slice& msg, const slice& msg2 = slice()) {
+  static status io_error(const bytes_view& msg, const bytes_view& msg2 = bytes_view()) {
     return status(kIOError, msg, msg2);
   }
 
@@ -90,7 +89,7 @@ class status {
     return (state_ == nullptr) ? kOk : static_cast<code_type>(state_[4]);
   }
 
-  status(code_type c, const slice& msg, const slice& msg2);
+  status(code_type c, const bytes_view& msg, const bytes_view& msg2);
   static const char* copy_state(const char* s);
 };
 

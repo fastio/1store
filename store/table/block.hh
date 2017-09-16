@@ -17,9 +17,9 @@ class block {
     uint32_t _restart_offset;     // Offset in data_ of restart array
     uint32_t num_restarts() const;
 public:
-    explicit block(managed_bytes cache_key, temporary_buffer<char> data);
-    explicit block(bytes cache_key, temporary_buffer<char> data) 
-        : block(managed_bytes { cache_key.data(), cache_key.size() }, std::move(data))
+    block(managed_bytes cache_key, temporary_buffer<char> data);
+    block(bytes cache_key, temporary_buffer<char> data) 
+        : block(managed_bytes { bytes_view {cache_key.data(), cache_key.size() } }, std::move(data))
     {
     }
 
@@ -43,9 +43,7 @@ public:
 
     ~block() {}
 
-    size_t size() const { return size_; }
-    block(const block&) = delete;
-    void operator=(const block&) = delete;
+    size_t size() const { return _size; }
     friend class block_cache;
 };
 

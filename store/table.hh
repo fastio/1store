@@ -8,7 +8,7 @@ namespace store {
 
 struct sstable_options {
     size_t _sstable_buffer_size = 4096;
-    lw_shared_ptr<block_cache> _block_cache;
+    lw_shared_ptr<sstable_cache> _sstable_cache;
     lw_shared_ptr<table_cache> _table_cache;
 };
 // A Table is a sorted map from strings to strings.  Tables are
@@ -31,5 +31,17 @@ class sstable {
   // No copying allowed
   sstable(const table&) = delete;
   void operator=(const table&) = delete;
+};
+
+class sstable_cache : public base_cache<managed_bytes, lw_shared_ptr<sstable>> {
+public:
+    sstable_cache()
+        : redis::base_cache<managed_bytes, lw_shared_ptr<sstable>> (redis::global_cache_tracker<managed_bytes, lw_shared_ptr<block>>())
+    {
+    }
+    sstable_cache(sstable_cache&&) = delete;
+    sstable_cache(const sstable_cache&) = delete;
+    sstable_cache& operator = (const sstable_cache&) = delete;
+    sstable_cache& operator = (sstable_cache&&) = delete;
 };
 }
