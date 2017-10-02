@@ -5,9 +5,12 @@
 #pragma once
 
 #include <stdint.h>
-#include "db/log_format.h"
-#include "store/slice.h"
-#include "store/status.h"
+#include "store/log_format.h"
+#include "utils/bytes.hh"
+#include "core/future.hh"
+#include "core/file.hh"
+#include "core/shared_ptr.hh"
+#include "seastarx.hh"
 
 namespace store {
 
@@ -16,19 +19,12 @@ namespace log {
 
 class writer {
  public:
-  // Create a writer that will append data to "*dest".
-  // "*dest" must be initially empty.
-  // "*dest" must remain live while this Writer is in use.
   explicit writer(lw_shared_ptr<file> dest);
-
-  // Create a writer that will append data to "*dest".
-  // "*dest" must have initial length "dest_length".
-  // "*dest" must remain live while this Writer is in use.
   writer(lw_shared_ptr<file>, uint64_t dest_length);
 
   ~writer();
 
-  future<status> add_record(const slice& slice);
+  future<> append(const bytes_view slice);
 
  private:
   lw_shared_ptr<file> dest_;

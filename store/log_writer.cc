@@ -2,13 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
+//
+// Modified by Peng Jian.
+//
 #include "store/log_writer.hh"
 
 #include <stdint.h>
-#include "util/coding.h"
-#include "util/crc32c.h"
+#include "store/util/coding.hh"
+#include "store/util/crc32c.hh"
 
-namespace leveldb {
+namespace store {
 namespace log {
 
 static void init_type_crc(uint32_t* type_crc) {
@@ -37,11 +40,11 @@ writer::writer(lw_shared_ptr<file> dest, uint64_t dest_length)
 writer::~writer() {
 }
 
-future<status> writer::add_record(const slice& data) {
+future<> writer::append(const bytes_view data) {
     // Fragment the record if necessary and emit it.  Note that if slice
     // is empty, we still want to iterate once to emit a single
     // zero-length record
-    return do_with(slice {data}, size_t {data.size() }, bool { true }, [this] (auto& data, auto& left, auto& begin) {
+    return do_with(bytes_view { data }, size_t { data.size() }, bool { true }, [this] (auto& data, auto& left, auto& begin) {
         return repeat([this, &data, &left, &begin] () mutable {
             const char* ptr = data.data();
             const int leftover = kBlockSize - block_offset_;
@@ -78,7 +81,7 @@ future<status> writer::add_record(const slice& data) {
                  type = kMiddleType;
              }
              return emit_physical_record(type, ptr, fragment_length).then([this, &data, &left, &begin] (auto s) {
-                 data = slice(data.data() + fragment_length, data.size() - fragment_length);
+                 data = bytes_view {data.data() + fragment_length, data.size() - fragment_length};
                  begin = false;
                  if (left > 0) {
                      return make_ready_future<stop_iteration>(stop_iteration::no);
@@ -88,7 +91,7 @@ future<status> writer::add_record(const slice& data) {
              });
         }).finally ([this] {
              return dest_->flush().then([] {
-                 return make_ready_future<status>(status {});
+                 return make_ready_future<>();
              });
         });
     });

@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include "utils/managed_bytes.hh"
 #include "core/temporary_buffer.hh"
-#include "base_cache.hh"
+#include "lru_cache.hh"
 #include "seastarx.hh"
 
 namespace store {
