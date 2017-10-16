@@ -2,6 +2,9 @@
 #include "stdx.hh"
 
 namespace store {
+memtable::memtable()
+{
+}
 
 memtable::memtable(dirty_memory_manager& dmm)
     : logalloc::region(dmm.region_group())

@@ -48,7 +48,7 @@ std::vector<lw_shared_ptr<sstable_meta>> version::filter_file_meta(bytes_view ke
     return std::move(result);
 }
 
-future<lw_shared_ptr<partition>> column_faily::try_read_from_sstable(lw_shared_ptr<sstable> stable, lw_shared_ptr<partition> target, bytes_view key)
+future<lw_shared_ptr<partition>> column_family::try_read_from_sstable(lw_shared_ptr<sstable> stable, lw_shared_ptr<partition> target, bytes_view key)
 {
     assert(stable);
     auto sstable_reader = make_sstable_reader(sstable);
@@ -60,7 +60,19 @@ future<lw_shared_ptr<partition>> column_faily::try_read_from_sstable(lw_shared_p
     });
 }
 
-future<lw_shared_ptr<partition>> column_faily::read(const read_options& opt, bytes_view key)
+void column_family::maybe_flush(version& v)
+{
+}
+
+
+future<> column_family::write(const write_options& opt, redis::decorated_key&& key, partition&& p)
+{
+    _current._memtable->insert(std::move(key), p);
+    maybe_flush();
+    return make_ready_future<>();
+}
+
+future<lw_shared_ptr<partition>> column_family::read(const read_options& opt, bytes_view key)
 {
     auto target = make_empty_partition();
 
@@ -70,7 +82,7 @@ future<lw_shared_ptr<partition>> column_faily::read(const read_options& opt, byt
     // if the target partition was not in the memtable, the memtable_reader's eof will return true.
     if (memtable_reader->eof() == false) {
         // we read the target partition from the memtable, good news, return it to caller.
-        return make_ready_future<lw_shared_ptr<partition>> { memtable_reader->current() }; 
+        return make_ready_future<lw_shared_ptr<partition>> ( memtable_reader->current() ); 
     }
 
     // 2. read partition from the immemtables;
@@ -80,7 +92,7 @@ future<lw_shared_ptr<partition>> column_faily::read(const read_options& opt, byt
         immemtable_reader->seek(key);
         if (immemtable_reader->eof() == false) {
             // we read the target partition from the memtable, good news, return it to caller.
-            return make_ready_future<lw_shared_ptr<partition>> { immemtable_reader->current() }; 
+            return make_ready_future<lw_shared_ptr<partition>> ( immemtable_reader->current() ); 
         }
     }
     // 3. read partition from the level 0 files.
@@ -101,7 +113,7 @@ future<lw_shared_ptr<partition>> column_faily::read(const read_options& opt, byt
             if (target->empty()) {
      // 4. read partition from other level files.
                 auto& target_sstables = _current.filter_sstable_meta(key);
-                if (target_sstables.empty()) {
+                if (!target_sstables.empty()) {
                     return do_with(std::move(target_sstables), std::move(target_sstables.begin()), [this, target, key] (auto& sstables, auto& iter) {
                         return do_until ([target, &sstables, &iter] () { target->empty() == false || iter == sstables.end(); }, [this, target, &iter, &sstables, key] {
                             auto& sstable_meta = *iter++;
@@ -118,10 +130,10 @@ future<lw_shared_ptr<partition>> column_faily::read(const read_options& opt, byt
                     });
                 }
             }
-            return make_ready_future<lw_shared_ptr<partition>> { target };
+            return make_ready_future<lw_shared_ptr<partition>> ( target );
         });
     }
     // oh, the key was not exists.
     assert(target->empty()); 
-    return make_ready_future<lw_shared_ptr<partition>> { target };
+    return make_ready_future<lw_shared_ptr<partition>> ( target );
 }

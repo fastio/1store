@@ -21,6 +21,11 @@ static void init_type_crc(uint32_t* type_crc) {
   }
 }
 
+writer::writer(const bytes& file_name)
+{
+    // mock
+}
+
 writer::writer(lw_shared_ptr<file> dest)
     : dest_(dest)
     , block_offset_(0)
@@ -80,7 +85,7 @@ future<> writer::append(const bytes_view data) {
              } else {
                  type = kMiddleType;
              }
-             return emit_physical_record(type, ptr, fragment_length).then([this, &data, &left, &begin] (auto s) {
+             return emit_physical_record(type, ptr, fragment_length).then([this, &data, &left, &begin] {
                  data = bytes_view {data.data() + fragment_length, data.size() - fragment_length};
                  begin = false;
                  if (left > 0) {
@@ -97,7 +102,7 @@ future<> writer::append(const bytes_view data) {
     });
 }
 
-Future<status> writer::emit_physical_record(record_type t, const char* ptr, size_t n) {
+future<> writer::emit_physical_record(record_type t, const char* ptr, size_t n) {
     assert(n <= 0xffff);  // Must fit in two bytes
     assert(block_offset_ + kHeaderSize + n <= kBlockSize);
 
@@ -119,7 +124,7 @@ Future<status> writer::emit_physical_record(record_type t, const char* ptr, size
         return dest_->dma_write(slice(ptr, n)).then([this, n] (auto s) {
             pos_ += n;
             block_offset_ += n;
-            return make_ready_future<status>(status {});
+            return make_ready_future<>();
         });
     });
 }

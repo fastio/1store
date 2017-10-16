@@ -9,22 +9,27 @@
 #include <memory>
 #include "utils/logalloc.hh"
 #include "utils/managed_bytes.hh"
+#include "partition.hh"
 #include "keys.hh"
 #include "seastarx.hh"
+#include <experimental/optional>
+
+template<class T>
+using optional = std::experimental::optional<T>;
 
 namespace bi = boost::intrusive;
-
+class partition;
 namespace store {
 class memtable_entry {
     bi::set_member_hook<> _link;
     redis::decorated_key _key;
-    partition _parititon;
+    partition _partition;
 public:
     friend class memtable;
 
-    memtable_entry(redis::decorated_key key, partition _data)
+    memtable_entry(redis::decorated_key key, partition&& data)
         : _key(std::move(key))
-        , _partition(std::move(_data))
+        , _partition(std::move(data))
     {
     }
 
@@ -32,8 +37,6 @@ public:
 
     const redis::decorated_key& key() const { return _key; }
     redis::decorated_key& key() { return _key; }
-    const partition& get_partition() const { return _partition; }
-    partition& get_partition() const { return _partition; }
 
     struct compare {
         bool operator()(const redis::decorated_key& l, const memtable_entry& r) const {
@@ -41,6 +44,7 @@ public:
         }
 
         bool operator()(const memtable_entry& l, const memtable_entry& r) const {
+
             return l.key() == r.key();
         }
 
@@ -89,16 +93,16 @@ public:
     logalloc::region_group* region_group() {
         return group();
     }
-    bool put(decorated_key key, partition data);
-    optional<partition> get(decorated_key key);
-    bool remote(decorated_key key);
+    bool put(redis::decorated_key key, partition data);
+    optional<partition> get(redis::decorated_key key);
+    bool remote(redis::decorated_key key);
     void disable_write() { _write_enabled = false; }
     bool write_enabled() const { return _write_enabled; }
 public:
     size_t partition_count() const;
     logalloc::occupancy_stats occupancy() const;
 
-    bool empty() const { return partitions.empty(); }
+    bool empty() const { return _partitions.empty(); }
     bool is_flushed() const;
     void on_detach_from_region_group() noexcept;
     void revert_flushed_memory() noexcept;

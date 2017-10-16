@@ -9,6 +9,15 @@
 
 namespace store {
 
+static thread_local sstable_cache _table_cache;
+static inline sstable_cache& get_table_cache() {
+    return _table_cache;
+}
+static thread_local block_cache _block_cache;
+static inline block_cache& get_block_cache() {
+    return _block_cache;
+}
+
 future<temporary_buffer<char>> read_block(lw_shared_ptr<file_random_access_reader> r, block_handle index);
 lw_shared_ptr<reader> make_block_reader(lw_shared_ptr<table> ptable, block_handle index);
 
@@ -17,14 +26,12 @@ struct sstable::rep {
   }
 
   rep(lw_shared_ptr<file_reader> freader,
-      lw_shared_ptr<block_cache> bcache,
       block_handle metaindex,
       lw_shared_ptr<block> index_block,
       sstable_options opt)
       : _file_reader (freader)
       , _filter (nullptr)
       , _fileter_data()
-      , _block_cache (bcache)
       , _file_name ()
       , _metaindex_handle ()
       , _index_block (index_block)
@@ -35,7 +42,6 @@ struct sstable::rep {
   lw_shared_ptr<file_reader> _file_reader;
   lw_shared_ptr<filter_block_reader> _filter = nullptr;
   managed_bytes _fileter_data;
-  lw_shared_ptr<block_cache> _block_cache;
   bytes _file_name;
   block_handle _metaindex_handle;  // Handle to metaindex_block: saved from footer
   lw_shared_ptr<block> _index_block = nullptr;
@@ -54,20 +60,23 @@ future<temporary_buffer<char>> read_block(lw_shared_ptr<file_random_access_reade
     });;
 }
 
-future<lw_shared_ptr<table>> table::open(bytes fname, sstable_options opts) {
-    return open_file_dma(fname, open_flags::ro).then([this, options = std::move(opts)] (file file_) mutable {
-        auto cached_table = opts.get_table_cache()->find(fname);
+sstable::sstable(std::unique_ptr<sstable::rep> r) : rep_(std::move(r)) {}
+
+future<lw_shared_ptr<sstable>> open(bytes fname, const sstable_options& opts) {
+    return open_file_dma(fname, open_flags::ro).then([this, &opts] (file file_) mutable {
+        // mock, we will get the table cache from the thread local instance?
+        auto cached_table = get_table_cache().find(fname);
         if (cached_table) {
             return make_ready_future<table> (cached_table);
         }
-        return file_.size().then([this, file_ = std::move(file_), opts = std::move(opts)] (uint64_t size) {
+        return file_.size().then([this, file_ = std::move(file_), &opts] (uint64_t size) {
             if (size < footer::kEncodedLength) {
                 return make_exception_future<>(lw_shared_ptr<table>({}));
             }
             auto f = make_checked_file(opts._read_error_handler, file_);
             auto r = make_lw_shared<file_random_access_reader>(std::move(f), size, opts.sstable_buffer_size);
             reader->seek(size - Footer::kEncodedLength);
-            return r->read_exactly(Footer::kEncodedLength).then([this, r, opts = std::move(opts)] (auto buffer) mutable {
+            return r->read_exactly(Footer::kEncodedLength).then([this, r, &opts] (auto buffer) mutable {
                 if (buffer.size() != footer::kEncodedLength) {
                     return make_exception_future<>(lw_shared_ptr<table>({}));
                 }
@@ -78,15 +87,15 @@ future<lw_shared_ptr<table>> table::open(bytes fname, sstable_options opts) {
                 }
                 // read index block, and do not parse the index block now.
                 auto fut = read_block(r, footer_.index_handle());
-                return fut.then([this, r = std::move(r), _footer = std::move(_footer), opts = std::move(opts)] (auto&& data) {
+                return fut.then([this, r = std::move(r), _footer = std::move(_footer), &opts] (auto&& data) {
                     auto block_handle_key = convert_to_handle_key(footer_.index_handle());
                     auto index_block = cache->find_and_create(std::move(block_handle_key), std::move(data));
-                    auto rep_ = std::make_unique<table::rep>(r, opts.get_block_cache(), footer_.metaindex_handle(), index_block, opts);
+                    auto rep_ = std::make_unique<table::rep>(r, footer_.metaindex_handle(), index_block, opts);
                     auto table_instance = make_lw_shared<table>(rep_);
                     // read meta block
                     return rep_->read_meta(footer_.metaindex_handle()).then([this, table_instance] {
-                        rep_->insert(table_instance);
-                        return make_ready_future<lw_shared_ptr<table>> ({table_instance});
+                        get_table_cache().insert(table_instance);
+                        return make_ready_future<lw_shared_ptr<sstable>> ({table_instance});
                     });
                 });
              });

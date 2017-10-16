@@ -40,8 +40,8 @@
 using logger =  seastar::logger;
 static logger logc ("cache");
 
-namespace redis {
 namespace bi = boost::intrusive;
+namespace redis {
 using clock_type = lowres_clock;
 static constexpr clock_type::time_point never_expire_timepoint = clock_type::time_point(clock_type::duration::min());
 class cache;

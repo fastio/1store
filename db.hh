@@ -35,8 +35,13 @@
 #include  <experimental/vector>
 #include "config.hh"
 #include "utils/bytes.hh"
+#include "store/column_family.hh"
+#include "store/commit_log.hh"
+#include "keys.hh"
+#include "store/options.hh"
 namespace stdx = std::experimental;
 namespace redis {
+using namespace store;
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
 class sset_lsa;
 class database;
@@ -75,115 +80,14 @@ public:
         return *_config;
     }
 private:
-    static const int DEFAULT_DB_COUNT = 1;
-    cache _cache_stores[DEFAULT_DB_COUNT];
-    size_t current_store_index = 0;
-    inline cache& current_store() { return _cache_stores[current_store_index]; }
+    cache _cache;
+    lw_shared_ptr<column_family> _system_store;
+    lw_shared_ptr<column_family> _store;
+    lw_shared_ptr<commit_log> _commit_log;
     seastar::metrics::metric_groups _metrics;
-    struct stats {
-        uint64_t _read = 0;
-        uint64_t _hit = 0;
-        uint64_t _total_counter_entries = 0;
-        uint64_t _total_string_entries = 0;
-        uint64_t _total_dict_entries = 0;
-        uint64_t _total_list_entries = 0;
-        uint64_t _total_set_entries = 0;
-        uint64_t _total_zset_entries = 0;
-        uint64_t _total_bitmap_entries = 0;
-        uint64_t _total_hll_entries = 0;
-
-        uint64_t _echo = 0;
-        uint64_t _set = 0;
-        uint64_t _get = 0;
-        uint64_t _del = 0;
-        uint64_t _mset = 0;
-        uint64_t _mget = 0;
-        uint64_t _counter = 0;
-        uint64_t _strlen = 0;
-        uint64_t _exists = 0;
-        uint64_t _append = 0;
-        uint64_t _lpush = 0;
-        uint64_t _lpushx = 0;
-        uint64_t _rpush = 0;
-        uint64_t _rpushx = 0;
-        uint64_t _lpop = 0;
-        uint64_t _rpop = 0;
-        uint64_t _lindex = 0;
-        uint64_t _llen = 0;
-        uint64_t _linsert = 0;
-        uint64_t _lrange = 0;
-        uint64_t _lset = 0;
-        uint64_t _ltrim = 0;
-        uint64_t _lrem = 0;
-        uint64_t _hdel = 0;
-        uint64_t _hexists = 0;
-        uint64_t _hset = 0;
-        uint64_t _hget = 0;
-        uint64_t _hmset = 0;
-        uint64_t _hincrby = 0;
-        uint64_t _hincrbyfloat = 0;
-        uint64_t _hlen = 0;
-        uint64_t _hstrlen = 0;
-        uint64_t _hgetall = 0;
-        uint64_t _hgetall_keys = 0;
-        uint64_t _hgetall_values = 0;
-        uint64_t _hmget = 0;
-        uint64_t _smembers = 0;
-        uint64_t _sadd = 0;
-        uint64_t _scard = 0;
-        uint64_t _sismember = 0;
-        uint64_t _srem = 0;
-        uint64_t _sdiff = 0;
-        uint64_t _sdiff_store = 0;
-        uint64_t _sinter = 0;
-        uint64_t _sinter_store = 0;
-        uint64_t _sunion = 0;
-        uint64_t _sunion_store = 0;
-        uint64_t _smove = 0;
-        uint64_t _srandmember = 0;
-        uint64_t _spop = 0;
-        uint64_t _type = 0;
-        uint64_t _expire = 0;
-        uint64_t _pexpire = 0;
-        uint64_t _pttl = 0;
-        uint64_t _ttl = 0;
-        uint64_t _persist = 0;
-        uint64_t _zadd  = 0;
-        uint64_t _zcard = 0;
-        uint64_t _zrange = 0;
-        uint64_t _zrangebyscore = 0;
-        uint64_t _zcount = 0;
-        uint64_t _zincrby = 0;
-        uint64_t _zrank = 0;
-        uint64_t _zrem = 0;
-        uint64_t _zscore = 0;
-        uint64_t _zunionstore = 0;
-        uint64_t _zinterstore = 0;
-        uint64_t _zdiffstore = 0;
-        uint64_t _zremrangebyscore = 0;
-        uint64_t _zremrangebyrank = 0;
-        uint64_t _zdiff = 0;
-        uint64_t _zunion = 0;
-        uint64_t _zinter = 0;
-        uint64_t _zrangebylex = 0;
-        uint64_t _zlexcount = 0;
-        uint64_t _select  = 0;
-        uint64_t _geoadd = 0;
-        uint64_t _geodist = 0;
-        uint64_t _geohash = 0;
-        uint64_t _geopos = 0;
-        uint64_t _georadius = 0;
-        uint64_t _setbit = 0;
-        uint64_t _getbit = 0;
-        uint64_t _bitcount = 0;
-        uint64_t _bitop = 0;
-        uint64_t _bitpos = 0;
-        uint64_t _bitfield = 0;
-        uint64_t _pfadd = 0;
-        uint64_t _pfcount = 0;
-        uint64_t _pfmerge = 0;
-    };
-    stats _stat;
+    write_options _write_opt;
+    read_options _read_opt;
+    bool _enable_write_disk { false };
     void setup_metrics();
     size_t sum_expiring_entries();
     std::unique_ptr<redis::config> _config;

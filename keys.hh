@@ -4,6 +4,34 @@
 #include "token.hh"
 #include "utils/managed_bytes.hh"
 namespace redis {
+struct decorated_key {
+    managed_bytes _key;
+    token _token;
+    decorated_key() = default;
+    decorated_key(managed_bytes&& mb, token&& t) : _key(std::move(mb)), _token(t) {}
+    decorated_key(decorated_key&& o) : _key(std::move(o._key)), _token(std::move(o._token)) {}
+    decorated_key(const decorated_key& o) : _key(o._key), _token(o._token) {}
+    decorated_key& operator = (decorated_key&& o) {
+        if (this != &o) {
+            _key = std::move(o._key);
+            _token = std::move(o._token);
+        }
+        return *this;
+    }
+    decorated_key& operator = (const decorated_key& o) {
+        if (this != &o) {
+            _key = o._key;
+            _token = o._token;
+        }
+        return *this;
+    }
+    friend bool operator == (const decorated_key& l, const decorated_key& r);
+};
+
+bool operator == (const decorated_key& l, const decorated_key& r) {
+   return false;
+}
+
 struct redis_key {
     bytes _key;
     size_t _hash;
@@ -22,19 +50,8 @@ struct redis_key {
     inline const char* data() const { return _key.c_str(); }
 };
 
-struct decorated_key {
-    managed_bytes _key;
-    token _token;
-    decorated_key(managed_bytes&& mb, token&& t) : _key(std::move(mb)), _token(t) {}
-    decorated_key(decorated_key&& o) : _key(std::move(o._key)), _token(std::move(o._token)) {}
-    decorated_key& operator = (decorated_key&& o) {
-        if (this != &o) {
-            _key = std::move(o._key);
-            _token = std::move(o._token);
-        }
-        return *this;
-    }
-    decorated_key& operator = (const decorated_key&&) = delete;
-    decorated_key(const decorated_key&) = delete;
-};
+decorated_key to_decorated_key(const redis_key& rk) {
+    //mock now.
+    return decorated_key();
+}
 }

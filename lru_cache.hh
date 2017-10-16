@@ -1,11 +1,8 @@
 #pragma once
-
 #include <boost/intrusive/list.hpp>
 #include <boost/intrusive/set.hpp>
-
 #include "core/memory.hh"
 #include "core/thread.hh"
-
 #include "utils/logalloc.hh"
 #include "utils/phased_barrier.hh"
 #include "utils/histogram.hh"
@@ -23,7 +20,8 @@ template<typename Key, typename Value>
 class cache_tracker;
 
 template<typename Key, typename Value>
-class cache_entry {
+class base_cache_entry {
+
     using cache_type = base_cache<Key, Value>;
     using lru_link_type = bi::list_member_hook<bi::link_mode<bi::auto_unlink>>;
     using cache_link_type = bi::set_member_hook<bi::link_mode<bi::auto_unlink>>;
@@ -37,19 +35,19 @@ public:
     friend class base_cache<Key, Value>;
     friend class cache_tracker<Key, Value>;
 
-    cache_entry()
+    base_cache_entry()
         : _key()
         , _value()
     {
     }
 
-    cache_entry(const Key& key, const Value& value)
+    base_cache_entry(const Key& key, const Value& value)
         : _key(key)
         , _value(value)
     {
     }
 
-    cache_entry(cache_entry&& o) noexcept
+    base_cache_entry(base_cache_entry&& o) noexcept
         : _key(std::move(o._key))
         , _value(std::move(o._value))
         , _lru_link()
@@ -67,7 +65,7 @@ public:
             container_type::node_algorithms::init(o._cache_link.this_ptr());
         }
     }
-    cache_entry& operator = (cache_entry&& o) noexcept
+    base_cache_entry& operator = (base_cache_entry&& o) noexcept
     {
         if (this != &o) {
             _key = std::move(o._key);
@@ -91,8 +89,8 @@ public:
         return *this;
     }
 
-    cache_entry(const cache_entry&) = delete;
-    cache_entry& operator = (const cache_entry&) = delete;
+    base_cache_entry(const base_cache_entry&) = delete;
+    base_cache_entry& operator = (const base_cache_entry&) = delete;
 
     bool is_evictable() { return _lru_link.is_linked(); }
     const Key& key() const { return _key; }
@@ -100,29 +98,29 @@ public:
     Value& value() { return _value; }
 
     struct compare {
-        bool operator()(const Key& a, const cache_entry& b) const {
+        bool operator()(const Key& a, const base_cache_entry& b) const {
             return a < b.key();
         }
 
-        bool operator()(const cache_entry& a, const Key& b) const {
+        bool operator()(const base_cache_entry& a, const Key& b) const {
             return a.key() < b;
         }
 
-        bool operator()(const cache_entry& a, const cache_entry& b) const {
+        bool operator()(const base_cache_entry& a, const base_cache_entry& b) const {
             return a.key() < b.key();
         }
     };
 
-    //friend std::ostream& operator<<(std::ostream&, cache_entry&);
+    //friend std::ostream& operator<<(std::ostream&, base_cache_entry&);
 };
 
 // Tracks accesses and performs eviction of cache entries.
 template<typename Key, typename Value>
 class cache_tracker final {
 public:
-    using cache_entry_type = cache_entry<Key, Value>;
-    using lru_type = bi::list<cache_entry_type,
-        bi::member_hook<cache_entry_type, typename cache_entry_type::lru_link_type, &cache_entry<Key, Value>::_lru_link>,
+    using base_cache_entry_type = base_cache_entry<Key, Value>;
+    using lru_type = bi::list<base_cache_entry_type,
+        bi::member_hook<base_cache_entry_type, typename base_cache_entry_type::lru_link_type, &base_cache_entry<Key, Value>::_lru_link>,
         bi::constant_time_size<false>>; // we need this to have bi::auto_unlink on hooks.
     using this_type = base_cache<Key, Value>;    
 public:
@@ -152,10 +150,10 @@ public:
                 return with_linearized_managed_bytes([&] {
                     try {
                         auto evict_last = [this](lru_type& lru) {
-                            //cache_entry_type& ce = lru.back();
+                            //base_cache_entry_type& ce = lru.back();
                             //auto it = this_type::container_type::s_iterator_to(ce);
                             //clear_continuity(*std::next(it));
-                            lru.pop_back_and_dispose(current_deleter<cache_entry_type>());
+                            lru.pop_back_and_dispose(current_deleter<base_cache_entry_type>());
                         };
                         if (_lru.empty()) {
                             return memory::reclaiming_result::reclaimed_nothing;
@@ -190,13 +188,13 @@ public:
         with_allocator(_region.allocator(), [this] {
             auto clear = [this] (lru_type& lru) {
                 while (!lru.empty()) {
-                    cache_entry_type& ce = lru.back();
+                    base_cache_entry_type& ce = lru.back();
                     auto it = this_type::container_type::s_iterator_to(ce);
                     while (it->is_evictable()) {
-                        cache_entry_type& to_remove = *it;
+                        base_cache_entry_type& to_remove = *it;
                         ++it;
                         to_remove._lru_link.unlink();
-                        current_deleter<cache_entry_type>()(&to_remove);
+                        current_deleter<base_cache_entry_type>()(&to_remove);
                     }
                     //clear_continuity(*it);
                 }
@@ -211,14 +209,14 @@ public:
     void on_erase() {
     }
 
-    void touch(cache_entry_type& e) {
-        auto move_to_front = [this] (lru_type& lru, cache_entry_type& e) {
+    void touch(base_cache_entry_type& e) {
+        auto move_to_front = [this] (lru_type& lru, base_cache_entry_type& e) {
             lru.erase(lru.iterator_to(e));
             lru.push_front(e);
         };
         move_to_front(_lru, e);
     }
-    void insert(cache_entry_type& e) {
+    void insert(base_cache_entry_type& e) {
         //++_stats.partition_insertions;
         //++_stats.partitions;
         //++_stats.modification_count;
@@ -250,12 +248,12 @@ cache_tracker<Key, Value>& global_cache_tracker() {
 template<typename Key, typename Value>
 class base_cache {
 public:
-    using cache_entry_type = cache_entry<Key, Value>;
+    using base_cache_entry_type = base_cache_entry<Key, Value>;
     using phase_type = utils::phased_barrier::phase_type;
-    using container_type = bi::set<cache_entry_type,
-        bi::member_hook<cache_entry_type, typename cache_entry_type::cache_link_type, &cache_entry_type::_cache_link>,
+    using container_type = bi::set<base_cache_entry_type,
+        bi::member_hook<base_cache_entry_type, typename base_cache_entry_type::cache_link_type, &base_cache_entry_type::_cache_link>,
         bi::constant_time_size<false>, // we need this to have bi::auto_unlink on hooks
-        bi::compare<typename cache_entry_type::compare>>;
+        bi::compare<typename base_cache_entry_type::compare>>;
     using cache_tracker_type = cache_tracker<Key, Value>;
 public:
     struct stats {
@@ -276,13 +274,13 @@ private:
     logalloc::allocating_section _populate_section;
     logalloc::allocating_section _read_section;
 
-    void upgrade_entry(cache_entry_type&);
+    void upgrade_entry(base_cache_entry_type&);
     void invalidate_locked(const Key& key);
     void invalidate_unwrapped(const Key& key);
     static thread_local seastar::thread_scheduling_group _update_thread_scheduling_group;
 
     // Must be run under reclaim lock
-    cache_entry_type& find_or_create_entry(const Key& key, const Value& value);
+    base_cache_entry_type& find_or_create_entry(const Key& key, const Value& value);
 
     // Ensures that partition entry for given key exists in cache and returns a reference to it.
     // Prepares the entry for reading. "phase" must match the current phase of the entry.
@@ -301,7 +299,7 @@ private:
 public:
     ~base_cache() {
         with_allocator(_tracker.allocator(), [this] {
-            _cache.clear_and_dispose([this, deleter = current_deleter<cache_entry_type>()] (auto&& p) mutable {
+            _cache.clear_and_dispose([this, deleter = current_deleter<base_cache_entry_type>()] (auto&& p) mutable {
                 _tracker.on_erase();
                 deleter(p);
             });
@@ -320,18 +318,18 @@ public:
     // Can only be called prior to any reads.
     void populate(const Key& key, const Value& value) {
         _populate_section(_tracker.region(), [&] {
-             auto entry = current_allocator().construct<cache_entry_type>(key, value);
+             auto entry = current_allocator().construct<base_cache_entry_type>(key, value);
              upgrade_entry(*entry);
              _tracker.insert(*entry);
         });
     }
 
-    cache_entry_type& find_or_create(const Key& key, const Value& value) {
+    base_cache_entry_type& find_or_create(const Key& key, const Value& value) {
         auto it = _cache.find(key);
         if (it != _cache.end()) {
             return *it;
         }
-        auto entry = current_allocator().construct<cache_entry_type>(key, value);
+        auto entry = current_allocator().construct<base_cache_entry_type>(key, value);
         _tracker.insert(*entry);
         return _cache.insert(it, *entry);
     }
@@ -354,7 +352,7 @@ public:
         auto target = _cache.find(key);
         if (target != _cache.end()) {
             with_allocator(_tracker.allocator(), [this, target] {
-                auto it = _cache.erase_and_dispose(target, [this, deleter = current_deleter<cache_entry_type>()] (auto&& p) mutable {
+                auto it = _cache.erase_and_dispose(target, [this, deleter = current_deleter<base_cache_entry_type>()] (auto&& p) mutable {
                     _tracker.on_erase();
                     deleter(p);
                 });
@@ -365,7 +363,7 @@ public:
 
     void clear_now() noexcept {
         with_allocator(_tracker.allocator(), [this] {
-            auto it = _cache.erase_and_dispose(_cache.begin(), std::prev(_cache.end()), [this, deleter = current_deleter<cache_entry_type>()] (auto&& p) mutable {
+            auto it = _cache.erase_and_dispose(_cache.begin(), std::prev(_cache.end()), [this, deleter = current_deleter<base_cache_entry_type>()] (auto&& p) mutable {
                 _tracker.on_erase();
                 deleter(p);
             });
