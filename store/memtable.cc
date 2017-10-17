@@ -175,7 +175,7 @@ public:
        return make_ready_future<>();
    }
 
-   future<> seek(bytes key) {
+   future<> seek(bytes_view key) {
        // disable seek operation
        return make_exception_future<>();
    }

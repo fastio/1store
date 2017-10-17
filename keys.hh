@@ -25,12 +25,11 @@ struct decorated_key {
         }
         return *this;
     }
+    bytes_view key_view() const {
+        return bytes_view { _key };
+    }
     friend bool operator == (const decorated_key& l, const decorated_key& r);
 };
-
-bool operator == (const decorated_key& l, const decorated_key& r) {
-   return false;
-}
 
 struct redis_key {
     bytes _key;
@@ -50,8 +49,5 @@ struct redis_key {
     inline const char* data() const { return _key.c_str(); }
 };
 
-decorated_key to_decorated_key(const redis_key& rk) {
-    //mock now.
-    return decorated_key();
-}
+decorated_key to_decorated_key(const redis_key& rk);
 }

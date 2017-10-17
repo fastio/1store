@@ -93,7 +93,7 @@ public:
     logalloc::region_group* region_group() {
         return group();
     }
-    bool put(redis::decorated_key key, partition data);
+    bool insert(redis::decorated_key&& key, partition&& data) { return false; /* mock now; */ }
     optional<partition> get(redis::decorated_key key);
     bool remote(redis::decorated_key key);
     void disable_write() { _write_enabled = false; }

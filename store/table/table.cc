@@ -62,7 +62,7 @@ future<temporary_buffer<char>> read_block(lw_shared_ptr<file_random_access_reade
 
 sstable::sstable(std::unique_ptr<sstable::rep> r) : rep_(std::move(r)) {}
 
-future<lw_shared_ptr<sstable>> open(bytes fname, const sstable_options& opts) {
+future<lw_shared_ptr<sstable>> open_sstable(bytes fname, const sstable_options& opts) {
     return open_file_dma(fname, open_flags::ro).then([this, &opts] (file file_) mutable {
         // mock, we will get the table cache from the thread local instance?
         auto cached_table = get_table_cache().find(fname);
@@ -302,7 +302,7 @@ public:
             });
        });
    }
-   future<> seek(bytes key) {
+   future<> seek(bytes_view key) {
        return _index_block_reader->seek(key).then([this, key] {
             _initialized = true;
             block_handle data_handle;
@@ -351,8 +351,8 @@ public:
    }
 };
 
-lw_shared_ptr<reader> make_sstable_reader(lw_shared_ptr<table> ptable) {
-    return make_lw_shared<reader>(std::make_unique<block_reader>(ptable));
+lw_shared_ptr<reader> make_sstable_reader(lw_shared_ptr<sstable> table) {
+    return make_lw_shared<reader>(std::make_unique<sstable_reader>(table));
 }
 
 class combined_sstables_reader : public reader::impl {
@@ -393,7 +393,7 @@ public:
         });
     }
 
-    future<> seek(bytes key) {
+    future<> seek(bytes_view key) {
         return parallel_for_each(_sstables, [this, key] (auto sstable) mutable {
             sstable->seek(key);
         }).then(this] mutable {

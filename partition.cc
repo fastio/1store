@@ -14,6 +14,18 @@ partition_type partition::type() const
     return _impl->type();
 }
 
+class null_partition_impl : public partition_impl {
+public:
+    removable_partition_impl() : partition(partition_type::null, {}) {}
+    virtual bytes serialize() override {
+        return {};
+    }
+};
+
+partition make_null_partition() {
+    return partition(std::unique_ptr<null_partition_impl>());
+}
+
 class removable_partition_impl : public partition_impl {
 public:
     removable_partition_impl(const bytes& key) : partition(partition_type::unknown, key) {}

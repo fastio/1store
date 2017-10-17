@@ -32,7 +32,7 @@ private:
     void operator=(const sstable&) = delete;
 };
 
-future<lw_shared_ptr<sstable>> open(bytes fname, const sstable_options& options);
+future<lw_shared_ptr<sstable>> open_sstable(bytes fname, const sstable_options& options);
 
 class sstable_cache : public redis::base_cache<managed_bytes, lw_shared_ptr<sstable>> {
 public:

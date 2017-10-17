@@ -5,6 +5,7 @@
 #include "store/memtable.hh"
 #include "store/log_writer.hh"
 #include "partition.hh"
+#include "core/sharded.hh"
 namespace store {
 
 struct sstable_meta {
@@ -37,58 +38,29 @@ public:
     }
 };
 
-class column_family;
-class version {
-    column_family& owner_;
-    lw_shared_ptr<memtable> _memtable;
-    std::vector<std::vector<lw_shared_ptr<sstable_meta>>> _sstable_metas;
-    static constexpr int MAX_LEVELS = 9;
-public:
-    explicit version(column_family& o)
-        : owner_(o)
-        , _memtable(make_lw_shared<memtable>())
-    {
-        _sstable_metas.resize(MAX_LEVELS);
-    }
-
-    version(version&& o)
-        : owner_(o.owner_)
-        , _memtable(std::move(o._memtable))
-        , _sstable_metas(std::move(o._sstable_metas))
-    {
-    }
-
-    ~version()
-    {
-    }
-
-    lw_shared_ptr<memtable> release_memtable() {
-        auto result = _memtable;
-        _memtable = {};
-        return result;
-    }
-private:
-    std::vector<lw_shared_ptr<sstable_meta>> filter_file_meta(bytes_view key);
-    int in_range(lw_shared_ptr<sstable_meta> m, const bytes_view& key) const;
-    friend class column_family;
-};
-
 class write_options;
 class read_options;
 class column_family final {
-    version _current;
+    static constexpr int MAX_LEVELS = 9;
+    std::vector<std::vector<lw_shared_ptr<sstable_meta>>> _sstables;
+    lw_shared_ptr<memtable> _active_memtable;
     std::vector<lw_shared_ptr<memtable>> _immutable_memtables;
     bytes _sstable_dir_name;
     bytes _column_family_name;
+    sstable_options _sstable_opt;
 public:
     column_family();
     ~column_family();
     future<> write(const write_options& opt, redis::decorated_key&& key, partition&& p);
-    future<lw_shared_ptr<partition>> read(const read_options& opt, redis::decorated_key&& key);
+    future<lw_shared_ptr<partition>> read(const read_options& opt, const redis::decorated_key& key) const;
     bool apply_new_sstables(foreign_ptr<level_manifest_wrapper> news);
 private:
-    future<lw_shared_ptr<partition>> try_read_from_sstable(lw_shared_ptr<sstable> stable, lw_shared_ptr<partition> target, bytes_view key);
-    void maybe_flush(version& v);
+    future<lw_shared_ptr<partition>> try_read_from_sstable(lw_shared_ptr<sstable> stable, bytes_view key) const;
+    void maybe_flush();
+    int in_range(lw_shared_ptr<sstable_meta> m, const bytes_view& key) const;
+    std::vector<lw_shared_ptr<sstable_meta>> filter_file_meta(bytes_view key) const;
+    std::vector<lw_shared_ptr<sstable_meta>> filter_file_meta_from_level_zero(bytes_view key) const;
+    lw_shared_ptr<partition> merge_multi_targets(std::vector<lw_shared_ptr<partition>>&& ps) const;
 };
 
 }

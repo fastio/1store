@@ -10,6 +10,7 @@ enum class partition_type : unsigned {
     zset,
     string,
     unknown,
+    null,
 };
 
 using partition_generation_type = size_t;
@@ -43,7 +44,10 @@ public:
     partition(std::unique_ptr<partition_impl> impl) : _impl(std::move(impl)) {}
     bytes serialize() const;
     partition_type type() const;
+    void replace_if_newer(partition&& p) {}
+    bool empty() const { return false; }
 };
 
+partition make_null_partition();
 partition make_removable_partition(const bytes& key);
 partition make_sstring_partition(const bytes& key, const bytes& value);

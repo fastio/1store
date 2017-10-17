@@ -30,7 +30,7 @@ class writer {
   explicit writer(lw_shared_ptr<file> dest);
   writer(lw_shared_ptr<file>, uint64_t dest_length);
 
-  ~writer();
+  ~writer() {}
 
   template<class PartitionType>
   future<> append(lw_shared_ptr<PartitionType> p) {
