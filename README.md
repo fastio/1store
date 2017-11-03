@@ -26,6 +26,10 @@ In fact, the building instructions of Seastar also works for Pedis.
 
 See building instructions for [Fedora](docs/building-fedora.md), [CentOS](docs/building-centos.md) and [Ubuntu](docs/building-ubuntu.md).
 
+>NOTE:
+>   The master branch is developing now. If you want to test it, please check it out from early commit ```2f5f14996d539520846239b55d5df6e7e3f0320b```.
+>   If you enconter any problems, please let me know.
+
 ## Getting started
 
 ```
