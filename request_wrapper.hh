@@ -18,15 +18,11 @@
 *  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
-
-/*  This file copy from Seastar's apps/memcached.
- *  Copyright (C) 2014 Cloudius Systems, Ltd.
- *
- */
 #pragma once
 #include <iomanip>
 #include <sstream>
 #include <functional>
+#include <unordered_map>
 #include <vector>
 #include "utils/bytes.hh"
 #include  <experimental/vector>
@@ -36,6 +32,10 @@ using namespace seastar;
 struct request_wrapper {
     uint32_t _args_count { 0 };
     command_code _command;
+    std::vector<bytes> _tmp_keys {};
+    std::unordered_map<bytes, bytes> _tmp_key_values {};
+    std::unordered_map<bytes, double> _tmp_key_scores {};
+    std::vector<std::pair<bytes, bytes>> _tmp_key_value_pairs {};
     std::vector<bytes> _args {};
     request_wrapper () {}
 };

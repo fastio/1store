@@ -37,7 +37,7 @@
 #include "structures/dict_lsa.hh"
 #include "structures/sset_lsa.hh"
 #include "structures/geo.hh"
-#include "utils/bytes.hh"
+#include "keys.hh"
 namespace redis {
 using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
 
@@ -108,14 +108,14 @@ static future<scattered_message_ptr> build(double number)
     return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
 }
 
-static future<scattered_message_ptr> build(const sstring& message)
+static future<scattered_message_ptr> build(const bytes& message)
 {
    auto m = make_lw_shared<scattered_message<char>>();
    m->append(message);
    return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
 }
 
-inline static future<> build_local(output_stream<char>& out, const sstring& message)
+inline static future<> build_local(output_stream<char>& out, const bytes& message)
 {
    return out.write(message);
 }
@@ -233,7 +233,7 @@ static future<scattered_message_ptr> build(const std::vector<const dict_entry*>&
     }
 }
 
-static  future<> build_local(output_stream<char>& out, std::vector<foreign_ptr<lw_shared_ptr<sstring>>>& entries)
+static  future<> build_local(output_stream<char>& out, std::vector<foreign_ptr<lw_shared_ptr<bytes>>>& entries)
 {
     if (!entries.empty()) {
         auto m = make_lw_shared<scattered_message<char>>();
@@ -255,7 +255,7 @@ static  future<> build_local(output_stream<char>& out, std::vector<foreign_ptr<l
     }
 }
 
-static  future<> build_local(output_stream<char>& out, const std::vector<sstring>& entries)
+static  future<> build_local(output_stream<char>& out, const std::vector<bytes>& entries)
 {
     if (!entries.empty()) {
         auto m = make_lw_shared<scattered_message<char>>();
@@ -417,7 +417,7 @@ static future<scattered_message_ptr> build(const std::vector<const sset_entry*>&
     }
 }
 
-static future<scattered_message_ptr> build(std::vector<sstring>& data)
+static future<scattered_message_ptr> build(std::vector<bytes>& data)
 {
     auto m = make_lw_shared<scattered_message<char>>();
     m->append_static(msg_sigle_tag);
@@ -434,7 +434,7 @@ static future<scattered_message_ptr> build(std::vector<sstring>& data)
     return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
 }
 
-static future<> build_local(output_stream<char>& out, std::vector<std::tuple<sstring, double, double, double, double>>& u, int flags)
+static future<> build_local(output_stream<char>& out, std::vector<std::tuple<bytes, double, double, double, double>>& u, int flags)
 {
     auto m = make_lw_shared<scattered_message<char>>();
     m->append_static(msg_sigle_tag);
@@ -453,7 +453,7 @@ static future<> build_local(output_stream<char>& out, std::vector<std::tuple<sst
         m->append_static(msg_crlf);
 
         //key
-        sstring& key = std::get<0>(u[i]);
+        bytes& key = std::get<0>(u[i]);
         m->append_static(msg_batch_tag);
         m->append(to_sstring(key.size()));
         m->append_static(msg_crlf);
@@ -490,16 +490,14 @@ static future<> build_local(output_stream<char>& out, std::vector<std::tuple<sst
         }
         //hash
         if (wh) {
-/*
             double& score = std::get<1>(u[i]);
-            sstring hashstr;
+            bytes hashstr;
             geo::encode_to_geohash_string(score, hashstr);
             m->append_static(msg_batch_tag);
             m->append(to_sstring(hashstr.size()));
             m->append_static(msg_crlf);
             m->append(std::move(hashstr));
             m->append_static(msg_crlf);
-*/
         }
     }
     return out.write(std::move(*m));

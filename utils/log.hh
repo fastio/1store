@@ -28,7 +28,7 @@ namespace logging {
 using log_level = seastar::log_level;
 
 using logger = seastar::logger;
-using registry = seastar::log_registry;
+using registry = seastar::logger_registry;
 
 
 using seastar::pretty_type_name;

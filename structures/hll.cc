@@ -22,13 +22,6 @@
 #include <cmath>
 namespace redis {
 
-static constexpr const int HLL_P = 14;
-static constexpr const int HLL_BITS = 6;
-static constexpr const int HLL_CARD_CACHE_SIZE = 8;
-static constexpr const int HLL_BUCKET_COUNT = (1 << HLL_P);
-static constexpr const int HLL_BYTES_SIZE = HLL_CARD_CACHE_SIZE + (HLL_BUCKET_COUNT * HLL_BITS + 7) / 8;
-
-static constexpr const int HLL_BUCKET_COUNT_MAX = (1 << HLL_BITS) - 1;
 static constexpr const int HLL_BUCKET_COUNT_MASK = HLL_BUCKET_COUNT - 1; 
 static constexpr const double ALPHA = 0.7213 / (1+1.079 / HLL_BUCKET_COUNT);
 static constexpr const double ALPHA_BUCKET_COUNT_POWER_2 = ALPHA * HLL_BUCKET_COUNT * HLL_BUCKET_COUNT;
@@ -79,11 +72,11 @@ static inline void hll_set_counter_on_bucket(uint8_t* p, long index, uint8_t cou
     _p[_byte+1] |= _v >> _fb8;
 }
 
-bool hll_add(managed_bytes& data, const sstring& element)
+bool hll_add(managed_bytes& data, const bytes& element)
 {
     uint8_t oldcount = 0, count = 1;
     uint8_t* p = (uint8_t*)(data.data()) + HLL_CARD_CACHE_SIZE;
-    auto hash = (uint64_t)(std::hash<sstring>()(element));
+    auto hash = (uint64_t)(std::hash<bytes>()(element));
     //auto hash = murmur_hash_64a((uint8_t*)element.data(), element.size(), 0xadc83b19ULL);
     auto index = hash & HLL_BUCKET_COUNT_MASK;
     hash |= ((uint64_t) 1 << 63);
@@ -101,7 +94,7 @@ bool hll_add(managed_bytes& data, const sstring& element)
     return false;
 }
 
-size_t hll::append(managed_bytes& data, const std::vector<sstring>& elements)
+size_t hll::append(managed_bytes& data, const std::vector<bytes>& elements)
 {
     size_t result = 0;
     for (size_t i = 0; i < elements.size(); ++i) {
@@ -234,7 +227,7 @@ size_t hll::merge(managed_bytes& data, const uint8_t* merged_sources, size_t siz
     return 1;
 }
 
-size_t hll::merge(uint8_t* data, size_t size, const sstring& merged_sources)
+size_t hll::merge(uint8_t* data, size_t size, const bytes& merged_sources)
 {
     if (merged_sources.size() != HLL_BYTES_SIZE) {
         return 0;

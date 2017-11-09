@@ -14,8 +14,8 @@
 * KIND, either express or implied.  See the License for the
 * specific language governing permissions and limitations
 * under the License.
-*
-*  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
+* 
+*  Copyright (c) 2016-2026, Peng Jian, pengjian.uestc@gmail.com. All rights reserved.
 *
 */
 #include "redis.hh"
@@ -24,145 +24,55 @@
 #include "redis_protocol.hh"
 #include "server.hh"
 #include "util/log.hh"
-//#include "core/prometheus.hh"
-#include "proxy.hh"
-#include "service.hh"
-#include "init.hh"
-#include "release.hh"
-#include "gms/gossiper.hh"
-#include "gms/inet_address.hh"
-#include "utils/fb_utilities.hh"
-#include "core/thread.hh"
-#include "seastarx.hh"
+#include "core/prometheus.hh"
 #define PLATFORM "seastar"
 #define VERSION "v1.0"
 #define VERSION_STRING PLATFORM " " VERSION
 
-using namespace seastar;
 using logger =  seastar::logger;
 static logger main_log ("main");
 
 
 int main(int ac, char** av) {
-    int return_value = 0;
-    //prometheus::config prometheus_config;
-    //httpd::http_server_control prometheus_server;
+    distributed<redis::database> db;
+    distributed<redis::server> server;
+    redis::redis_service redis(db);
+    prometheus::config prometheus_config;
+    httpd::http_server_control prometheus_server;
     namespace bpo = boost::program_options;
     app_template app;
-    auto opt_add = app.add_options();
-    auto cfg = make_lw_shared<redis::config>();
-    bool help_loggers = false;
-    bool help_version = false;
+    app.add_options()
+        ("port", bpo::value<uint16_t>()->default_value(6379), "Redis server port to listen on")
+        ("prometheus_port", bpo::value<uint16_t>()->default_value(10000), "Prometheus server port to listen on")
+        ;
 
-    cfg->add_options(opt_add)
-    ("options-file", bpo::value<sstring>(), "configuration file (i.e. ${REDIS_HOME}/etc/redis.yaml)")
-    ("help-loggers", bpo::bool_switch(&help_loggers), "print a list of logger names and exit")
-    ("version", bpo::bool_switch(&help_version), "print version number and exit")
-    ;
-    if (help_version) {
-        print("%s", pedis_version());
-        return return_value;
-    }
-    if (help_loggers) {
-        init_utils::do_help_loggers();
-        return return_value;
-    }
+    return app.run_deprecated(ac, av, [&] {
+        engine().at_exit([&] { return server.stop(); });
+        engine().at_exit([&] { return db.stop(); });
+        engine().at_exit([&] { return prometheus_server.stop(); });
 
-    try {
-        return app.run_deprecated(ac, av, [&] {
-            print("Parallel Redis version %s starting ... ", pedis_version());
-
-            init_utils::apply_logger_settings(cfg->default_log_level(), cfg->logger_log_level(), cfg->log_to_stdout(), cfg->log_to_syslog());
-            init_utils::tcp_syncookies_sanity();
-
-            return seastar::async([ac, av, cfg, &app,/* &prometheus_config, &prometheus_server,*/ &return_value] () {
-                auto&& opts = app.configuration();
-                init_utils::read_config(opts, *cfg).get();
-                init_utils::apply_logger_settings(cfg->default_log_level(), cfg->logger_log_level(), cfg->log_to_stdout(), cfg->log_to_syslog());
-
-                auto& db = redis::get_database();
-                auto& server = redis::get_server();
-                auto& redis = redis::get_service();
-                auto& px = redis::get_proxy();
-                auto& ss = redis::get_service();
-
-                engine().at_exit([&] { return db.stop(); });
-                engine().at_exit([&] { return server.stop(); });
-                engine().at_exit([&] { return redis.stop(); });
-                engine().at_exit([&] { return px.stop(); });
-                engine().at_exit([&] { return ss.stop(); });
-                //engine().at_exit([&] { return prometheus_server.stop(); });
-
-                //auto port = cfg->storage_port();
-                //auto pport = cfg->prometheus_port();
-                // start databse
-                db.start().get();
-
-                // start gossper
-                sstring listen_address = cfg->listen_address();
-                uint16_t storage_port = cfg->storage_port();
-                uint16_t ssl_storage_port = cfg->ssl_storage_port();
-                double phi = cfg->phi_convict_threshold();
-                //auto seeds = cfg->seeds();
-                sstring seeds {}; 
-                sstring cluster_name = cfg->cluster_name();
-
-                if (!listen_address.empty()) {
-                    try {
-                        utils::fb_utilities::set_broadcast_address(gms::inet_address::lookup(listen_address).get0());
-                    } catch (...) {
-                        startlog.error("Bad configuration: invalid 'listen_address': {}: {}", listen_address, std::current_exception());
-                        throw bad_configuration_error();
-                    }
-                } else {
-                    startlog.error("Bad configuration: listen_address was not defined\n");
-                    throw bad_configuration_error();
-                }
-                const auto& ssl_opts = cfg->server_encryption_options();
-                auto encrypt_what = init_utils::get_or_default(ssl_opts, "internode_encryption", "none");
-                auto trust_store = init_utils::get_or_default(ssl_opts, "truststore");
-                auto cert = init_utils::get_or_default(ssl_opts, "certificate", init_utils::relative_conf_dir("redis.crt").string());
-                auto key = init_utils::get_or_default(ssl_opts, "keyfile", init_utils::relative_conf_dir("redis.key").string());
-                init_message_failuredetector_gossiper(
-                        listen_address
-                        , storage_port
-                        , ssl_storage_port
-                        , encrypt_what
-                        , trust_store
-                        , cert
-                        , key
-                        , cfg->internode_compression()
-                        , seeds 
-                        , cluster_name
-                        , phi
-                        , cfg->listen_on_broadcast_address()
-                ).get();
-
-                px.start().get();
-                ss.start().get();
-
-                gms::get_local_gossiper().wait_for_gossip_to_settle().get();
-
-                //prometheus_config.metric_help = "Redis server statistics";
-                //prometheus_config.prefix = "redis";
-                //prometheus_server.start("prometheus").get();
-                //prometheus::start(prometheus_server, prometheus_config).get();
-                //listen_options lo;
-                //lo.reuse_address = true;
-                //prometheus_server.listen(make_ipv4_address({pport})).get();
-                //server.start(port).get();
-                //server.invoke_on_all(&redis::server::start).get();
-                print(" [SUCCESS]\n");
-            }).then_wrapped([&return_value] (auto && f) {
-                try {
-                   f.get();
-                } catch (...) {
-                   return_value = 1;
-                }
-                return return_value;
-            });
+        auto&& config = app.configuration();
+        auto port = config["port"].as<uint16_t>();
+        auto pport = config["prometheus_port"].as<uint16_t>();
+        return db.start().then([&, port] {
+            return server.start(std::ref(redis), port);
+        }).then([&] {
+            return server.invoke_on_all(&redis::server::start);
+        }).then([&, pport] {
+             prometheus_config.metric_help = "Redis server statistics";
+             prometheus_config.prefix = "redis";
+             return prometheus_server.start("prometheus").then([&] {
+                 return prometheus::start(prometheus_server, prometheus_config);
+             }).then([&, pport] {
+                listen_options lo;
+                lo.reuse_address = true;
+                return prometheus_server.listen(make_ipv4_address({pport})).handle_exception([pport] (auto ep) {
+                    return make_exception_future<>(ep);
+                });
+             });
+        }).then([&, port] {
+            main_log.info("Parallel Redis ... [{}]", port); 
+            return make_ready_future<>();
         });
-    } catch (...) {
-        return return_value;
-    }
+    });
 }

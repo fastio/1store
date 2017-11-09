@@ -4,7 +4,6 @@
 #
 
 #
-# This file is part of Scylla.
 #
 # Scylla is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published by
@@ -18,6 +17,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
+#
+# Modified by Peng Jian
 #
 
 import os, os.path, textwrap, argparse, sys, shlex, subprocess, tempfile, re
@@ -246,44 +247,47 @@ scylla_core = ([
         'utils/exceptions.cc',
         'utils/unimplemented.cc',
         'utils/gc_clock.cc',
-        'utils/disk-error-handler.cc',
-        'message/messaging_service.cc',
+        #'utils/disk-error-handler.cc',
+        #'message/messaging_service.cc',
         'exceptions/exceptions.cc',
-        'idl/gossip_digest.idl.hh',
+        #'idl/gossip_digest.idl.hh',
         'release.cc',
-        'io/io.cc',
-        'gms/application_state.cc',
-        'gms/versioned_value.cc',
-        'gms/endpoint_state.cc',
-        'gms/gossip_digest_ack2.cc',
-        'gms/gossip_digest_syn.cc',
-        'gms/version_generator.cc',
-        'gms/failure_detector.cc',
-        'gms/gossip_digest_ack.cc',
-        'gms/gossiper.cc',
-        'gms/inet_address.cc',
-      'redis.cc',
-      'server.cc',
-      'db.cc',
-      'redis_protocol_parser.rl',
-      'redis_protocol.cc',
-      'structures/dict_lsa.cc',
-      'structures/geo.cc',
-      'structures/hll.cc',
-      'structures/bits_operation.cc',
-      'structures/list_lsa.cc',
-      'cache.cc',
-      'reply_builder.cc',
-      'ring.cc',
-      'proxy.cc',
-      'service.cc',
-      'config.cc',
-      'init.cc',
-      'token.cc',
-      'keys.cc',
-      'store/table/block.cc',
-      'store/table/block_builder.cc',
-      'store/comparator.cc',
+        #'io/io.cc',
+        #'gms/application_state.cc',
+        #'gms/versioned_value.cc',
+        #'gms/endpoint_state.cc',
+        #'gms/gossip_digest_ack2.cc',
+        #'gms/gossip_digest_syn.cc',
+        #'gms/version_generator.cc',
+        #'gms/failure_detector.cc',
+        #'gms/gossip_digest_ack.cc',
+        #'gms/gossiper.cc',
+        #'gms/inet_address.cc',
+        'redis.cc',
+        'server.cc',
+        'db.cc',
+        'redis_protocol_parser.rl',
+        'redis_protocol.cc',
+        'structures/dict_lsa.cc',
+        'structures/geo.cc',
+        'structures/hll.cc',
+        'structures/bits_operation.cc',
+        'structures/list_lsa.cc',
+        'cache.cc',
+        'reply_builder.cc',
+        #'ring.cc',
+        #'proxy.cc',
+        #'service.cc',
+        'config.cc',
+        #'init.cc',
+        #'token.cc',
+        'keys.cc',
+        #'store/table/block.cc',
+        #'store/table/table.cc',
+        #'store/table/block_builder.cc',
+        #'store/comparator.cc',
+        #'store/util/coding.cc',
+        #'store/column_family.cc',
                ]
                )
 
@@ -291,10 +295,10 @@ api = [
        ]
 
 store = [
-        'store/filename.cc',
-        'store/util/logging.cc',
-        'store/file_writer.cc',
-        'store/file_reader.cc',
+        #'store/filename.cc',
+        #'store/util/logging.cc',
+        #'store/file_writer.cc',
+        #'store/file_reader.cc',
         ]
 scylla_tests_dependencies = scylla_core + api +  [
 ]

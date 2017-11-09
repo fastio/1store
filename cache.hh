@@ -37,8 +37,6 @@
 #include "keys.hh"
 #include "utils/bytes.hh"
 #include "seastarx.hh"
-using logger =  seastar::logger;
-static logger logc ("cache");
 
 namespace bi = boost::intrusive;
 namespace redis {
@@ -120,7 +118,7 @@ protected:
         managed_ref<sset_lsa> _sset;
         storage() {}
         ~storage() {}
-    } _storage;
+    } _u;
     bi::list_member_hook<> _timer_link;
     expiration _expiry;
 public:
@@ -137,59 +135,59 @@ public:
     cache_entry(const bytes& key, size_t hash, double data) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_FLOAT)
     {
-        _storage._float_number = data;
+        _u._float_number = data;
     }
 
     cache_entry(const bytes key, size_t hash, int64_t data) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_INT64)
     {
-        _storage._integer_number = data;
+        _u._integer_number = data;
     }
 
     cache_entry(const bytes key, size_t hash, size_t origin_size) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_BYTES)
     {
-        //_storage._bytes = make_managed<managed_bytes>(origin_size, 0);
+        //_u._bytes = make_managed<managed_bytes>(origin_size, 0);
     }
 
     cache_entry(const bytes& key, size_t hash, const bytes& data) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_BYTES)
     {
-        _storage._bytes = make_managed<managed_bytes>(bytes_view{data.data(), data.size()});
+        _u._bytes = make_managed<managed_bytes>(bytes_view{data.data(), data.size()});
     }
     struct list_initializer {};
     cache_entry(const bytes& key, size_t hash, list_initializer) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_LIST)
     {
-        _storage._list = make_managed<list_lsa>();
+        _u._list = make_managed<list_lsa>();
     }
 
     struct dict_initializer {};
     cache_entry(const bytes& key, size_t hash, dict_initializer) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_MAP)
     {
-        _storage._dict = make_managed<dict_lsa>();
+        _u._dict = make_managed<dict_lsa>();
     }
 
     struct set_initializer {};
     cache_entry(const bytes& key, size_t hash, set_initializer) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_SET)
     {
-        _storage._dict = make_managed<dict_lsa>();
+        _u._dict = make_managed<dict_lsa>();
     }
 
     struct sset_initializer {};
     cache_entry(const bytes& key, size_t hash, sset_initializer) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_SSET)
     {
-        _storage._sset = make_managed<sset_lsa>();
+        _u._sset = make_managed<sset_lsa>();
     }
 
     struct hll_initializer {};
     cache_entry(const bytes& key, size_t hash, hll_initializer) noexcept
         : cache_entry(key, hash, entry_type::ENTRY_HLL)
     {
-        //_storage._bytes = make_managed<managed_bytes>(HLL_BYTES_SIZE, 0);
+        //_u._bytes = make_managed<managed_bytes>(HLL_BYTES_SIZE, 0);
     }
 
     cache_entry(cache_entry&& o) noexcept
@@ -200,24 +198,24 @@ public:
     {
         switch (_type) {
             case entry_type::ENTRY_FLOAT:
-                _storage._float_number = std::move(o._storage._float_number);
+                _u._float_number = std::move(o._u._float_number);
                 break;
             case entry_type::ENTRY_INT64:
-                _storage._integer_number = std::move(o._storage._integer_number);
+                _u._integer_number = std::move(o._u._integer_number);
                 break;
             case entry_type::ENTRY_BYTES:
             case entry_type::ENTRY_HLL:
-                _storage._bytes = std::move(o._storage._bytes);
+                _u._bytes = std::move(o._u._bytes);
                 break;
             case entry_type::ENTRY_LIST:
-                _storage._list = std::move(o._storage._list);
+                _u._list = std::move(o._u._list);
                 break;
             case entry_type::ENTRY_MAP:
             case entry_type::ENTRY_SET:
-                _storage._dict = std::move(o._storage._dict);
+                _u._dict = std::move(o._u._dict);
                 break;
             case entry_type::ENTRY_SSET:
-                _storage._sset = std::move(o._storage._sset);
+                _u._sset = std::move(o._u._sset);
                 break;
         }
     }
@@ -230,17 +228,17 @@ public:
                 break;
             case entry_type::ENTRY_BYTES:
             case entry_type::ENTRY_HLL:
-                _storage._bytes.~managed_ref<managed_bytes>();
+                _u._bytes.~managed_ref<managed_bytes>();
                 break;
             case entry_type::ENTRY_LIST:
-                _storage._list.~managed_ref<list_lsa>();
+                _u._list.~managed_ref<list_lsa>();
                 break;
             case entry_type::ENTRY_MAP:
             case entry_type::ENTRY_SET:
-                _storage._dict.~managed_ref<dict_lsa>();
+                _u._dict.~managed_ref<dict_lsa>();
                 break;
             case entry_type::ENTRY_SSET:
-                _storage._sset.~managed_ref<sset_lsa>();
+                _u._sset.~managed_ref<sset_lsa>();
                 break;
         }
     }
@@ -324,11 +322,11 @@ public:
     }
     inline size_t value_bytes_size() const
     {
-        return _storage._bytes->size();
+        return _u._bytes->size();
     }
     inline const char* value_bytes_data() const
     {
-        return _storage._bytes->data();
+        return _u._bytes->data();
     }
     inline entry_type type() const
     {
@@ -364,51 +362,51 @@ public:
     }
     inline int64_t value_integer() const
     {
-        return _storage._integer_number;
+        return _u._integer_number;
     }
     inline void value_integer_incr(int64_t step)
     {
-        _storage._integer_number += step;
+        _u._integer_number += step;
     }
 
     inline double value_float() const
     {
-        return _storage._float_number;
+        return _u._float_number;
     }
 
     inline void value_float_incr(double step)
     {
-        _storage._float_number += step;
+        _u._float_number += step;
     }
     inline managed_bytes& value_bytes() {
-        return *(_storage._bytes);
+        return *(_u._bytes);
     }
     inline const managed_bytes& value_bytes() const {
-        return *(_storage._bytes);
+        return *(_u._bytes);
     }
     inline list_lsa& value_list() {
-        return *(_storage._list);
+        return *(_u._list);
     }
     inline const list_lsa& value_list() const {
-        return *(_storage._list);
+        return *(_u._list);
     }
     inline dict_lsa& value_map() {
-        return *(_storage._dict);
+        return *(_u._dict);
     }
     inline const dict_lsa& value_map() const {
-        return *(_storage._dict);
+        return *(_u._dict);
     }
     inline dict_lsa& value_set() {
-        return *(_storage._dict);
+        return *(_u._dict);
     }
     inline const dict_lsa& value_set() const {
-        return *(_storage._dict);
+        return *(_u._dict);
     }
     inline sset_lsa& value_sset() {
-        return *(_storage._sset);
+        return *(_u._sset);
     }
     inline const sset_lsa& value_sset() const {
-        return *(_storage._sset);
+        return *(_u._sset);
     }
 };
 

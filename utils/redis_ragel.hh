@@ -19,9 +19,7 @@
  * Copyright (C) 2014 Cloudius Systems, Ltd.
  */
 
-#ifndef RAGEL_HH_
-#define RAGEL_HH_
-
+#pragma once
 #include "utils/bytes.hh"
 #include "core/temporary_buffer.hh"
 #include "util/eclipse.hh"
@@ -140,5 +138,3 @@ public:
 };
 
 }
-
-#endif /* RAGEL_HH_ */

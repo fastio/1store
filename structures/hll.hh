@@ -19,16 +19,24 @@
 *
 */
 #pragma once
-#include "core/sstring.hh"
+#include "keys.hh"
 #include "utils/managed_bytes.hh"
 namespace redis {
+
+static constexpr const int HLL_P = 14;
+static constexpr const int HLL_BITS = 6;
+static constexpr const int HLL_CARD_CACHE_SIZE = 8;
+static constexpr const int HLL_BUCKET_COUNT = (1 << HLL_P);
+static constexpr const int HLL_BYTES_SIZE = HLL_CARD_CACHE_SIZE + (HLL_BUCKET_COUNT * HLL_BITS + 7) / 8;
+
+static constexpr const int HLL_BUCKET_COUNT_MAX = (1 << HLL_BITS) - 1;
 class hll {
 public:
-    static size_t append(managed_bytes& data, const std::vector<sstring>& elements);
+    static size_t append(managed_bytes& data, const std::vector<bytes>& elements);
     static size_t count(managed_bytes& data);
     static size_t count(const uint8_t* merged_sources, size_t size);
     static size_t merge(managed_bytes& data, const uint8_t* merged_sources, size_t size); 
-    static size_t merge(uint8_t* dest, size_t size, const sstring& merged_sources); 
+    static size_t merge(uint8_t* dest, size_t size, const bytes& merged_sources); 
 };
 
 }

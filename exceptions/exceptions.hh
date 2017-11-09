@@ -4,8 +4,6 @@
 #include "core/print.hh"
 #include "utils/bytes.hh"
 
-namespace redis {
-
 enum class exception_code : int32_t {
     SERVER_ERROR    = 0x0000,
     PROTOCOL_ERROR  = 0x000A,
@@ -46,4 +44,3 @@ class request_exception : public base_exception {
 public:
     request_exception(sstring msg) : base_exception(exception_code::REQUEST_ERROR, std::move(msg)) {}
 };
-}
