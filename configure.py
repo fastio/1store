@@ -263,6 +263,7 @@ scylla_core = ([
         #'gms/gossip_digest_ack.cc',
         #'gms/gossiper.cc',
         #'gms/inet_address.cc',
+        'native_protocol_parser.cc',
         'redis.cc',
         'server.cc',
         'db.cc',

@@ -44,3 +44,8 @@ class request_exception : public base_exception {
 public:
     request_exception(sstring msg) : base_exception(exception_code::REQUEST_ERROR, std::move(msg)) {}
 };
+
+class parse_exception : base_exception {
+public:
+    parse_exception(sstring msg) : base_exception(exception_code::REQUEST_ERROR, std::move(msg)) {}
+};
