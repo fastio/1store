@@ -148,6 +148,7 @@ char* native_protocol_parser::parse(char* p, char* pe, char* eof)
                 if (parse_cmd_name) {
                     throw protocol_exception("Protocol error: invalid request");
                 }
+                parse_cmd_name = true;
                 assert(_req._args.empty());
                 ++begin;
                 _req._args_count = convert_to_number(begin, end) - 1;
@@ -157,7 +158,11 @@ char* native_protocol_parser::parse(char* p, char* pe, char* eof)
                 continue;
             }
             if (*begin != '$') {
-                throw protocol_exception("Protocol error: expect $");
+                throw unexpect_protocol_exception('$', *begin);
+            }
+            if (!parse_cmd_name) {
+                // igore the inline request format
+                throw protocol_exception("Protocol error: inline request format is not supported");
             }
             ++begin;
             auto endnumber = find_first_nonnumeric(begin, end);
@@ -165,13 +170,13 @@ char* native_protocol_parser::parse(char* p, char* pe, char* eof)
                 throw protocol_exception("Protocol error: invalid request");
             }
             auto number = convert_to_number(begin, endnumber);
-            if (number != static_cast<uint32_t>(end - endnumber)) {
-                throw protocol_exception("Protocol error: invalid request");
-            }
             end += number;
             end += 2;
             begin = end;
             endnumber += 2;
+            if (end > pe || endnumber > pe) {
+                throw protocol_exception("Protocol error: invalid request");
+            }
             if (_req._command == command_code::unknown) {
                 // command string
                 bytes command { endnumber, number};

@@ -49,3 +49,10 @@ class protocol_exception : base_exception {
 public:
     protocol_exception(sstring msg) : base_exception(exception_code::REQUEST_ERROR, std::move(msg)) {}
 };
+
+class unexpect_protocol_exception : base_exception {
+public:
+    unexpect_protocol_exception(char expect, char got)
+        : base_exception(exception_code::REQUEST_ERROR, std::move(prepare_message("Protocol error: expect %c, got %c", expect, got)))
+    { }
+};
