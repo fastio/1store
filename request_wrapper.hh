@@ -30,13 +30,21 @@
 namespace redis {
 using namespace seastar;
 struct request_wrapper {
-    uint32_t _args_count { 0 };
+    protocol_state _state;
     command_code _command;
+    uint32_t _args_count { 0 };
+    std::vector<bytes> _args {};
     std::vector<bytes> _tmp_keys {};
     std::unordered_map<bytes, bytes> _tmp_key_values {};
     std::unordered_map<bytes, double> _tmp_key_scores {};
     std::vector<std::pair<bytes, bytes>> _tmp_key_value_pairs {};
-    std::vector<bytes> _args {};
     request_wrapper () {}
+
+    void clear_temporary_containers() {
+        _tmp_keys.clear();
+        _tmp_key_values.clear();
+        _tmp_key_scores.clear();
+        _tmp_key_value_pairs.clear();
+    }
 };
 }

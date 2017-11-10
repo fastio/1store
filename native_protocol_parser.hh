@@ -30,67 +30,22 @@
 #include "core/future.hh"
 #include "exceptions/exceptions.hh"
 #include "request_wrapper.hh"
-
+#include "protocol_parser.hh"
 namespace redis {
 
-class native_protocol_parser {
+class native_protocol_parser : public protocol_parser::impl {
     static constexpr size_t MAX_INLINE_BUFFER_SIZE = 1024 * 64; // 64K
     bool _unfinished { false };
-    request_wrapper _req; 
-    using unconsumed_remainder = std::experimental::optional<temporary_buffer<char>>;
-    inline char* parse(char* p, char* pe, char* eof)
-    {
-        auto s = p;
-        auto begin = s, end = s;
-        for (auto s = p; s <= pe; ++s) {
-            if (*s == ' ') continue; 
-            if (*s == '\n') {
-                if (*(s - 1) != '\r') {
-                    throw parse_exception("Protocol error: expected \\r");
-                }
-                end = s;
-                if (static_cast<size_t>(end - begin) > MAX_INLINE_BUFFER_SIZE) {
-                    throw parse_exception("Protocol error: too big inline request");
-                }
-                if (end <= begin) {
-                    throw parse_exception("Protocol error: empty");
-                }
-                if (*begin == '*') {
-                    if (_unfinished) {
-                        throw parse_exception("Protocol error: invalid request");
-                    }
-                    _unfinished = true;
-                    try {
-                        _req._args_count = std::atoi(begin);
-                    }
-                    catch (const std::invalid_argument&) {
-                        throw parse_exception("Protocol error: invalid request");
-                    }
-                }
-                else {
-                    _req._args.emplace_back(std::move(bytes(begin, end)));
-                    begin =  s;
-                    if (_req._args.size() == static_cast<size_t>(_req._args_count)) {
-                        _unfinished = false;
-                        break;
-                    }
-                }
-            }
-        }
-        return begin;
-    }
+    request_wrapper _req;
+    char* find_first_nonnumeric(char* begin, char* end);
+    uint32_t convert_to_number(char* begin, char* end);
 public:
-    void init();
-    inline future<unconsumed_remainder> operator()(temporary_buffer<char> buf) {
-        char* p = buf.get_write();
-        char* pe = p + buf.size();
-        char* eof = buf.empty() ? pe : nullptr;
-        char* parsed = parse(p, pe, eof);
-        if (parsed) {
-            buf.trim_front(parsed - p);
-            return make_ready_future<unconsumed_remainder>(std::move(buf));
-        }
-        return make_ready_future<unconsumed_remainder>();
+    native_protocol_parser() : _unfinished(false) {}
+    virtual ~native_protocol_parser() {}
+    virtual void init();
+    virtual char* parse(char* p, char* limit, char* eof);
+    virtual request_wrapper& request() {
+        return _req;
     }
 };
 

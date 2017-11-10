@@ -8,6 +8,7 @@ enum class protocol_state {
 };
 
 enum class command_code {
+    unknown,
     set,
     mset,
     get,

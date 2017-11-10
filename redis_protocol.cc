@@ -22,20 +22,19 @@
 #include "redis.hh"
 #include <algorithm>
 #include "reply_builder.hh"
+#include "protocol_parser.hh"
 namespace redis {
 
-redis_protocol::redis_protocol(redis_service& redis) : _redis(redis)
+redis_protocol::redis_protocol(redis_service& redis, bool use_native_parser)
+    : _redis(redis)
+    //, _parser(use_native_parser ? make_native_protocol_parser() : make_ragel_protocol_parser())
+    , _parser(make_native_protocol_parser())
 {
 }
 
 void redis_protocol::prepare_request()
 {
-    _req._args_count = _parser._args_count - 1;
-    _req._args = std::move(_parser._args_list);
-    _req._tmp_keys.clear();
-    _req._tmp_key_values.clear();
-    _req._tmp_key_scores.clear();
-    _req._tmp_key_value_pairs.clear();
+    _parser.request().clear_temporary_containers();
 }
 
 future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out)
@@ -44,7 +43,8 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
     // NOTE: The command is handled sequentially. The parser will control the lifetime
     // of every parameters for command.
     return in.consume(_parser).then([this, &in, &out] () -> future<> {
-        switch (_parser._state) {
+        auto& _req = _parser.request();
+        switch (_req._state) {
             case protocol_state::eof:
             case protocol_state::error:
                 return make_ready_future<>();
@@ -52,7 +52,7 @@ future<> redis_protocol::handle(input_stream<char>& in, output_stream<char>& out
             case protocol_state::ok:
             {
                 prepare_request();
-                switch (_parser._command) {
+                switch (_req._command) {
                 case command_code::set:
                     return _redis.set(_req, std::ref(out));
                 case command_code::mset:

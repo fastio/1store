@@ -31,18 +31,19 @@ private:
     lw_shared_ptr<server_socket> _listener;
     redis_service& _redis;
     uint16_t _port;
+    bool _use_native_parser;
     struct connection {
         connected_socket _socket;
         socket_address _addr;
         input_stream<char> _in;
         output_stream<char> _out;
         redis_protocol _proto;
-        connection(connected_socket&& socket, socket_address addr, redis_service& redis)
+        connection(connected_socket&& socket, socket_address addr, redis_service& redis, bool use_native_parser)
             : _socket(std::move(socket))
               , _addr(addr)
               , _in(_socket.input())
               , _out(_socket.output())
-              , _proto(redis)
+              , _proto(redis, use_native_parser)
         {
         }
         ~connection() {
@@ -56,9 +57,10 @@ private:
     };
     stats _stats;
 public:
-    server(redis_service& db, uint16_t port = 6379)
+    server(redis_service& db, uint16_t port = 6379, bool use_native_parser = false)
         : _redis(db)
         , _port(port)
+        , _use_native_parser(use_native_parser)
     {
         setup_metrics();
     }
@@ -71,7 +73,7 @@ public:
            return _listener->accept().then([this] (connected_socket fd, socket_address addr) mutable {
                ++_stats._connections_total;
                ++_stats._connections_current;
-               auto conn = make_lw_shared<connection>(std::move(fd), addr, _redis);
+               auto conn = make_lw_shared<connection>(std::move(fd), addr, _redis, _use_native_parser);
                do_until([conn] { return conn->_in.eof(); }, [this, conn] {
                    return conn->_proto.handle(conn->_in, conn->_out).then([this, conn] {
                        return conn->_out.flush();

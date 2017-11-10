@@ -20,7 +20,7 @@
 */
 #pragma once
 #include "core/stream.hh"
-#include "redis_protocol_parser.hh"
+#include "protocol_parser.hh"
 #include "net/packet-data-source.hh"
 #include "net/packet-data-source.hh"
 #include "request_wrapper.hh"
@@ -30,13 +30,13 @@ class redis_service;
 class redis_protocol {
 private:
     redis_service& _redis;
-    redis_protocol_parser _parser;
-    request_wrapper _req;
+    protocol_parser _parser;
 public:
-    redis_protocol(redis_service& redis);
+    redis_protocol(redis_service& redis, bool use_native_parser);
     void prepare_request();
     void print_input()
     {
+        auto& _req = _parser.request();
         std::cout << "{ \n" << _req._args_count << "\n";
         for (size_t i = 0; i < _req._args.size(); i++) {
             std::cout << i << "=> " << _req._args[i] << "\n";

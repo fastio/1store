@@ -43,6 +43,7 @@ int main(int ac, char** av) {
     app_template app;
     app.add_options()
         ("port", bpo::value<uint16_t>()->default_value(6379), "Redis server port to listen on")
+        ("native_parser", bpo::value<bool>()->default_value(true), "Use native protocol parser")
         ("prometheus_port", bpo::value<uint16_t>()->default_value(10000), "Prometheus server port to listen on")
         ;
 
@@ -54,8 +55,9 @@ int main(int ac, char** av) {
         auto&& config = app.configuration();
         auto port = config["port"].as<uint16_t>();
         auto pport = config["prometheus_port"].as<uint16_t>();
+        auto user_native_parser = config["native_parser"].as<bool>();
         return db.start().then([&, port] {
-            return server.start(std::ref(redis), port);
+            return server.start(std::ref(redis), port, user_native_parser);
         }).then([&] {
             return server.invoke_on_all(&redis::server::start);
         }).then([&, pport] {
