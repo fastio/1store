@@ -114,15 +114,16 @@ void native_protocol_parser::init()
     _req._args.clear();
 }
 
-uint32_t native_protocol_parser::convert_to_number(char* begin, char* end)
+uint32_t native_protocol_parser::convert_to_number(char* begin, char* end) const
 {
     auto num = std::atoi(begin);
     if (num == 0) {
+        throw protocol_exception("Protocol error: invalid request");
     }
     return static_cast<uint32_t> (num);
 }
 
-char* native_protocol_parser::find_first_nonnumeric(char* begin, char* end)
+char* native_protocol_parser::find_first_nonnumeric(char* begin, char* end) const
 {
     for (auto s = begin; s < end; ++s) {
         if (!isdigit(*s)) {

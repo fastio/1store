@@ -36,8 +36,8 @@ namespace redis {
 class native_protocol_parser : public protocol_parser::impl {
     static constexpr size_t MAX_INLINE_BUFFER_SIZE = 1024 * 64; // 64K
     request_wrapper _req;
-    char* find_first_nonnumeric(char* begin, char* end);
-    uint32_t convert_to_number(char* begin, char* end);
+    char* find_first_nonnumeric(char* begin, char* end) const;
+    uint32_t convert_to_number(char* begin, char* end) const;
 public:
     native_protocol_parser() {}
     virtual ~native_protocol_parser() {}
