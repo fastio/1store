@@ -65,26 +65,7 @@ public:
         setup_metrics();
     }
 
-    void start() {
-        listen_options lo;
-        lo.reuse_address = true;
-        _listener = engine().listen(make_ipv4_address({_port}), lo);
-        keep_doing([this] {
-           return _listener->accept().then([this] (connected_socket fd, socket_address addr) mutable {
-               ++_stats._connections_total;
-               ++_stats._connections_current;
-               auto conn = make_lw_shared<connection>(std::move(fd), addr, _redis, _use_native_parser);
-               do_until([conn] { return conn->_in.eof(); }, [this, conn] {
-                   return conn->_proto.handle(conn->_in, conn->_out).then([this, conn] {
-                       return conn->_out.flush();
-                   });
-               }).finally([this, conn] {
-                   --_stats._connections_current;
-                   return conn->_out.close().finally([conn]{});
-               });
-           });
-       }).or_terminate();
-    }
+    void start();
     future<> stop() {
         return make_ready_future<>();
     }
