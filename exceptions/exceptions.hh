@@ -45,7 +45,7 @@ public:
     request_exception(sstring msg) : base_exception(exception_code::REQUEST_ERROR, std::move(msg)) {}
 };
 
-class parse_exception : base_exception {
+class protocol_exception : base_exception {
 public:
-    parse_exception(sstring msg) : base_exception(exception_code::REQUEST_ERROR, std::move(msg)) {}
+    protocol_exception(sstring msg) : base_exception(exception_code::REQUEST_ERROR, std::move(msg)) {}
 };
