@@ -45,8 +45,7 @@ public:
 public:
     explicit protocol_parser(std::unique_ptr<impl> p) : _impl(std::move(p)) {}
     void init() { _impl->init(); }
-    future<unconsumed_remainder> operator()(temporary_buffer<char> buf) {
-    //inline future<unconsumed_remainder> operator()(temporary_buffer<char> buf) {
+    inline future<unconsumed_remainder> operator()(temporary_buffer<char> buf) {
         char* p = buf.get_write();
         char* pe = p + buf.size();
         std::cout << "input: " << p;

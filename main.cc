@@ -43,7 +43,7 @@ int main(int ac, char** av) {
     app_template app;
     app.add_options()
         ("port", bpo::value<uint16_t>()->default_value(6379), "Redis server port to listen on")
-        ("native_parser", bpo::value<bool>()->default_value(true), "Use native protocol parser")
+        ("native_parser", bpo::value<bool>()->default_value(false), "Use native protocol parser")
         ("prometheus_port", bpo::value<uint16_t>()->default_value(10000), "Prometheus server port to listen on")
         ;
 
