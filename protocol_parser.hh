@@ -48,7 +48,6 @@ public:
     inline future<unconsumed_remainder> operator()(temporary_buffer<char> buf) {
         char* p = buf.get_write();
         char* pe = p + buf.size();
-        std::cout << "input: " << p;
         char* eof = buf.empty() ? pe : nullptr;
         char* parsed = _impl->parse(p, pe, eof);
         if (parsed) {
