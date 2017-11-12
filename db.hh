@@ -34,6 +34,7 @@
 #include "keys.hh"
 #include "reply_builder.hh"
 #include  <experimental/vector>
+#include "store/commit_log.hh"
 namespace stdx = std::experimental;
 namespace redis {
 
@@ -190,6 +191,7 @@ private:
     size_t current_store_index = 0;
     inline cache& current_store() { return _cache_stores[current_store_index]; }
     seastar::metrics::metric_groups _metrics;
+    lw_shared_ptr<store::commit_log> _commit_log { nullptr };
     struct stats {
         uint64_t _read = 0;
         uint64_t _hit = 0;

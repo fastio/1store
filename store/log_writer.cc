@@ -40,22 +40,23 @@ static void init_type_crc(uint32_t* type_crc) {
   }
 }
 
-writer::writer(lw_shared_ptr<file> dest)
-    : dest_(dest)
+writer::writer(file dest)
+    : dest_(std::move(dest))
     , block_offset_(0)
     , pos_ (0)
 {
   init_type_crc(type_crc_);
 }
 
-future<> writer::do_append(const bytes_view data) {
+future<> writer::append(bytes_view data) {
     // Fragment the record if necessary and emit it.  Note that if slice
     // is empty, we still want to iterate once to emit a single
     // zero-length record
-    return do_with(bytes_view { data }, size_t { data.size() }, bool { true }, [this] (auto& data, auto& left, auto& begin) {
+    size_t data_size = static_cast<size_t>(data.size());
+    return do_with(std::move(data), size_t { data_size }, bool { true }, [this] (auto& data, auto& left, auto& begin) {
         return repeat([this, &data, &left, &begin] () mutable {
             const char* ptr = data.data();
-            const int leftover = BLOCK_SIZE - block_offset_;
+            const int leftover = LOG_BLOCK_SIZE - block_offset_;
             assert(leftover >= 0);
             if (leftover < HEADER_SIZE) {
                 // Switch to a new block
@@ -64,7 +65,7 @@ future<> writer::do_append(const bytes_view data) {
                   assert(HEADER_SIZE == 7);
                   const bytes zeros("\x00\x00\x00\x00\x00\x00");
                   auto&& priority_class = get_local_commitlog_priority();
-                  return dest_->dma_write(pos_, zeros.data(), leftover, priority_class).then([this] (auto s) {
+                  return dest_.dma_write(pos_, zeros.data(), leftover, priority_class).then([this] (auto s) {
                       pos_ += s;
                       block_offset_ = 0;
                       return make_ready_future<stop_iteration>(stop_iteration::no);
@@ -73,8 +74,8 @@ future<> writer::do_append(const bytes_view data) {
              }
 
              // Invariant: we never leave < HEADER_SIZE bytes in a block.
-             assert(BLOCK_SIZE - block_offset_ - HEADER_SIZE >= 0);
-             const size_t avail = BLOCK_SIZE - block_offset_ - HEADER_SIZE;
+             assert(LOG_BLOCK_SIZE - block_offset_ - HEADER_SIZE >= 0);
+             const size_t avail = LOG_BLOCK_SIZE - block_offset_ - HEADER_SIZE;
              const size_t fragment_length = (left < avail) ? left : avail;
 
              record_type type;
@@ -98,7 +99,7 @@ future<> writer::do_append(const bytes_view data) {
                  return make_ready_future<stop_iteration>(stop_iteration::yes);
              });
         }).finally ([this] {
-             return dest_->flush().then([] {
+             return dest_.flush().then([] {
                  return make_ready_future<>();
              });
         });
@@ -107,7 +108,7 @@ future<> writer::do_append(const bytes_view data) {
 
 future<> writer::emit_physical_record(record_type t, const char* ptr, size_t n) {
     assert(n <= 0xffff);  // Must fit in two bytes
-    assert(block_offset_ + HEADER_SIZE + n <= BLOCK_SIZE);
+    assert(block_offset_ + HEADER_SIZE + n <= LOG_BLOCK_SIZE);
 
     // Format the header
     char buf[HEADER_SIZE];
@@ -122,11 +123,11 @@ future<> writer::emit_physical_record(record_type t, const char* ptr, size_t n) 
 
     // Write the header and the payload
     auto&& priority_class = get_local_commitlog_priority();
-    return dest_->dma_write(pos_, buf, HEADER_SIZE, priority_class).then([this, ptr, n] (auto s) {
+    return dest_.dma_write(pos_, buf, HEADER_SIZE, priority_class).then([this, ptr, n] (auto s) {
         pos_ += HEADER_SIZE;
         block_offset_ += HEADER_SIZE;
         auto&& priority_class = get_local_commitlog_priority();
-        return dest_->dma_write(pos_, ptr, n, priority_class).then([this, n] (auto s) {
+        return dest_.dma_write(pos_, ptr, n, priority_class).then([this, n] (auto s) {
             pos_ += n;
             block_offset_ += n;
             return make_ready_future<>();

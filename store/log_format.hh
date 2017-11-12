@@ -26,8 +26,8 @@ enum record_type {
   middle = 3,
   last   = 4,
 };
-static constexpr const uint32_t MAX_RECORD_TYPE = static_cast<uint32_t>(record_type::last); 
-static constexpr const int BLOCK_SIZE = 1024 * 32;
+static constexpr const uint32_t MAX_RECORD_TYPE = record_type::last;
+static constexpr const int LOG_BLOCK_SIZE = 1024 * 32;
 // Header is checksum (4 bytes), length (2 bytes), type (1 byte).
 static constexpr const int HEADER_SIZE = 4 + 2 + 1;
 }

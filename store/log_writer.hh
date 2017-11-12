@@ -46,17 +46,14 @@ bytes serialize_to_bytes(lw_shared_ptr<PartitionType> p) {
 
 class writer {
  public:
-  explicit writer(lw_shared_ptr<file> dest);
+  explicit writer(file dest);
 
   ~writer() {}
 
-  template<class PartitionType>
-  future<> append(lw_shared_ptr<PartitionType> p) {
-      return do_append(bytes_view { serialize_to_bytes (p) });
-  }
+  future<> append(bytes_view slice);
 
  private:
-  lw_shared_ptr<file> dest_;
+  file dest_;
   int block_offset_;       // Current offset in block
   size_t pos_ = 0;          // the current pos of file
   // crc32c values for all supported record types.  These are
@@ -64,7 +61,6 @@ class writer {
   // record type stored in the header.
   uint32_t type_crc_[MAX_RECORD_TYPE + 1];
 
-  future<> do_append(bytes_view slice);
   future<> emit_physical_record(record_type type, const char* ptr, size_t length);
 
   // No copying allowed

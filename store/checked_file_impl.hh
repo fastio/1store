@@ -42,8 +42,12 @@
 #pragma once
 
 #include "core/file.hh"
-#include "disk-error-handler.hh"
-namespace redis {
+#include "core/reactor.hh"
+#include "utils/disk-error-handler.hh"
+#include "seastarx.hh"
+using namespace seastar;
+namespace store {
+
 class checked_file_impl : public file_impl {
 public:
 

@@ -44,10 +44,10 @@ public:
     }
     partition() : partition(nullptr) {}
     partition(std::unique_ptr<partition_impl> impl) : _impl(std::move(impl)) {}
-    bytes serialize() const;
     partition_type type() const;
     void replace_if_newer(partition&& p) {}
     bool empty() const { return false; }
+    bytes serialize() const { return _impl->serialize(); }
 };
 
 partition make_null_partition();

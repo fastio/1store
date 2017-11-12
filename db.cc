@@ -97,6 +97,7 @@ database::database()
              });
         });
     }
+    //_commit_log = make_lw_shared<store::commit_log>(sstring{"mock.dat"});
     setup_metrics();
 }
 

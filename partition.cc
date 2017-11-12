@@ -4,11 +4,6 @@
 #include "seastarx.hh"
 
 
-bytes partition::serialize() const
-{
-    return _impl->serialize();
-}
-
 partition_type partition::type() const
 {
     return _impl->type();
