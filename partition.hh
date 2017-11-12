@@ -21,11 +21,12 @@ protected:
     partition_type _type;
     partition_generation_type _gen;
     bytes _key;
+    size_t _hash;
 public:
     partition_impl() = default;
     partition_impl(const partition_impl&) = default;
     partition_impl& operator = (const partition_impl&) = default;
-    partition_impl(partition_type type, const bytes& key) : _type(type), _key(key) {}
+    partition_impl(partition_type type, const bytes& key, size_t hash) : _type(type), _key(key), _hash(hash) {}
     virtual bytes serialize() = 0;
     partition_type type() const { return _type; }
 };
@@ -50,6 +51,6 @@ public:
     bytes serialize() const { return _impl->serialize(); }
 };
 
-partition make_null_partition();
-partition make_removable_partition(const bytes& key);
-partition make_string_partition(const bytes& key, const bytes& value);
+lw_shared_ptr<partition> make_null_partition();
+lw_shared_ptr<partition> make_removable_partition(const bytes& key, const size_t hash);
+lw_shared_ptr<partition> make_string_partition(const bytes& key, const size_t hash, const bytes& value);

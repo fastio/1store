@@ -11,33 +11,33 @@ partition_type partition::type() const
 
 class null_partition_impl : public partition_impl {
 public:
-    null_partition_impl() : partition_impl(partition_type::null, {}) {}
+    null_partition_impl() : partition_impl(partition_type::null, {}, 0) {}
     virtual bytes serialize() override {
         return {};
     }
 };
 
-partition make_null_partition() {
-    return partition(std::make_unique<null_partition_impl>());
+lw_shared_ptr<partition> make_null_partition() {
+    return make_lw_shared<partition>(std::make_unique<null_partition_impl>());
 }
 
 class removable_partition_impl : public partition_impl {
 public:
-    removable_partition_impl(const bytes& key) : partition_impl(partition_type::unknown, key) {}
+    removable_partition_impl(const bytes& key, const size_t hash) : partition_impl(partition_type::unknown, key, hash) {}
     virtual bytes serialize() override {
         return _key;
     }
 };
 
-partition make_removable_partition(const bytes& key) {
-    return partition(std::make_unique<removable_partition_impl>(key));
+lw_shared_ptr<partition> make_removable_partition(const bytes& key, size_t hash) {
+    return make_lw_shared<partition>(std::make_unique<removable_partition_impl>(key, hash));
 }
 
 class string_partition_impl : public partition_impl {
    bytes _value;
 public:
-   string_partition_impl(const bytes& key, const bytes& value)
-       : partition_impl(partition_type::string, key)
+   string_partition_impl(const bytes& key, size_t hash, const bytes& value)
+       : partition_impl(partition_type::string, key, hash)
        , _value(value)
    {
    }
@@ -46,6 +46,6 @@ public:
    }
 };
 
-partition make_string_partition(const bytes& key, const bytes& value) {
-    return partition(std::make_unique<string_partition_impl>(key, value));
+lw_shared_ptr<partition> make_string_partition(const bytes& key, const size_t hash, const bytes& value) {
+    return make_lw_shared<partition>(std::make_unique<string_partition_impl>(key, hash, value));
 }
