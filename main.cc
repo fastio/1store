@@ -25,6 +25,7 @@
 #include "server.hh"
 #include "util/log.hh"
 #include "core/prometheus.hh"
+#include "utils/disk-error-handler.hh"
 #define PLATFORM "seastar"
 #define VERSION "v1.0"
 #define VERSION_STRING PLATFORM " " VERSION
@@ -32,6 +33,9 @@
 using logger =  seastar::logger;
 static logger main_log ("main");
 
+thread_local disk_error_signal_type commit_error;
+thread_local disk_error_signal_type general_disk_error;
+thread_local disk_error_signal_type sstable_write_error;
 
 int main(int ac, char** av) {
     distributed<redis::database> db;

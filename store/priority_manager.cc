@@ -16,9 +16,6 @@
 */
 
 /*
-*
-* This file is part of Pedis.
-*
 * Pedis is free software: you can redistribute it and/or modify
 * it under the terms of the GNU Affero General Public License as published by
 * the Free Software Foundation, either version 3 of the License, or
@@ -34,31 +31,16 @@
 * KIND, either express or implied.  See the License for the
 * specific language governing permissions and limitations
 * under the License.
-* 
-*  Copyright (c) 2016-2026, Peng Jian, pengjian.uestc@gmail.com. All rights reserved.
+*
+*  Modified by Peng Jian, pengjian.uestc@gmail.com.
 *
 */
-#include "disk-error-handler.hh"
 
-thread_local io_error_handler commit_error_handler = default_io_error_handler(commit_error);
-thread_local io_error_handler general_disk_error_handler = default_io_error_handler(general_disk_error);
-thread_local io_error_handler sstable_write_error_handler = default_io_error_handler(sstable_write_error);
+#include "priority_manager.hh"
 
-io_error_handler default_io_error_handler(disk_error_signal_type& signal) {
-    return [&signal] (std::exception_ptr eptr) {
-        try {
-            std::rethrow_exception(eptr);
-        } catch(std::system_error& e) {
-            if (should_stop_on_system_error(e)) {
-                signal();
-                throw storage_io_error(e);
-            }
-        }
-    };
+namespace store {
+priority_manager& get_local_priority_manager() {
+    static thread_local priority_manager pm = priority_manager();
+    return pm;
 }
-
-io_error_handler_gen default_io_error_handler_gen() {
-    return [] (disk_error_signal_type& signal) {
-        return default_io_error_handler(signal);
-    };
 }

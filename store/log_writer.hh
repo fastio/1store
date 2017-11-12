@@ -3,6 +3,26 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 // Modified by Peng Jian.
+/*
+* Pedis is free software: you can redistribute it and/or modify
+* it under the terms of the GNU Affero General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* You may obtain a copy of the License at
+*
+*     http://www.gnu.org/licenses
+*
+* Unless required by applicable law or agreed to in writing,
+* software distributed under the License is distributed on an
+* "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+* KIND, either express or implied.  See the License for the
+* specific language governing permissions and limitations
+* under the License.
+* 
+*  Copyright (c) 2016-2026, Peng Jian, pengjian.uestc@gmail.com. All rights reserved.
+*
+*/
 #pragma once
 
 #include <stdint.h>
@@ -26,9 +46,7 @@ bytes serialize_to_bytes(lw_shared_ptr<PartitionType> p) {
 
 class writer {
  public:
-  explicit writer(const bytes file_name);
   explicit writer(lw_shared_ptr<file> dest);
-  writer(lw_shared_ptr<file>, uint64_t dest_length);
 
   ~writer() {}
 
@@ -44,7 +62,7 @@ class writer {
   // crc32c values for all supported record types.  These are
   // pre-computed to reduce the overhead of computing the crc of the
   // record type stored in the header.
-  uint32_t type_crc_[kMaxRecordType + 1];
+  uint32_t type_crc_[MAX_RECORD_TYPE + 1];
 
   future<> do_append(bytes_view slice);
   future<> emit_physical_record(record_type type, const char* ptr, size_t length);

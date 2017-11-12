@@ -40,8 +40,8 @@ class list_lsa {
         }
     };
     using internal_list_type = boost::intrusive::list<internal_node,
-                                                      boost::intrusive::member_hook<internal_node, boost::intrusive::list_member_hook<>,
-                                                      &internal_node::_link>>;
+        boost::intrusive::member_hook<internal_node, boost::intrusive::list_member_hook<>,
+        &internal_node::_link>>;
     using const_iterator = internal_list_type::const_iterator;
     using iterator = internal_list_type::iterator;
     internal_list_type  _list;

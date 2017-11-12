@@ -8,7 +8,6 @@
 #include "store/reader.hh"
 
 namespace store {
-
 static thread_local sstable_cache _table_cache;
 static inline sstable_cache& get_table_cache() {
     return _table_cache;

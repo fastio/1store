@@ -3,12 +3,13 @@
 #include "core/shared_ptr.hh"
 #include "seastarx.hh"
 #include <memory>
+
 enum class partition_type : unsigned {
+    string,
     list,
     set,
     hash,
     zset,
-    string,
     unknown,
     null,
 };
@@ -16,6 +17,7 @@ enum class partition_type : unsigned {
 using partition_generation_type = size_t;
 
 class partition_impl {
+protected:
     partition_type _type;
     partition_generation_type _gen;
     bytes _key;
@@ -50,4 +52,4 @@ public:
 
 partition make_null_partition();
 partition make_removable_partition(const bytes& key);
-partition make_sstring_partition(const bytes& key, const bytes& value);
+partition make_string_partition(const bytes& key, const bytes& value);

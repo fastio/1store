@@ -1,6 +1,28 @@
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
+//
+//
+/*
+* Pedis is free software: you can redistribute it and/or modify
+* it under the terms of the GNU Affero General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* You may obtain a copy of the License at
+*
+*     http://www.gnu.org/licenses
+*
+* Unless required by applicable law or agreed to in writing,
+* software distributed under the License is distributed on an
+* "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+* KIND, either express or implied.  See the License for the
+* specific language governing permissions and limitations
+* under the License.
+* 
+*  Copyright (c) 2016-2026, Peng Jian, pengjian.uestc@gmail.com. All rights reserved.
+*
+*/
 
 #include "store/util/coding.hh"
 #include <cstring>
@@ -18,13 +40,13 @@ void encode_fixed64(char* buf, uint64_t value) {
 void put_fixed32(bytes& dst, uint32_t value) {
   char buf[sizeof(value)];
   encode_fixed32(buf, value);
-  dst->append(buf, sizeof(buf));
+  dst.append(buf, sizeof(buf));
 }
 
 void put_fixed64(bytes& dst, uint64_t value) {
   char buf[sizeof(value)];
   encode_fixed64(buf, value);
-  dst->append(buf, sizeof(buf));
+  dst.append(buf, sizeof(buf));
 }
 
 char* encode_varint32(char* dst, uint32_t v) {
@@ -58,7 +80,7 @@ char* encode_varint32(char* dst, uint32_t v) {
 void put_varint32(bytes& dst, uint32_t v) {
   char buf[5];
   char* ptr = encode_varint32(buf, v);
-  dst->append(buf, ptr - buf);
+  dst.append(buf, ptr - buf);
 }
 
 char* encode_varint64(char* dst, uint64_t v) {
@@ -75,12 +97,12 @@ char* encode_varint64(char* dst, uint64_t v) {
 void put_varint64(bytes& dst, uint64_t v) {
   char buf[10];
   char* ptr = encode_varint64(buf, v);
-  dst->append(buf, ptr - buf);
+  dst.append(buf, ptr - buf);
 }
 
 void put_length_prefixed_slice(bytes& dst, const bytes_view& value) {
   put_varint32(dst, value.size());
-  dst->append(value.data(), value.size());
+  dst.append(value.data(), value.size());
 }
 
 int varint_length(uint64_t v) {
@@ -118,7 +140,7 @@ bool get_varint32(bytes_view& input, uint32_t& value) {
   if (q == nullptr) {
     return false;
   } else {
-    input = bytes_view { q, limit - q };
+    input = bytes_view { q, static_cast<uint32_t>(limit - q) };
     return true;
   }
 }
@@ -147,7 +169,7 @@ bool get_varint64(bytes_view& input, uint64_t& value) {
   if (q == nullptr) {
     return false;
   } else {
-    input = bytes_view { q, limit - q };
+    input = bytes_view { q, static_cast<uint32_t>(limit - q) };
     return true;
   }
 }
