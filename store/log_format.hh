@@ -18,6 +18,7 @@
 *  Copyright (c) 2016-2026, Peng Jian, pengjian.uest@gmail.com. All rights reserved.
 *
 */
+#pragma once
 namespace store {
 enum record_type {
   zero   = 0,

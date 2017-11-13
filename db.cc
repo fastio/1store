@@ -97,7 +97,7 @@ database::database()
              });
         });
     }
-    _commit_log = make_lw_shared<store::commit_log>(sstring{"mock.dat"});
+    _commit_log = make_lw_shared<store::commit_log>(sstring{"/u/scylla/data/mock.dat"});
     setup_metrics();
 }
 

@@ -1,28 +1,48 @@
 /*
- * Copyright (C) 2014 ScyllaDB
- */
+* Copyright 2016 ScyllaDB
+*
+* Scylla is free software: you can redistribute it and/or modify
+* it under the terms of the GNU Affero General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* Scylla is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
+*/
 
 /*
- * This file is part of Scylla.
- *
- * Scylla is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Scylla is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
- */
+*
+* This file is part of Pedis.
+*
+* Pedis is free software: you can redistribute it and/or modify
+* it under the terms of the GNU Affero General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* You may obtain a copy of the License at
+*
+*     http://www.gnu.org/licenses
+*
+* Unless required by applicable law or agreed to in writing,
+* software distributed under the License is distributed on an
+* "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+* KIND, either express or implied.  See the License for the
+* specific language governing permissions and limitations
+* under the License.
+*
+*  Peng Jian, pengjian.uestc@gmail.com. All rights reserved.
+*
+*
+*/
 
-#ifndef UTILS_DATA_OUTPUT_HH_
-#define UTILS_DATA_OUTPUT_HH_
+#pragma once
 
-#include "bytes.hh"
+#include "utils/bytes.hh"
 #include "net/byteorder.hh"
 
 /**
@@ -180,5 +200,3 @@ inline std::enable_if_t<std::is_fundamental<T>::value, data_output&> data_output
     _ptr += sizeof(T);
     return *this;
 }
-
-#endif /* UTILS_DATA_OUTPUT_HH_ */

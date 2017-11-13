@@ -277,7 +277,7 @@ scylla_core = ([
         'structures/list_lsa.cc',
         'cache.cc',
         'reply_builder.cc',
-        'partition.cc',
+        'mutation.cc',
         'store/util/coding.cc',
         'store/util/crc32c.cc',
         'store/util/logging.cc',

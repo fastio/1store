@@ -19,7 +19,7 @@
 * KIND, either express or implied.  See the License for the
 * specific language governing permissions and limitations
 * under the License.
-* 
+*
 *  Copyright (c) 2016-2026, Peng Jian, pengjian.uestc@gmail.com. All rights reserved.
 *
 */
@@ -29,44 +29,90 @@
 #include "store/log_format.hh"
 #include "utils/bytes.hh"
 #include "core/future.hh"
+#include "core/temporary_buffer.hh"
 #include "core/file.hh"
 #include "core/shared_ptr.hh"
 #include "seastarx.hh"
-
+#include "mutation.hh"
 namespace store {
 
+class flush_buffer {
+    lw_shared_ptr<temporary_buffer<char>> _data;
+    data_output _output;
+    size_t _pending_size;
+    size_t _written;
+public:
+    flush_buffer() : _data (nullptr), _output(nullptr, size_t(0)), _pending_size(0), _written(0)
+    {
+    }
 
-namespace log {
+    flush_buffer(char* data, size_t size)
+        : _data(make_lw_shared<temporary_buffer<char>>(data, size, make_free_deleter(data)))
+        , _output(data, size)
+        , _pending_size(0)
+        , _written(0)
+    {
+    }
 
-template <class PartitionType>
-bytes serialize_to_bytes(lw_shared_ptr<PartitionType> p) {
-    assert(p);
-    return p->serialize();
-}
+    inline void skip(size_t n) {
+        _pending_size += n;
+    }
 
-class writer {
+    inline size_t write(lw_shared_ptr<mutation> m) {
+        return 0;
+    }
+
+    inline char* get_current() {
+        return _data->get_write() + _pending_size;
+    }
+
+    inline size_t available_size() const {
+        return _data->size() - _pending_size;
+    }
+
+    inline bool available() const {
+        return !!_data;
+    }
+
+    inline bool flushed_all() const {
+        return _written == _pending_size;
+    }
+
+    inline void update_flushed_size(size_t flushed) {
+        _written += flushed;
+    }
+
+    inline char* data() {
+        return _data->get_write() + _written;
+    }
+
+    inline size_t size() const {
+        return _pending_size - _written;
+    }
+
+    inline void reset() {
+        _pending_size = 0;
+        _written = 0;
+    }
+
+    inline void close() {
+    }
+};
+
+class log_writer {
  public:
-  explicit writer(file dest);
+  explicit log_writer(file dest);
 
-  ~writer() {}
+  ~log_writer() {}
 
-  future<> append(bytes_view slice);
+  future<> write(flush_buffer fb);
 
  private:
   file dest_;
-  int block_offset_;       // Current offset in block
   size_t pos_ = 0;          // the current pos of file
-  // crc32c values for all supported record types.  These are
-  // pre-computed to reduce the overhead of computing the crc of the
-  // record type stored in the header.
-  uint32_t type_crc_[MAX_RECORD_TYPE + 1];
-
-  future<> emit_physical_record(record_type type, const char* ptr, size_t length);
-
   // No copying allowed
-  writer(const writer&) = delete;
-  void operator=(const writer&) = delete;
+  log_writer(const log_writer&) = delete;
+  void operator=(const log_writer&) = delete;
 };
 
-}  // namespace log
-}  // namespace store 
+}
