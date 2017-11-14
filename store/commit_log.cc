@@ -80,7 +80,9 @@ future<> commit_log::make_room_for_apending_mutation(size_t size)
                 _current_buffer = _released_buffers.front();
                 _released_buffers.pop();
             }
-            _current_buffer = make_flush_buffer();
+            else {
+                _current_buffer = make_flush_buffer();
+            }
             return make_ready_future<>();
         });
     }
