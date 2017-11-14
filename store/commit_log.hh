@@ -16,11 +16,18 @@ class commit_log {
     static const size_t SEGEMENT_SIZE = 32 * 1024;
     static const size_t OUTPUT_BUFFER_ALIGNMENT = 4096;
     static const uint32_t MAX_FLUSH_BUFFER_SIZE = 32;
+    static const size_t FLUSH_SIZE_THRESHOLD = FLUSH_BUFFER_SIZE * 80 / 100;
+    static const uint32_t FLUSH_TOUCH_COUNTER_THRESHOLD = 10;
     std::queue<flush_buffer> _released_buffers;
     std::queue<flush_buffer> _pending_buffers;
     flush_buffer _current_buffer;
     size_t segement_offset_;
-    bool close_ { false };
+    bool shutdown_ { false };
+
+    using clock_type = lowres_clock;
+    // periodically flush commitlog buffer to disk
+    timer<clock_type> _timer;
+
     using timeout_exception_factory = default_timeout_exception_factory;
     basic_semaphore<timeout_exception_factory> _released_semaphore;
     basic_semaphore<timeout_exception_factory> _pending_semaphore;
@@ -36,6 +43,7 @@ private:
     future<> make_room_for_apending_mutation(size_t size);
     future<flush_buffer> do_flush_one_buffer(flush_buffer fb);
     flush_buffer make_flush_buffer();
+    void on_timer();
 };
 
 lw_shared_ptr<commit_log> make_commit_log(sstring file_name);

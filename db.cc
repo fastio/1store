@@ -97,7 +97,7 @@ database::database()
              });
         });
     }
-    _commit_log = make_lw_shared<store::commit_log>(sstring{"/u/scylla/data/mock.dat"});
+    _commit_log = make_lw_shared<store::commit_log>(sstring{"mock.dat"});
     setup_metrics();
 }
 
@@ -248,19 +248,18 @@ future<scattered_message_ptr> database::set(const redis_key& rk, bytes& val, lon
 {
     ++_stat._set;
     return with_allocator(allocator(), [this, &rk, &val, expired, flag] {
-        //auto partition = make_string_partition(rk.key(), rk.hash(), val);
-        //return _commit_log->append(partition).then([this, &rk, &val, expired, flag] {
-            auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
-            bool result = true;
-            if (current_store().insert_if(entry, expired, flag & FLAG_SET_NX, flag & FLAG_SET_XX)) {
-                ++_stat._total_string_entries;
-            }
-            else {
-                result = false;
-                current_allocator().destroy<cache_entry>(entry);
-            }
-            return reply_builder::build(result ? msg_ok : msg_nil);
-        //});
+        auto m = make_string_mutation(rk.key(), rk.hash(), val, expired, flag);
+        _commit_log->append(m);
+        auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
+        bool result = true;
+        if (current_store().insert_if(entry, expired, flag & FLAG_SET_NX, flag & FLAG_SET_XX)) {
+            ++_stat._total_string_entries;
+        }
+        else {
+            result = false;
+            current_allocator().destroy<cache_entry>(entry);
+        }
+        return reply_builder::build(result ? msg_ok : msg_nil);
     });
 }
 

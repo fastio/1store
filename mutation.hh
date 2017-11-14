@@ -31,6 +31,7 @@ public:
     mutation_type type() const { return _type; }
     virtual size_t encode_to(data_output& output) const = 0;
     virtual void decode_from(data_input& input) = 0;
+    virtual size_t estimate_serialized_size() const = 0;
 };
 
 class mutation {
@@ -52,9 +53,9 @@ public:
     bool empty() const { return false; }
     size_t encode_to(data_output& output) { return _impl->encode_to(output); }
     void decode_from(data_input& input) { _impl->decode_from(input); }
-    size_t estimate_serialized_size() const { return 0; }
+    size_t estimate_serialized_size() const { return _impl->estimate_serialized_size(); }
 };
 
 lw_shared_ptr<mutation> make_null_mutation();
 lw_shared_ptr<mutation> make_removable_mutation(const bytes& key, const size_t hash);
-lw_shared_ptr<mutation> make_string_mutation(const bytes& key, const size_t hash, const bytes& value);
+lw_shared_ptr<mutation> make_string_mutation(const bytes& key, const size_t hash, const bytes& value, long expire, int flag);

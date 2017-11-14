@@ -39,43 +39,65 @@ namespace store {
 class flush_buffer {
     lw_shared_ptr<temporary_buffer<char>> _data;
     data_output _output;
-    size_t _pending_size;
+    size_t _offset;
     size_t _written;
+    uint32_t _touched_counter;
+    uint32_t _ref;
 public:
-    flush_buffer() : _data (nullptr), _output(nullptr, size_t(0)), _pending_size(0), _written(0)
+    flush_buffer()
+        : _data (nullptr)
+        , _output(nullptr, size_t(0))
+        , _offset(0)
+        , _written(0)
+        , _touched_counter(0)
+        , _ref(0)
     {
     }
 
     flush_buffer(char* data, size_t size)
         : _data(make_lw_shared<temporary_buffer<char>>(data, size, make_free_deleter(data)))
         , _output(data, size)
-        , _pending_size(0)
+        , _offset(0)
         , _written(0)
+        , _touched_counter(0)
     {
     }
 
+    inline uint32_t ref() {
+        return ++_ref;
+    }
+    inline void unref() {
+        --_ref;
+    }
+
     inline void skip(size_t n) {
-        _pending_size += n;
+        _offset += n;
     }
 
     inline size_t write(lw_shared_ptr<mutation> m) {
-        return 0;
+        size_t serialized = m->encode_to(_output);
+        _offset += serialized;
+        return serialized;
     }
 
     inline char* get_current() {
-        return _data->get_write() + _pending_size;
+        return _data->get_write() + _offset;
     }
 
     inline size_t available_size() const {
-        return _data->size() - _pending_size;
+        return _data->size() - _offset;
     }
 
     inline bool available() const {
         return !!_data;
     }
 
+    inline size_t payload_size() const {
+        return _offset;
+    }
+
     inline bool flushed_all() const {
-        return _written == _pending_size;
+        return _written == _offset;
     }
 
     inline void update_flushed_size(size_t flushed) {
@@ -87,15 +109,21 @@ public:
     }
 
     inline size_t size() const {
-        return _pending_size - _written;
+        return _offset - _written;
     }
 
     inline void reset() {
-        _pending_size = 0;
+        _offset = 0;
         _written = 0;
+        _touched_counter = 0;
     }
 
     inline void close() {
+    }
+
+    inline uint32_t touch() {
+        ++_touched_counter;
+        return _touched_counter;
     }
 };
 

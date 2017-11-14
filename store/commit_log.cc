@@ -19,9 +19,9 @@ commit_log::commit_log(sstring fn)
     , _writer(nullptr)
     , _current_buffer()
     , segement_offset_(0)
-    , close_(false)
-    , _released_semaphore(1)
-    , _pending_semaphore(MAX_FLUSH_BUFFER_SIZE)
+    , shutdown_(false)
+    , _released_semaphore(MAX_FLUSH_BUFFER_SIZE)
+    , _pending_semaphore(0)
 {
     init_type_crc(type_crc_);
 }
@@ -35,6 +35,27 @@ future<flush_buffer> commit_log::do_flush_one_buffer(flush_buffer fb)
     });
 }
 
+void commit_log::on_timer()
+{
+    if (_current_buffer.available()) {
+        _current_buffer.touch();
+        if (_current_buffer.ref() == 1) {
+            if ( _current_buffer.payload_size() > FLUSH_SIZE_THRESHOLD || _current_buffer.touch() > FLUSH_TOUCH_COUNTER_THRESHOLD) {
+                _current_buffer.unref();
+                _current_buffer.close();
+                _pending_buffers.push(_current_buffer);
+                _pending_semaphore.signal();
+                _current_buffer = {};
+                return;
+            }
+        }
+        _current_buffer.unref();
+    }
+    if (!shutdown_) {
+        _timer.arm(std::chrono::milliseconds(8));
+    }
+}
+
 future<> commit_log::initialize()
 {
     repeat([this] {
@@ -45,20 +66,30 @@ future<> commit_log::initialize()
             b.reset();
             _released_buffers.push(b);
             _released_semaphore.signal();
-            auto should_stop = _pending_buffers.empty() && close_;
+            auto should_stop = _pending_buffers.empty() && shutdown_;
                 return make_ready_future<stop_iteration>(should_stop ? stop_iteration::yes : stop_iteration::no);
             });
         });
     });
 
+     _timer.set_callback(std::bind(&commit_log::on_timer, this));
+     _timer.arm(std::chrono::milliseconds(8));
+
     file_open_options opt;
     opt.extent_allocation_size_hint = IO_EXTENT_ALLOCATION_SIZE;
     return open_checked_file_dma(commit_error_handler, _file_name, open_flags::wo | open_flags::create, opt).then([this](file f) {
         // xfs doesn't like files extended betond eof, so enlarge the file
+        _writer = make_lw_shared<store::log_writer>(std::move(f));
+        return _released_semaphore.wait().then([this] {
+            _current_buffer = this->make_flush_buffer();
+            return make_ready_future<>();
+        });
+        /*
         return f.truncate(IO_EXTENT_ALLOCATION_SIZE).then([this, f] () mutable {
             _writer = make_lw_shared<store::log_writer>(std::move(f));
             return make_ready_future<>();
         });
+        */
     });
 }
 flush_buffer commit_log::make_flush_buffer()
@@ -99,6 +130,7 @@ future<> commit_log::append(lw_shared_ptr<mutation> m)
     assert(_writer);
     auto estimated_size = m->estimate_serialized_size() + HEADER_SIZE;
     return make_room_for_apending_mutation(estimated_size).then([this, m, estimated_size] {
+        _current_buffer.ref();
         // Format the header
         char* header = _current_buffer.get_current();
         _current_buffer.skip(HEADER_SIZE);
@@ -111,6 +143,18 @@ future<> commit_log::append(lw_shared_ptr<mutation> m)
         header[4] = static_cast<char>(serialized_size & 0xff);
         header[5] = static_cast<char>(serialized_size >> 8);
         header[6] = static_cast<char>(record_type::full);
+    }).then([this] {
+        if (_current_buffer.payload_size() > FLUSH_SIZE_THRESHOLD || _current_buffer.touch() > FLUSH_TOUCH_COUNTER_THRESHOLD) {
+            _current_buffer.unref();
+            _current_buffer.close();
+            _pending_buffers.push(_current_buffer);
+            _pending_semaphore.signal();
+            _current_buffer = {};
+        }
+        else {
+            _current_buffer.unref();
+        }
+        return make_ready_future<>();
     });
 }
 
