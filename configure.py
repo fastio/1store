@@ -283,7 +283,6 @@ scylla_core = ([
         'store/util/logging.cc',
         'store/priority_manager.cc',
         'utils/disk-error-handler.cc',
-        'store/log_writer.cc',
         'store/commit_log.cc',
         #'ring.cc',
         #'proxy.cc',

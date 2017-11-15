@@ -24,6 +24,7 @@
 #include <algorithm>
 #include "util/log.hh"
 #include "core/metrics.hh"
+#include "core/sleep.hh"
 #include "structures/hll.hh"
 //using logger =  seastar::logger;
 //static logger db_log ("db");
@@ -97,7 +98,7 @@ database::database()
              });
         });
     }
-    _commit_log = make_lw_shared<store::commit_log>(sstring{"mock.dat"});
+    _commit_log = store::make_commit_log();
     setup_metrics();
 }
 
@@ -247,19 +248,20 @@ bool database::set_direct(const redis_key& rk, bytes& val, long expired, uint32_
 future<scattered_message_ptr> database::set(const redis_key& rk, bytes& val, long expired, uint32_t flag)
 {
     ++_stat._set;
-    return with_allocator(allocator(), [this, &rk, &val, expired, flag] {
-        auto m = make_string_mutation(rk.key(), rk.hash(), val, expired, flag);
-        _commit_log->append(m);
-        auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
-        bool result = true;
-        if (current_store().insert_if(entry, expired, flag & FLAG_SET_NX, flag & FLAG_SET_XX)) {
-            ++_stat._total_string_entries;
-        }
-        else {
-            result = false;
-            current_allocator().destroy<cache_entry>(entry);
-        }
-        return reply_builder::build(result ? msg_ok : msg_nil);
+    auto m = make_string_mutation(rk.key(), rk.hash(), val, expired, flag);
+    return _commit_log->append(m).then([this, rk, val, expired, flag] {
+        return with_allocator(allocator(), [this, &rk, &val, expired, flag] {
+            auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
+            bool result = true;
+            if (current_store().insert_if(entry, expired, flag & FLAG_SET_NX, flag & FLAG_SET_XX)) {
+                ++_stat._total_string_entries;
+            }
+            else {
+                result = false;
+                current_allocator().destroy<cache_entry>(entry);
+            }
+            return reply_builder::build(result ? msg_ok : msg_nil);
+        });
     });
 }
 
