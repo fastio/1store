@@ -25,6 +25,7 @@
 #include "core/sharded.hh"
 #include "core/temporary_buffer.hh"
 #include "core/metrics_registration.hh"
+#include "core/semaphore.hh"
 #include <sstream>
 #include <iostream>
 #include "structures/geo.hh"
@@ -34,7 +35,7 @@
 #include "keys.hh"
 #include "reply_builder.hh"
 #include  <experimental/vector>
-#include "store/commit_log.hh"
+#include "commit_log.hh"
 namespace stdx = std::experimental;
 namespace redis {
 
@@ -52,6 +53,8 @@ class database final : private logalloc::region {
 public:
     database();
     ~database();
+
+    future<> initialize();
 
     future<scattered_message_ptr> set(const redis_key& rk, bytes& val, long expire, uint32_t flag);
     bool set_direct(const redis_key& rk, bytes& val, long expire, uint32_t flag);
@@ -186,10 +189,8 @@ private:
         });
     }
 private:
-    static const int DEFAULT_DB_COUNT = 1;
-    cache _cache_stores[DEFAULT_DB_COUNT];
-    size_t current_store_index = 0;
-    inline cache& current_store() { return _cache_stores[current_store_index]; }
+    cache _cache;
+    inline cache& current_store() { return _cache; }
     seastar::metrics::metric_groups _metrics;
     lw_shared_ptr<store::commit_log> _commit_log { nullptr };
     struct stats {
@@ -296,6 +297,15 @@ private:
         uint64_t _pfmerge = 0;
     };
     stats _stat;
+    lw_shared_ptr<store::column_family> _sys_cf;
+    lw_shared_ptr<store::column_family> _data_cf;
+    using timeout_exception_factory = default_timeout_exception_factory;
+    basic_semaphore<timeout_exception_factory> _flush_cache;
+    bool _shutdown { false };
+    // periodically flush dirty cache_entry to column_family
+    using clock_type = lowres_clock;
+    timer<clock_type> _flush_timer;
+    void on_timer();
     void setup_metrics();
     size_t sum_expiring_entries();
 };

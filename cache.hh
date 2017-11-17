@@ -37,27 +37,13 @@
 #include "keys.hh"
 #include "utils/bytes.hh"
 #include "seastarx.hh"
-
+#include "column_family.hh"
+#include "types.hh"
 namespace bi = boost::intrusive;
 namespace redis {
 using clock_type = lowres_clock;
 static constexpr clock_type::time_point never_expire_timepoint = clock_type::time_point(clock_type::duration::min());
 class cache;
-
-enum {
-    REDIS_RAW_UINT64,
-    REDIS_RAW_INT64,
-    REDIS_RAW_DOUBLE,
-    REDIS_RAW_STRING,
-    REDIS_RAW_OBJECT, // for data struct
-    REDIS_RAW_ITEM,   // for data item
-    REDIS_LIST,
-    REDIS_DICT,
-    REDIS_SET,
-    REDIS_ZSET,
-    REDIS_BITMAP,
-};
-
 struct expiration {
     using time_point = clock_type::time_point;
     using duration   = time_point::duration;
@@ -89,24 +75,13 @@ struct expiration {
     }
 };
 
-// cache_entry should be allocated by LSA.
-enum class entry_type {
-    ENTRY_FLOAT = 0,
-    ENTRY_INT64 = 1,
-    ENTRY_BYTES = 2,
-    ENTRY_LIST  = 3,
-    ENTRY_MAP   = 4,
-    ENTRY_SET   = 5,
-    ENTRY_SSET  = 6,
-    ENTRY_HLL   = 7,
-};
 class cache_entry
 {
 protected:
     friend class cache;
     using hook_type = boost::intrusive::unordered_set_member_hook<>;
     hook_type _cache_link;
-    entry_type _type;
+    data_type _type;
     managed_ref<managed_bytes> _key;
     size_t _key_hash;
     union storage {
@@ -121,10 +96,13 @@ protected:
     } _u;
     bi::list_member_hook<> _timer_link;
     expiration _expiry;
+    bool _dirty { true };
+    clock_type::time_point _last_touched;
+    bi::list_member_hook<> _dirty_link;
 public:
     using time_point = expiration::time_point;
     using duration = expiration::duration;
-    cache_entry(const bytes& key, size_t hash, entry_type type) noexcept
+    cache_entry(const bytes& key, size_t hash, data_type type) noexcept
         : _cache_link()
         , _type(type)
         , _key_hash(hash)
@@ -133,112 +111,86 @@ public:
     }
 
     cache_entry(const bytes& key, size_t hash, double data) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_FLOAT)
+        : cache_entry(key, hash, data_type::numeric)
     {
         _u._float_number = data;
     }
 
     cache_entry(const bytes key, size_t hash, int64_t data) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_INT64)
+        : cache_entry(key, hash, data_type::int64)
     {
         _u._integer_number = data;
     }
 
     cache_entry(const bytes key, size_t hash, size_t origin_size) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_BYTES)
+        : cache_entry(key, hash, data_type::bytes)
     {
         //_u._bytes = make_managed<managed_bytes>(origin_size, 0);
     }
 
     cache_entry(const bytes& key, size_t hash, const bytes& data) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_BYTES)
+        : cache_entry(key, hash, data_type::bytes)
     {
         _u._bytes = make_managed<managed_bytes>(bytes_view{data.data(), data.size()});
     }
     struct list_initializer {};
     cache_entry(const bytes& key, size_t hash, list_initializer) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_LIST)
+        : cache_entry(key, hash, data_type::list)
     {
         _u._list = make_managed<list_lsa>();
     }
 
     struct dict_initializer {};
     cache_entry(const bytes& key, size_t hash, dict_initializer) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_MAP)
+        : cache_entry(key, hash, data_type::dict)
     {
         _u._dict = make_managed<dict_lsa>();
     }
 
     struct set_initializer {};
     cache_entry(const bytes& key, size_t hash, set_initializer) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_SET)
+        : cache_entry(key, hash, data_type::set)
     {
         _u._dict = make_managed<dict_lsa>();
     }
 
     struct sset_initializer {};
     cache_entry(const bytes& key, size_t hash, sset_initializer) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_SSET)
+        : cache_entry(key, hash, data_type::sset)
     {
         _u._sset = make_managed<sset_lsa>();
     }
 
     struct hll_initializer {};
     cache_entry(const bytes& key, size_t hash, hll_initializer) noexcept
-        : cache_entry(key, hash, entry_type::ENTRY_HLL)
+        : cache_entry(key, hash, data_type::hll)
     {
         //_u._bytes = make_managed<managed_bytes>(HLL_BYTES_SIZE, 0);
     }
 
-    cache_entry(cache_entry&& o) noexcept
-        : _cache_link(std::move(o._cache_link))
-        , _type(o._type)
-        , _key(std::move(_key))
-        , _key_hash(std::move(o._key_hash))
-    {
-        switch (_type) {
-            case entry_type::ENTRY_FLOAT:
-                _u._float_number = std::move(o._u._float_number);
-                break;
-            case entry_type::ENTRY_INT64:
-                _u._integer_number = std::move(o._u._integer_number);
-                break;
-            case entry_type::ENTRY_BYTES:
-            case entry_type::ENTRY_HLL:
-                _u._bytes = std::move(o._u._bytes);
-                break;
-            case entry_type::ENTRY_LIST:
-                _u._list = std::move(o._u._list);
-                break;
-            case entry_type::ENTRY_MAP:
-            case entry_type::ENTRY_SET:
-                _u._dict = std::move(o._u._dict);
-                break;
-            case entry_type::ENTRY_SSET:
-                _u._sset = std::move(o._u._sset);
-                break;
-        }
-    }
+    cache_entry(cache_entry&& o) noexcept;
 
     virtual ~cache_entry()
     {
         switch (_type) {
-            case entry_type::ENTRY_FLOAT:
-            case entry_type::ENTRY_INT64:
+            case data_type::numeric:
+            case data_type::int64:
                 break;
-            case entry_type::ENTRY_BYTES:
-            case entry_type::ENTRY_HLL:
+            case data_type::bytes:
+            case data_type::hll:
                 _u._bytes.~managed_ref<managed_bytes>();
                 break;
-            case entry_type::ENTRY_LIST:
+            case data_type::list:
                 _u._list.~managed_ref<list_lsa>();
                 break;
-            case entry_type::ENTRY_MAP:
-            case entry_type::ENTRY_SET:
+            case data_type::dict:
+            case data_type::set:
                 _u._dict.~managed_ref<dict_lsa>();
                 break;
-            case entry_type::ENTRY_SSET:
+            case data_type::sset:
                 _u._sset.~managed_ref<sset_lsa>();
+                break;
+            default:
                 break;
         }
     }
@@ -328,37 +280,37 @@ public:
     {
         return _u._bytes->data();
     }
-    inline entry_type type() const
+    inline data_type type() const
     {
         return _type;
     }
     inline bool type_of_float() const
     {
-        return _type == entry_type::ENTRY_FLOAT;
+        return _type == data_type::numeric;
     }
     inline bool type_of_integer() const
     {
-        return _type == entry_type::ENTRY_INT64;
+        return _type == data_type::int64;
     }
     inline bool type_of_bytes() const
     {
-        return _type == entry_type::ENTRY_BYTES;
+        return _type == data_type::bytes;
     }
     inline bool type_of_list() const
     {
-        return _type == entry_type::ENTRY_LIST;
+        return _type == data_type::list;
     }
     inline bool type_of_map() const {
-        return _type == entry_type::ENTRY_MAP;
+        return _type == data_type::dict;
     }
     inline bool type_of_set() const {
-        return _type == entry_type::ENTRY_SET;
+        return _type == data_type::set;
     }
     inline bool type_of_sset() const {
-        return _type == entry_type::ENTRY_SSET;
+        return _type == data_type::sset;
     }
     inline bool type_of_hll() const {
-        return _type == entry_type::ENTRY_HLL;
+        return _type == data_type::hll;
     }
     inline int64_t value_integer() const
     {
@@ -440,6 +392,9 @@ public:
     ~cache ()
     {
     }
+
+    bool should_flush_dirty_entry() const { return false; }
+    future<> flush_dirty_entry(store::column_family& cf);
 
     inline size_t expiring_size() const
     {

@@ -4,14 +4,14 @@
 #include "seastarx.hh"
 
 
-mutation_type mutation::type() const
+data_type mutation::type() const
 {
     return _impl->type();
 }
 
-class null_mutation_impl : public mutation_impl {
+class deleted_mutation_impl : public mutation_impl {
 public:
-    null_mutation_impl() : mutation_impl(mutation_type::null, {}, 0) {}
+    deleted_mutation_impl(const bytes& key) : mutation_impl(data_type::deleted, key) {}
     virtual size_t encode_to(data_output& output) const override {
         output.write(static_cast<unsigned>(_type))
               .write(_gen)
@@ -31,34 +31,8 @@ public:
     }
 };
 
-lw_shared_ptr<mutation> make_null_mutation() {
-    return make_lw_shared<mutation>(std::make_unique<null_mutation_impl>());
-}
-
-class removable_mutation_impl : public mutation_impl {
-public:
-    removable_mutation_impl(const bytes& key, const size_t hash) : mutation_impl(mutation_type::unknown, key, hash) {}
-    virtual size_t encode_to(data_output& output) const override {
-        output.write(static_cast<unsigned>(_type))
-              .write(_gen)
-              .write(_key);
-        return estimate_serialized_size();
-    }
-
-    virtual void decode_from(data_input& input) override {
-
-    }
-
-    virtual size_t estimate_serialized_size() const override {
-        using output = data_output;
-        return output::serialized_size<unsigned>() +
-            output::serialized_size(_gen) +
-            output::serialized_size(_key);
-    }
-};
-
-lw_shared_ptr<mutation> make_removable_mutation(const bytes& key, size_t hash) {
-    return make_lw_shared<mutation>(std::make_unique<removable_mutation_impl>(key, hash));
+lw_shared_ptr<mutation> make_deleted_mutation(const bytes& key) {
+    return make_lw_shared<mutation>(std::make_unique<deleted_mutation_impl>(key));
 }
 
 class string_mutation_impl : public mutation_impl {
@@ -66,8 +40,8 @@ class string_mutation_impl : public mutation_impl {
     long _expire;
     int _flag;
 public:
-    string_mutation_impl(const bytes& key, size_t hash, const bytes& value, long expire, int flag)
-        : mutation_impl(mutation_type::string, key, hash)
+    string_mutation_impl(const bytes& key, const bytes& value, long expire, int flag)
+        : mutation_impl(data_type::bytes, key)
         , _value(value)
         , _expire(expire)
         , _flag(flag)
@@ -99,6 +73,6 @@ public:
     }
 };
 
-lw_shared_ptr<mutation> make_string_mutation(const bytes& key, const size_t hash, const bytes& value, long expire, int flag) {
-    return make_lw_shared<mutation>(std::make_unique<string_mutation_impl>(key, hash, value, expire, flag));
+lw_shared_ptr<mutation> make_bytes_mutation(const bytes& key, const bytes& value, long expire, int flag) {
+    return make_lw_shared<mutation>(std::make_unique<string_mutation_impl>(key, value, expire, flag));
 }

@@ -1,4 +1,4 @@
-#include "store/commit_log.hh"
+#include "commit_log.hh"
 #include "store/checked_file_impl.hh"
 #include "store/util/coding.hh"
 #include "store/util/crc32c.hh"
@@ -156,12 +156,12 @@ future<> commit_log::impl::do_flush_one_buffer(lw_shared_ptr<flush_buffer> fb)
     assert(_file);
     return repeat([this, fb] () mutable {
         auto data = fb->data();
-        auto size = align_up<size_t>(fb->size(), 4096);
+        auto size = align_up<size_t>(fb->size(), OUTPUT_BUFFER_ALIGNMENT);
         std::fill(data + fb->size(), data + size, 0);
         auto&& priority_class = get_local_commitlog_priority();
         return _file->dma_write(_file_offset, data, size, priority_class).then([this, fb] (auto s) {
             fb->update_flushed_size(s);
-            s = align_down<size_t>(s, 4096);
+            s = align_down<size_t>(s, OUTPUT_BUFFER_ALIGNMENT);
             _file_offset += s;
 
             if (fb->flushed_all()) {

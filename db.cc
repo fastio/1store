@@ -26,6 +26,7 @@
 #include "core/metrics.hh"
 #include "core/sleep.hh"
 #include "structures/hll.hh"
+#include "types.hh"
 //using logger =  seastar::logger;
 //static logger db_log ("db");
 
@@ -61,64 +62,90 @@ private:
 };
 
 database::database()
+    : _stat()
+    , _sys_cf(make_lw_shared<store::column_family>("SYSTEM", true))
+    , _data_cf(make_lw_shared<store::column_family>("DATA", false))
+    , _flush_cache(0)
+    , _shutdown(false)
 {
     using namespace std::chrono;
 
-    for (size_t i = 0; i < DEFAULT_DB_COUNT; ++i) {
-        auto& store = _cache_stores[i];
-        _cache_stores[i].set_expired_entry_releaser([this, &store] (cache_entry& e) {
-             with_allocator(allocator(), [this, &store, &e] {
-                 auto type = e.type();
-                 if (store.erase(e)) {
-                     switch (type) {
-                         case entry_type::ENTRY_FLOAT:
-                         case entry_type::ENTRY_INT64:
-                             --_stat._total_counter_entries;
-                             break;
-                         case entry_type::ENTRY_BYTES:
-                             --_stat._total_string_entries;
-                             break;
-                         case entry_type::ENTRY_LIST:
-                             --_stat._total_list_entries;
-                             break;
-                         case entry_type::ENTRY_MAP:
-                             --_stat._total_bitmap_entries;
-                             break;
-                         case entry_type::ENTRY_SET:
-                             --_stat._total_set_entries;
-                             break;
-                         case entry_type::ENTRY_SSET:
-                             --_stat._total_zset_entries;
-                             break;
-                         case entry_type::ENTRY_HLL:
-                             --_stat._total_hll_entries;
-                             break;
-                     }
+    _cache.set_expired_entry_releaser([this] (cache_entry& e) {
+         with_allocator(allocator(), [this, &e] {
+             auto type = e.type();
+             if (_cache.erase(e)) {
+                 switch (type) {
+                     case data_type::numeric:
+                     case data_type::int64:
+                         --_stat._total_counter_entries;
+                         break;
+                     case data_type::bytes:
+                         --_stat._total_string_entries;
+                         break;
+                     case data_type::list:
+                         --_stat._total_list_entries;
+                         break;
+                     case data_type::bitmap:
+                         --_stat._total_bitmap_entries;
+                         break;
+                     case data_type::set:
+                         --_stat._total_set_entries;
+                         break;
+                     case data_type::sset:
+                         --_stat._total_zset_entries;
+                         break;
+                     case data_type::hll:
+                         --_stat._total_hll_entries;
+                         break;
+                     default:
+                         break;
                  }
-             });
-        });
-    }
+             }
+         });
+    });
     _commit_log = store::make_commit_log();
     setup_metrics();
+}
+
+future<> database::initialize()
+{
+    assert(_sys_cf);
+    assert(_data_cf);
+    repeat([this] {
+        return _flush_cache.wait().then([this] {
+            return _cache.flush_dirty_entry(*_data_cf).then([this] {
+                return _shutdown ? stop_iteration::yes : stop_iteration::no;
+            });
+        });
+    });
+
+     _flush_timer.set_callback(std::bind(&database::on_timer, this));
+    if (!_shutdown) {
+        _flush_timer.arm(std::chrono::milliseconds(8000));
+    }
+    return make_ready_future<>();
+}
+
+void database::on_timer()
+{
+    if (_cache.should_flush_dirty_entry()) {
+        _flush_cache.signal();
+    }
+    if (!_shutdown) {
+        _flush_timer.arm(std::chrono::milliseconds(8000));
+    }
 }
 
 database::~database()
 {
     with_allocator(allocator(), [this] {
-        for (size_t i = 0; i < DEFAULT_DB_COUNT; ++i) {
-            //db_log.info("total {} entries were released in cache [{}]", _cache_stores[i].size(), i);
-            _cache_stores[i].flush_all();
-        }
+        _cache.flush_all();
     });
 }
 
 size_t database::sum_expiring_entries()
 {
-    size_t sum = 0;
-    for (size_t i = 0; i < DEFAULT_DB_COUNT; ++i) {
-        sum += _cache_stores[i].expiring_size();
-    }
-    return sum;
+    return _cache.expiring_size();
 }
 
 void database::setup_metrics()
@@ -247,9 +274,14 @@ bool database::set_direct(const redis_key& rk, bytes& val, long expired, uint32_
 
 future<scattered_message_ptr> database::set(const redis_key& rk, bytes& val, long expired, uint32_t flag)
 {
+    // First, append the operation commitlog.
+    // Second, update the data-structures in the cache, reply message to client.
+    // Third, flush dirty data in the cache to memtable periodically.
+    // Then, flush memtable to disk when some conditions are statisfied.
+    //
     ++_stat._set;
-    auto m = make_string_mutation(rk.key(), rk.hash(), val, expired, flag);
-    return _commit_log->append(m).then([this, rk, val, expired, flag] {
+    auto m = make_bytes_mutation(rk.key(), val, expired, flag);
+    return _commit_log->append(m).then([this, &rk, &val, expired, flag] {
         return with_allocator(allocator(), [this, &rk, &val, expired, flag] {
             auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
             bool result = true;
@@ -1613,11 +1645,7 @@ future<scattered_message_ptr> database::zremrangebyrank(const redis_key& rk, siz
 
 bool database::select(size_t index)
 {
-    ++_stat._select;
-    if (index > DEFAULT_DB_COUNT) {
-        return false;
-    }
-    current_store_index = index;
+    (void) index;
     return true;
 }
 
