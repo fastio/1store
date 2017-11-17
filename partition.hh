@@ -48,5 +48,7 @@ public:
 };
 
 class cache_entry;
+lw_shared_ptr<partition> make_partition(cache_entry& e, version_type v);
 lw_shared_ptr<partition> make_deleted_partition(cache_entry&, version_type);
 lw_shared_ptr<partition> make_bytes_partition(cache_entry&, version_type);
+lw_shared_ptr<partition> make_list_partition(cache_entry&, version_type);

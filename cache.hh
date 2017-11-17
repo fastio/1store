@@ -21,6 +21,7 @@
 #pragma once
 #include <boost/intrusive/unordered_set.hpp>
 #include <boost/intrusive/list.hpp>
+#include <boost/intrusive/set.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/optional.hpp>
@@ -79,6 +80,7 @@ class cache_entry
 {
 protected:
     friend class cache;
+    using list_link_type = bi::list_member_hook<bi::link_mode<bi::auto_unlink>>;
     using hook_type = boost::intrusive::unordered_set_member_hook<>;
     hook_type _cache_link;
     data_type _type;
@@ -98,7 +100,8 @@ protected:
     expiration _expiry;
     bool _dirty { true };
     clock_type::time_point _last_touched;
-    bi::list_member_hook<> _dirty_link;
+    list_link_type _dirty_link;
+    list_link_type _lru_link;
 public:
     using time_point = expiration::time_point;
     using duration = expiration::duration;
@@ -106,6 +109,8 @@ public:
         : _cache_link()
         , _type(type)
         , _key_hash(hash)
+        , _dirty_link()
+        , _lru_link()
     {
         _key = make_managed<managed_bytes>(bytes_view{key.data(), key.size()});
     }
@@ -371,6 +376,12 @@ class cache {
         boost::intrusive::constant_time_size<true>>;
     using cache_iterator = typename cache_type::iterator;
     using const_cache_iterator = typename cache_type::const_iterator;
+    using lru_list_type = bi::list<cache_entry,
+        bi::member_hook<cache_entry, typename cache_entry::list_link_type, &cache_entry::_lru_link>,
+        bi::constant_time_size<false>>;
+    using dirty_list_type = bi::list<cache_entry,
+        bi::member_hook<cache_entry, typename cache_entry::list_link_type, &cache_entry::_dirty_link>,
+        bi::constant_time_size<false>>;
     static constexpr size_t initial_bucket_count = DEFAULT_INITIAL_SIZE;
     static constexpr float load_factor = 0.75f;
     size_t _resize_up_threshold = load_factor * initial_bucket_count;
@@ -382,10 +393,19 @@ class cache {
     allocation_strategy* alloc;
     using expired_entry_releaser_type = std::function<void(cache_entry& e)>;
     expired_entry_releaser_type _expired_entry_releaser;
+
+    // Evict cache_entry from lru, make the cache not to be too large.
+    // Of cause, flush it before evicted from the lru list.
+    lru_list_type _lru;
+
+    // Every modified cache_entry is dirty before flushed to memory table.
+    dirty_list_type _dirty;
 public:
     cache ()
         : _buckets(new cache_type::bucket_type[initial_bucket_count])
         , _store(cache_type::bucket_traits(_buckets, initial_bucket_count))
+        , _lru_list()
+        , _dirty_list()
     {
         _timer.set_callback([this] { erase_expired_entries(); });
     }
@@ -394,6 +414,7 @@ public:
     }
 
     bool should_flush_dirty_entry() const { return false; }
+
     future<> flush_dirty_entry(store::column_family& cf);
 
     inline size_t expiring_size() const
