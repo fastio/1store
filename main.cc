@@ -21,7 +21,6 @@
 #include "redis.hh"
 #include "db.hh"
 #include "redis.hh"
-#include "redis_protocol.hh"
 #include "server.hh"
 #include "util/log.hh"
 #include "core/prometheus.hh"
@@ -38,9 +37,8 @@ thread_local disk_error_signal_type general_disk_error;
 thread_local disk_error_signal_type sstable_write_error;
 
 int main(int ac, char** av) {
-    distributed<redis::database> db;
-    distributed<redis::server> server;
-    redis::redis_service redis(db);
+    auto& db = redis::get_database();
+    auto& server = redis::get_server();
     prometheus::config prometheus_config;
     httpd::http_server_control prometheus_server;
     namespace bpo = boost::program_options;
@@ -61,7 +59,7 @@ int main(int ac, char** av) {
         auto pport = config["prometheus_port"].as<uint16_t>();
         auto user_native_parser = config["native_parser"].as<bool>();
         return db.start().then([&, port] {
-            return server.start(std::ref(redis), port, user_native_parser);
+            return server.start(port, user_native_parser);
         }).then([&] {
             return server.invoke_on_all(&redis::server::start);
         }).then([&, pport] {

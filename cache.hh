@@ -404,8 +404,8 @@ public:
     cache ()
         : _buckets(new cache_type::bucket_type[initial_bucket_count])
         , _store(cache_type::bucket_traits(_buckets, initial_bucket_count))
-        , _lru_list()
-        , _dirty_list()
+        , _lru()
+        , _dirty()
     {
         _timer.set_callback([this] { erase_expired_entries(); });
     }

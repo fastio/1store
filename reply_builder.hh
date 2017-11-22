@@ -54,6 +54,7 @@ static const bytes msg_null_multi_bulk = {"*-1\r\n"};
 static const bytes msg_empty_multi_bulk = {"*0\r\n"};
 static const bytes msg_type_err = {"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"};
 static const bytes msg_nokey_err = {"-ERR no such key\r\n"};
+static const bytes msg_nocmd_err = {"-ERR no such command\r\n"};
 static const bytes msg_syntax_err = {"-ERR syntax error\r\n"};
 static const bytes msg_same_object_err = {"-ERR source and destination objects are the same\r\n"};
 static const bytes msg_out_of_range_err = {"-ERR index out of range\r\n"};
@@ -87,14 +88,6 @@ static future<scattered_message_ptr> build(size_t size)
     m->append_static(msg_crlf);
     return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
 }
-static future<> build_local(output_stream<char>& out, size_t size)
-{
-    auto m = make_lw_shared<scattered_message<char>>();
-    m->append_static(msg_num_tag);
-    m->append(to_sstring(size));
-    m->append_static(msg_crlf);
-    return out.write(std::move(*m));
-}
 
 static future<scattered_message_ptr> build(double number)
 {
@@ -113,11 +106,6 @@ static future<scattered_message_ptr> build(const bytes& message)
    auto m = make_lw_shared<scattered_message<char>>();
    m->append(message);
    return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
-}
-
-inline static future<> build_local(output_stream<char>& out, const bytes& message)
-{
-   return out.write(message);
 }
 
 template<bool Key, bool Value>
@@ -233,50 +221,6 @@ static future<scattered_message_ptr> build(const std::vector<const dict_entry*>&
     }
 }
 
-static  future<> build_local(output_stream<char>& out, std::vector<foreign_ptr<lw_shared_ptr<bytes>>>& entries)
-{
-    if (!entries.empty()) {
-        auto m = make_lw_shared<scattered_message<char>>();
-        m->append_static(msg_sigle_tag);
-        m->append(std::move(to_sstring(entries.size())));
-        m->append_static(msg_crlf);
-        for (size_t i = 0; i < entries.size(); ++i) {
-            auto& e = entries[i];
-            m->append_static(msg_batch_tag);
-            m->append(to_sstring(e->size()));
-            m->append_static(msg_crlf);
-            m->append(*e);
-            m->append_static(msg_crlf);
-        }
-        return out.write(std::move(*m));
-    }
-    else {
-        return out.write(msg_nil);
-    }
-}
-
-static  future<> build_local(output_stream<char>& out, const std::vector<bytes>& entries)
-{
-    if (!entries.empty()) {
-        auto m = make_lw_shared<scattered_message<char>>();
-        m->append_static(msg_sigle_tag);
-        m->append(std::move(to_sstring(entries.size())));
-        m->append_static(msg_crlf);
-        for (size_t i = 0; i < entries.size(); ++i) {
-            const auto e = entries[i];
-            m->append_static(msg_batch_tag);
-            m->append(to_sstring(e.size()));
-            m->append_static(msg_crlf);
-            m->append(e);
-            m->append_static(msg_crlf);
-        }
-        return out.write(std::move(*m));
-    }
-    else {
-        return out.write(msg_nil);
-    }
-}
-
 template<bool Key, bool Value>
 static future<scattered_message_ptr> build(const dict_entry* e)
 {
@@ -351,35 +295,6 @@ static future<scattered_message_ptr> build(const managed_bytes& data)
     return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
 }
 
-static future<> build_local(output_stream<char>& out, std::unordered_map<sstring, double>& data, bool with_score)
-{
-    auto m = make_lw_shared<scattered_message<char>>();
-    m->append_static(msg_sigle_tag);
-    if (with_score) {
-        m->append(std::move(to_sstring(data.size() * 2)));
-    }
-    else {
-        m->append(std::move(to_sstring(data.size())));
-    }
-    m->append_static(msg_crlf);
-    for (auto& d : data) {
-        m->append_static(msg_batch_tag);
-        m->append(to_sstring(d.first.size()));
-        m->append_static(msg_crlf);
-        m->append(std::move(d.first));
-        m->append_static(msg_crlf);
-        if (with_score) {
-            m->append_static(msg_batch_tag);
-            auto&& n = to_sstring(d.second);
-            m->append(to_sstring(n.size()));
-            m->append_static(msg_crlf);
-            m->append(n);
-            m->append_static(msg_crlf);
-        }
-    }
-    return out.write(std::move(*m));
-}
-
 static future<scattered_message_ptr> build(const std::vector<const sset_entry*>& entries, bool with_score)
 {
     if (!entries.empty()) {
@@ -434,7 +349,56 @@ static future<scattered_message_ptr> build(std::vector<bytes>& data)
     return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
 }
 
-static future<> build_local(output_stream<char>& out, std::vector<std::tuple<bytes, double, double, double, double>>& u, int flags)
+static  future<scattered_message_ptr> build(std::vector<foreign_ptr<lw_shared_ptr<bytes>>>& entries)
+{
+    if (!entries.empty()) {
+        auto m = make_lw_shared<scattered_message<char>>();
+        m->append_static(msg_sigle_tag);
+        m->append(std::move(to_sstring(entries.size())));
+        m->append_static(msg_crlf);
+        for (size_t i = 0; i < entries.size(); ++i) {
+            auto& e = entries[i];
+            m->append_static(msg_batch_tag);
+            m->append(to_sstring(e->size()));
+            m->append_static(msg_crlf);
+            m->append(*e);
+            m->append_static(msg_crlf);
+        }
+        return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
+    }
+    return reply_builder::build(msg_nil);
+}
+
+static future<scattered_message_ptr> build(std::unordered_map<sstring, double>& data, bool with_score)
+{
+    auto m = make_lw_shared<scattered_message<char>>();
+    m->append_static(msg_sigle_tag);
+    if (with_score) {
+        m->append(std::move(to_sstring(data.size() * 2)));
+    }
+    else {
+        m->append(std::move(to_sstring(data.size())));
+    }
+    m->append_static(msg_crlf);
+    for (auto& d : data) {
+        m->append_static(msg_batch_tag);
+        m->append(to_sstring(d.first.size()));
+        m->append_static(msg_crlf);
+        m->append(std::move(d.first));
+        m->append_static(msg_crlf);
+        if (with_score) {
+            m->append_static(msg_batch_tag);
+            auto&& n = to_sstring(d.second);
+            m->append(to_sstring(n.size()));
+            m->append_static(msg_crlf);
+            m->append(n);
+            m->append_static(msg_crlf);
+        }
+    }
+    return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
+}
+
+static future<scattered_message_ptr> build(std::vector<std::tuple<bytes, double, double, double, double>>& u, int flags)
 {
     auto m = make_lw_shared<scattered_message<char>>();
     m->append_static(msg_sigle_tag);
@@ -500,7 +464,7 @@ static future<> build_local(output_stream<char>& out, std::vector<std::tuple<byt
             m->append_static(msg_crlf);
         }
     }
-    return out.write(std::move(*m));
+    return make_ready_future<scattered_message_ptr>(foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m));
 }
 }; // end of class
 }

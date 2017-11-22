@@ -22,28 +22,48 @@
 #include "redis.hh"
 #include "db.hh"
 #include "redis.hh"
-#include "redis_protocol.hh"
 #include "core/metrics_registration.hh"
 #include "core/thread.hh"
+#include "reply_wrapper.hh"
+#include "protocol_parser.hh"
 namespace redis {
 class server {
-private:
+public:
     lw_shared_ptr<server_socket> _listener;
-    redis_service& _redis;
     uint16_t _port;
     bool _use_native_parser;
     struct connection {
+        static constexpr size_t reply_queue_size = 16;
         connected_socket _socket;
         socket_address _addr;
         input_stream<char> _in;
         output_stream<char> _out;
-        redis_protocol _proto;
-        connection(connected_socket&& socket, socket_address addr, redis_service& redis, bool use_native_parser)
+        protocol_parser _parser;
+        bool _done = false;
+        bool _use_native_parser;
+        queue<reply_wrapper> _replies { reply_queue_size };
+
+        future<> process()
+        {
+            // Luanch request & reply fiblers simultaneously.
+            return when_all(request(), reply()).then([] (std::tuple<future<>, future<>> joined) {
+                std::get<0>(joined).ignore_ready_future();
+                std::get<1>(joined).ignore_ready_future();
+                return make_ready_future<>();
+            });
+        }
+        future<scattered_message_ptr> handle();
+        future<scattered_message_ptr> do_handle_one(request_wrapper& req);
+        future<scattered_message_ptr> do_unexpect_request(request_wrapper& req);
+        future<> request();
+        future<> reply();
+
+        connection(connected_socket&& socket, socket_address addr, bool use_native_parser)
             : _socket(std::move(socket))
-              , _addr(addr)
-              , _in(_socket.input())
-              , _out(_socket.output())
-              , _proto(redis, use_native_parser)
+            , _addr(addr)
+            , _in(_socket.input())
+            , _out(_socket.output())
+            , _parser(make_ragel_protocol_parser())
         {
         }
         ~connection() {
@@ -57,9 +77,8 @@ private:
     };
     stats _stats;
 public:
-    server(redis_service& db, uint16_t port = 6379, bool use_native_parser = false)
-        : _redis(db)
-        , _port(port)
+    server(uint16_t port = 6379, bool use_native_parser = false)
+        : _port(port)
         , _use_native_parser(use_native_parser)
     {
         setup_metrics();
@@ -70,4 +89,11 @@ public:
         return make_ready_future<>();
     }
 };
+extern distributed<server> _server;
+inline distributed<server>& get_server() {
+    return _server;
+}
+inline server& get_local_server() {
+    return _server.local();
+}
 } /* namespace redis */

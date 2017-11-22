@@ -108,7 +108,7 @@ static thread_local std::unordered_map<bytes, command_code> _command_table {
 
 void native_protocol_parser::init()
 {
-    _req._command = command_code::unknown;
+    _req._command =  {};
     _req._state = protocol_state::error;
     _req._args_count = 0;
     _req._args.clear();
@@ -139,6 +139,7 @@ char* native_protocol_parser::parse(char* p, char* pe, char* eof)
     auto begin = s, end = s;
     auto limit = pe - 1;
     bool parse_cmd_name = false;
+    _req._command = {};
     while (s < limit) {
         while (*s == ' ') ++s;
         if (*s == '\r' && *(s + 1) == '\n') {
@@ -177,17 +178,12 @@ char* native_protocol_parser::parse(char* p, char* pe, char* eof)
             if (end > pe || endnumber > pe) {
                 throw protocol_exception("Protocol error: invalid request");
             }
-            if (_req._command == command_code::unknown) {
+            if (_req._command.empty()) {
                 // command string
-                bytes command { endnumber, number};
-                auto c = _command_table.find(command);
-                if (c != _command_table.end()) {
-                    _req._command = c->second;
-                    s = end;
-                    begin = s;
-                    continue;
-                }
-                throw protocol_exception("Protocol error: unknown comamnd");
+                _req._command = bytes { endnumber, number };
+                s = end;
+                begin = s;
+                continue;
             }
             _req._args.emplace_back(bytes { endnumber, number });
             if (_req._args.size() == _req._args_count) {

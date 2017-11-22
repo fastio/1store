@@ -309,4 +309,11 @@ private:
     void setup_metrics();
     size_t sum_expiring_entries();
 };
+extern distributed<database> _databases;
+inline distributed<database>& get_database() {
+    return _databases;
+}
+inline database& get_local_database() {
+    return _databases.local();
+}
 }

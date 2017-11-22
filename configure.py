@@ -269,7 +269,6 @@ scylla_core = ([
         'server.cc',
         'db.cc',
         'ragel_protocol_parser.rl',
-        'redis_protocol.cc',
         'structures/dict_lsa.cc',
         'structures/geo.cc',
         'structures/hll.cc',

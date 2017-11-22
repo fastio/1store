@@ -61,6 +61,8 @@ private:
     std::uniform_int_distribution<size_t> _dist;
 };
 
+distributed<database> _databases;
+
 database::database()
     : _stat()
     , _sys_cf(make_lw_shared<store::column_family>("SYSTEM", true))

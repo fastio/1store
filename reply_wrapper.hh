@@ -15,7 +15,7 @@
 * specific language governing permissions and limitations
 * under the License.
 * 
-*  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
+*  Copyright (c) 2016-2026, Peng Jian, pengjian.uestc@gmail.com. All rights reserved.
 *
 */
 #pragma once
@@ -27,26 +27,12 @@
 #include "utils/bytes.hh"
 #include  <experimental/vector>
 #include "redis_command_code.hh"
-#include "redis.hh"
-#include "utils/bytes.hh"
 namespace redis {
 using namespace seastar;
-struct request_wrapper {
-    protocol_state _state;
-    bytes _command;
-    uint32_t _args_count { 0 };
-    std::vector<bytes> _args {};
-    std::vector<bytes> _tmp_keys {};
-    std::unordered_map<bytes, bytes> _tmp_key_values {};
-    std::unordered_map<bytes, double> _tmp_key_scores {};
-    std::vector<std::pair<bytes, bytes>> _tmp_key_value_pairs {};
-    request_wrapper () {}
-
-    void clear_temporary_containers() {
-        _tmp_keys.clear();
-        _tmp_key_values.clear();
-        _tmp_key_scores.clear();
-        _tmp_key_value_pairs.clear();
-    }
+using scattered_message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
+struct reply_wrapper {
+    reply_wrapper() : _reply(nullptr) {}
+    reply_wrapper(scattered_message_ptr reply) : _reply(std::move(reply)) {}
+    scattered_message_ptr _reply;
 };
 }
