@@ -34,7 +34,7 @@ struct decorated_key {
 struct redis_key {
     bytes _key;
     size_t _hash;
-    redis_key(bytes& key) : _key(key), _hash(std::hash<bytes>()(_key)) {}
+    redis_key(bytes key) : _key(std::move(key)), _hash(std::hash<bytes>()(_key)) {}
     redis_key& operator = (const redis_key& o) {
         if (this != &o) {
             _key = o._key;

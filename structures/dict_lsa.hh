@@ -216,7 +216,7 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(const dict_entry* e)> with_entry_run(const bytes& k, Func&& func) const {
+    inline std::result_of_t<Func(const dict_entry* e)> run_with_entry(const bytes& k, Func&& func) const {
         auto it = _dict.find(k, dict_entry::compare());
         if (it != _dict.end()) {
             const auto& e = *it;
@@ -228,7 +228,7 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(dict_entry* e)> with_entry_run(const bytes& k, Func&& func) {
+    inline std::result_of_t<Func(dict_entry* e)> run_with_entry(const bytes& k, Func&& func) {
         auto it = _dict.find(k, dict_entry::compare());
         if (it != _dict.end()) {
             auto& e = *it;

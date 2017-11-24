@@ -139,8 +139,11 @@ void server::setup_metrics()
 
 future<scattered_message_ptr> server::connection::do_unexpect_request(request_wrapper& req)
 {
-    return reply_builder::build(msg_ok);
-    //return make_ready_future<scattered_message_ptr>();
+    bytes msg {"-ERR Unknown or disabled command '"};
+    msg.append(req._command.data(), req._command.size());
+    static bytes tail {"'\r\n"};
+    msg.append(tail.data(), tail.size());
+    return reply_builder::build(msg);
 }
 
 future<scattered_message_ptr> server::connection::do_handle_one(request_wrapper& req)

@@ -75,7 +75,7 @@ future<bool> redis_service::set_impl(bytes& key, bytes& val, long expir, uint8_t
 {
     redis_key rk { std::ref(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::set_direct, std::move(rk), std::ref(val), expir, flag).then([] (auto&& m) {
+    return get_database().invoke_on(cpu, &database::set_direct, std::move(rk), std::move(val), expir, flag).then([] (auto&& m) {
         return m == REDIS_OK;
     });
 }
@@ -132,7 +132,7 @@ future<scattered_message_ptr> redis_service::set(request_wrapper& req)
     }
     redis_key rk { std::ref(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::set, std::move(rk), std::ref(val), expir, flag);
+    return get_database().invoke_on(cpu, &database::set, std::move(rk), std::move(val), expir, flag);
 }
 
 future<bool> redis_service::remove_impl(bytes& key) {
@@ -193,7 +193,7 @@ future<scattered_message_ptr> redis_service::mset(request_wrapper& req)
             bytes& key = entry.first;
             bytes& value = entry.second;
             redis_key rk {std::ref(key)};
-            return get_database().invoke_on(this->get_cpu(rk), &database::set_direct, std::move(rk), std::ref(value), 0, FLAG_SET_NO).then([&state] (auto m) {
+            return get_database().invoke_on(this->get_cpu(rk), &database::set_direct, std::move(rk), std::move(value), 0, FLAG_SET_NO).then([&state] (auto m) {
                 if (m) state.success_count++ ;
             });
         }).then([&state] {
@@ -248,7 +248,7 @@ future<scattered_message_ptr> redis_service::strlen(request_wrapper& req)
     bytes& key = req._args[0];
     redis_key rk { std::ref(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::strlen, std::ref(rk));
+    return get_database().invoke_on(cpu, &database::strlen, std::move(rk));
 }
 
 future<bool> redis_service::exists_impl(bytes& key)
@@ -298,21 +298,21 @@ future<scattered_message_ptr> redis_service::append(request_wrapper& req)
     bytes& val = req._args[1];
     redis_key rk { std::ref(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::append, std::move(rk), std::ref(val));
+    return get_database().invoke_on(cpu, &database::append, std::move(rk), std::move(val));
 }
 
 future<scattered_message_ptr> redis_service::push_impl(bytes& key, bytes& val, bool force, bool left)
 {
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::push, std::move(rk), std::ref(val), force, left);
+    return get_database().invoke_on(cpu, &database::push, std::move(rk), std::move(val), force, left);
 }
 
 future<scattered_message_ptr> redis_service::push_impl(bytes& key, std::vector<bytes>& vals, bool force, bool left)
 {
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::push_multi, std::move(rk), std::ref(vals), force, left);
+    return get_database().invoke_on(cpu, &database::push_multi, std::move(rk), std::move(vals), force, left);
 }
 
 future<scattered_message_ptr> redis_service::push_impl(request_wrapper& req, bool force, bool left)
@@ -409,7 +409,7 @@ future<scattered_message_ptr> redis_service::linsert(request_wrapper& req)
     if (dir == "BEFORE") after = false;
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::linsert, std::move(rk), std::ref(pivot), std::ref(value), after);
+    return get_database().invoke_on(cpu, &database::linsert, std::move(rk), std::move(pivot), std::move(value), after);
 }
 
 future<scattered_message_ptr> redis_service::lrange(request_wrapper& req)
@@ -438,7 +438,7 @@ future<scattered_message_ptr> redis_service::lset(request_wrapper& req)
     int idx = std::atoi(index.c_str());
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::lset, std::move(rk), idx, std::ref(value));
+    return get_database().invoke_on(cpu, &database::lset, std::move(rk), idx, std::move(value));
 }
 
 future<scattered_message_ptr> redis_service::ltrim(request_wrapper& req)
@@ -462,9 +462,9 @@ future<scattered_message_ptr> redis_service::lrem(request_wrapper& req)
     bytes& key = req._args[0];
     int count = std::atoi(req._args[1].c_str());
     bytes& value = req._args[2];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::lrem, std::move(rk), count, std::ref(value));
+    return get_database().invoke_on(cpu, &database::lrem, std::move(rk), count, std::move(value));
 }
 
 future<scattered_message_ptr> redis_service::incr(request_wrapper& req)
@@ -500,7 +500,7 @@ future<scattered_message_ptr> redis_service::counter_by(request_wrapper& req, bo
             return reply_builder::build(msg_syntax_err);
         }
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::counter_by, std::move(rk), step, incr);
 }
@@ -512,15 +512,15 @@ future<scattered_message_ptr> redis_service::hdel(request_wrapper& req)
     }
     bytes& key = req._args[0];
     bytes& field = req._args[1];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     if (req._args_count == 2) {
-        return get_database().invoke_on(cpu, &database::hdel, std::move(rk), std::ref(field));
+        return get_database().invoke_on(cpu, &database::hdel, std::move(rk), std::move(field));
     }
     else {
         for (size_t i = 1; i < req._args.size(); ++i) req._tmp_keys.emplace_back(req._args[i]);
         auto& keys = req._tmp_keys;
-        return get_database().invoke_on(cpu, &database::hdel_multi, std::move(rk), std::ref(keys));
+        return get_database().invoke_on(cpu, &database::hdel_multi, std::move(rk), std::move(keys));
     }
 }
 
@@ -531,9 +531,9 @@ future<scattered_message_ptr> redis_service::hexists(request_wrapper& req)
     }
     bytes& key = req._args[0];
     bytes& field = req._args[1];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::hexists, std::move(rk), std::ref(field));
+    return get_database().invoke_on(cpu, &database::hexists, std::move(rk), std::move(field));
 }
 
 future<scattered_message_ptr> redis_service::hset(request_wrapper& req)
@@ -544,9 +544,9 @@ future<scattered_message_ptr> redis_service::hset(request_wrapper& req)
     bytes& key = req._args[0];
     bytes& field = req._args[1];
     bytes& val = req._args[2];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::hset, std::move(rk), std::ref(field), std::ref(val));
+    return get_database().invoke_on(cpu, &database::hset, std::move(rk), std::move(field), std::move(val));
 }
 
 future<scattered_message_ptr> redis_service::hmset(request_wrapper& req)
@@ -559,9 +559,9 @@ future<scattered_message_ptr> redis_service::hmset(request_wrapper& req)
     for (unsigned int i = 0; i < field_count; ++i) {
         req._tmp_key_values.emplace(std::make_pair(req._args[i], req._args[i + 1]));
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::hmset, std::move(rk), std::ref(req._tmp_key_values));
+    return get_database().invoke_on(cpu, &database::hmset, std::move(rk), std::move(req._tmp_key_values));
 }
 
 future<scattered_message_ptr> redis_service::hincrby(request_wrapper& req)
@@ -573,9 +573,9 @@ future<scattered_message_ptr> redis_service::hincrby(request_wrapper& req)
     bytes& field = req._args[1];
     bytes& val = req._args[2];
     int delta = std::atoi(val.c_str());
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::hincrby, std::move(rk), std::ref(field), delta);
+    return get_database().invoke_on(cpu, &database::hincrby, std::move(rk), std::move(field), delta);
 }
 
 future<scattered_message_ptr> redis_service::hincrbyfloat(request_wrapper& req)
@@ -587,9 +587,9 @@ future<scattered_message_ptr> redis_service::hincrbyfloat(request_wrapper& req)
     bytes& field = req._args[1];
     bytes& val = req._args[2];
     double delta = std::atof(val.c_str());
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::hincrbyfloat, std::move(rk), std::ref(field), delta);
+    return get_database().invoke_on(cpu, &database::hincrbyfloat, std::move(rk), std::move(field), delta);
 }
 
 future<scattered_message_ptr> redis_service::hlen(request_wrapper& req)
@@ -598,7 +598,7 @@ future<scattered_message_ptr> redis_service::hlen(request_wrapper& req)
         return reply_builder::build(msg_syntax_err);
     }
     bytes& key = req._args[0];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::hlen, std::move(rk));
 }
@@ -610,9 +610,9 @@ future<scattered_message_ptr> redis_service::hstrlen(request_wrapper& req)
     }
     bytes& key = req._args[0];
     bytes& field = req._args[1];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::hstrlen, std::move(rk), std::ref(field));
+    return get_database().invoke_on(cpu, &database::hstrlen, std::move(rk), std::move(field));
 }
 
 future<scattered_message_ptr> redis_service::hget(request_wrapper& req)
@@ -622,9 +622,9 @@ future<scattered_message_ptr> redis_service::hget(request_wrapper& req)
     }
     bytes& key = req._args[0];
     bytes& field = req._args[1];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::hget, std::move(rk), std::ref(field));
+    return get_database().invoke_on(cpu, &database::hget, std::move(rk), std::move(field));
 }
 
 future<scattered_message_ptr> redis_service::hgetall(request_wrapper& req)
@@ -633,7 +633,7 @@ future<scattered_message_ptr> redis_service::hgetall(request_wrapper& req)
         return reply_builder::build(msg_syntax_err);
     }
     bytes& key = req._args[0];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::hgetall, std::move(rk));
 }
@@ -644,7 +644,7 @@ future<scattered_message_ptr> redis_service::hgetall_keys(request_wrapper& req)
         return reply_builder::build(msg_syntax_err);
     }
     bytes& key = req._args[0];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::hgetall_keys, std::move(rk));
 }
@@ -655,7 +655,7 @@ future<scattered_message_ptr> redis_service::hgetall_values(request_wrapper& req
         return reply_builder::build(msg_syntax_err);
     }
     bytes& key = req._args[0];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::hgetall_values, std::move(rk));
 }
@@ -669,15 +669,15 @@ future<scattered_message_ptr> redis_service::hmget(request_wrapper& req)
     for (unsigned int i = 1; i < req._args_count; ++i) {
         req._tmp_keys.emplace_back(std::move(req._args[i]));
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     auto& keys = req._tmp_keys;
-    return get_database().invoke_on(cpu, &database::hmget, std::move(rk), std::ref(keys));
+    return get_database().invoke_on(cpu, &database::hmget, std::move(rk), std::move(keys));
 }
 
 future<scattered_message_ptr> redis_service::smembers_impl(bytes& key)
 {
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::smembers, std::move(rk));
 }
@@ -693,16 +693,16 @@ future<scattered_message_ptr> redis_service::smembers(request_wrapper& req)
 
 future<scattered_message_ptr> redis_service::sadds_impl(bytes& key, std::vector<bytes>& members)
 {
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::sadds, std::move(rk), std::ref(members));
+    return get_database().invoke_on(cpu, &database::sadds, std::move(rk), std::move(members));
 }
 
 future<scattered_message_ptr> redis_service::sadds_impl_return_keys(bytes& key, std::vector<bytes>& members)
 {
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::sadds_direct, std::move(rk), std::ref(members)).then([&members] (auto m) {
+    return get_database().invoke_on(cpu, &database::sadds_direct, std::move(rk), std::move(members)).then([&members] (auto m) {
         if (m)
            return reply_builder::build(members);
         return reply_builder::build(msg_err);
@@ -726,7 +726,7 @@ future<scattered_message_ptr> redis_service::scard(request_wrapper& req)
         return reply_builder::build(msg_syntax_err);
     }
     bytes& key = req._args[0];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::scard, std::move(rk));
 }
@@ -737,9 +737,9 @@ future<scattered_message_ptr> redis_service::sismember(request_wrapper& req)
     }
     bytes& key = req._args[0];
     bytes& member = req._args[1];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::sismember, std::move(rk), std::ref(member));
+    return get_database().invoke_on(cpu, &database::sismember, std::move(rk), std::move(member));
 }
 
 future<scattered_message_ptr> redis_service::srem(request_wrapper& req)
@@ -748,7 +748,7 @@ future<scattered_message_ptr> redis_service::srem(request_wrapper& req)
         return reply_builder::build(msg_syntax_err);
     }
     bytes& key = req._args[0];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     for (uint32_t i = 1; i < req._args_count; ++i) req._tmp_keys.emplace_back(std::move(req._args[i]));
     auto& keys = req._tmp_keys;
@@ -934,14 +934,14 @@ future<bool> redis_service::srem_direct(bytes& key, bytes& member)
 {
     redis_key rk {std::ref(key) };
     auto cpu = get_cpu(rk);
-    return   get_database().invoke_on(cpu, &database::srem_direct, rk, std::ref(member));
+    return   get_database().invoke_on(cpu, &database::srem_direct, rk, std::move(member));
 }
 
 future<bool> redis_service::sadd_direct(bytes& key, bytes& member)
 {
     redis_key rk {std::ref(key) };
     auto cpu = get_cpu(rk);
-    return  get_database().invoke_on(cpu, &database::sadd_direct, rk, std::ref(member));
+    return  get_database().invoke_on(cpu, &database::sadd_direct, rk, std::move(member));
 }
 
 future<scattered_message_ptr> redis_service::smove(request_wrapper& req)
@@ -983,9 +983,9 @@ future<scattered_message_ptr> redis_service::srandmember(request_wrapper& req)
             return reply_builder::build(msg_syntax_err);
         }
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::srandmember, rk, count);
+    return get_database().invoke_on(cpu, &database::srandmember, std::move(rk), count);
 }
 
 future<scattered_message_ptr> redis_service::spop(request_wrapper& req)
@@ -1002,9 +1002,9 @@ future<scattered_message_ptr> redis_service::spop(request_wrapper& req)
             return reply_builder::build(msg_syntax_err);
         }
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::spop, rk, count);
+    return get_database().invoke_on(cpu, &database::spop, std::move(rk), count);
 }
 
 future<scattered_message_ptr> redis_service::type(request_wrapper& req)
@@ -1013,7 +1013,7 @@ future<scattered_message_ptr> redis_service::type(request_wrapper& req)
         return reply_builder::build(msg_syntax_err);
     }
     bytes& key = req._args[0];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::type, std::move(rk));
 }
@@ -1031,7 +1031,7 @@ future<scattered_message_ptr> redis_service::expire(request_wrapper& req)
     } catch (const std::invalid_argument&) {
         return reply_builder::build(msg_syntax_err);
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::expire, std::move(rk), expir);
 }
@@ -1048,7 +1048,7 @@ future<scattered_message_ptr> redis_service::pexpire(request_wrapper& req)
     } catch (const std::invalid_argument&) {
         return reply_builder::build(msg_syntax_err);
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::expire, std::move(rk), expir);
 }
@@ -1059,7 +1059,7 @@ future<scattered_message_ptr> redis_service::pttl(request_wrapper& req)
         return reply_builder::build(msg_syntax_err);
     }
     bytes& key = req._args[0];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::pttl, std::move(rk));
 }
@@ -1070,7 +1070,7 @@ future<scattered_message_ptr> redis_service::ttl(request_wrapper& req)
         return reply_builder::build(msg_syntax_err);
     }
     bytes& key = req._args[0];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::ttl, std::move(rk));
 }
@@ -1081,7 +1081,7 @@ future<scattered_message_ptr> redis_service::persist(request_wrapper& req)
         return reply_builder::build(msg_syntax_err);
     }
     bytes& key = req._args[0];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::persist, std::move(rk));
 }
@@ -1115,7 +1115,7 @@ future<scattered_message_ptr> redis_service::zadd(request_wrapper& req)
         if (req._args_count - first_score_index > 2) {
             return reply_builder::build(msg_syntax_err);
         }
-        redis_key rk{std::ref(key)};
+        redis_key rk { std::move(key) };
         auto cpu = get_cpu(rk);
         bytes& member = req._args[first_score_index + 1];
         bytes& delta = req._args[first_score_index];
@@ -1125,7 +1125,7 @@ future<scattered_message_ptr> redis_service::zadd(request_wrapper& req)
         } catch (const std::invalid_argument&) {
             return reply_builder::build(msg_syntax_err);
         }
-        return get_database().invoke_on(cpu, &database::zincrby, std::move(rk), std::ref(member), score);
+        return get_database().invoke_on(cpu, &database::zincrby, std::move(rk), std::move(member), score);
     }
     else {
         if ((req._args_count - first_score_index) % 2 != 0 || ((zadd_flags & ZADD_NX) && (zadd_flags & ZADD_XX))) {
@@ -1143,9 +1143,9 @@ future<scattered_message_ptr> redis_service::zadd(request_wrapper& req)
         }
         req._tmp_key_scores.emplace(std::pair<bytes, double>(member, score));
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::zadds, std::move(rk), std::ref(req._tmp_key_scores), zadd_flags);
+    return get_database().invoke_on(cpu, &database::zadds, std::move(rk), std::move(req._tmp_key_scores), zadd_flags);
 }
 
 future<scattered_message_ptr> redis_service::zcard(request_wrapper& req)
@@ -1154,7 +1154,7 @@ future<scattered_message_ptr> redis_service::zcard(request_wrapper& req)
         return reply_builder::build(msg_syntax_err);
     }
     bytes& key = req._args[0];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::zcard, std::move(rk));
 }
@@ -1180,7 +1180,7 @@ future<scattered_message_ptr> redis_service::zrange(request_wrapper& req, bool r
             with_score = true;
         }
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::zrange, std::move(rk), begin, end, reverse, with_score);
 }
@@ -1191,7 +1191,7 @@ future<scattered_message_ptr> redis_service::zrangebyscore(request_wrapper& req,
         return reply_builder::build(msg_syntax_err);
     }
     bytes& key = req._args[0];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     double min = 0, max = 0;
     try {
@@ -1224,7 +1224,7 @@ future<scattered_message_ptr> redis_service::zcount(request_wrapper& req)
     } catch (const std::invalid_argument&) {
         return reply_builder::build(msg_syntax_err);
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::zcount, std::move(rk), min, max);
 }
@@ -1242,9 +1242,9 @@ future<scattered_message_ptr> redis_service::zincrby(request_wrapper& req)
     } catch (const std::invalid_argument&) {
         return reply_builder::build(msg_syntax_err);
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::zincrby, std::move(rk), std::ref(member), delta);
+    return get_database().invoke_on(cpu, &database::zincrby, std::move(rk), std::move(member), delta);
 }
 
 future<scattered_message_ptr> redis_service::zrank(request_wrapper& req, bool reverse)
@@ -1254,9 +1254,9 @@ future<scattered_message_ptr> redis_service::zrank(request_wrapper& req, bool re
     }
     bytes& key = req._args[0];
     bytes& member = req._args[1];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::zrank, std::move(rk), std::ref(member), reverse);
+    return get_database().invoke_on(cpu, &database::zrank, std::move(rk), std::move(member), reverse);
 }
 
 future<scattered_message_ptr> redis_service::zrem(request_wrapper& req)
@@ -1269,9 +1269,9 @@ future<scattered_message_ptr> redis_service::zrem(request_wrapper& req)
         bytes& member = req._args[i];
         req._tmp_keys.emplace_back(std::move(member));
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::zrem, std::move(rk), std::ref(req._tmp_keys));
+    return get_database().invoke_on(cpu, &database::zrem, std::move(rk), std::move(req._tmp_keys));
 }
 
 future<scattered_message_ptr> redis_service::zscore(request_wrapper& req)
@@ -1281,9 +1281,9 @@ future<scattered_message_ptr> redis_service::zscore(request_wrapper& req)
     }
     bytes& key = req._args[0];
     bytes& member = req._args[1];
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::zscore, std::move(rk), std::ref(member));
+    return get_database().invoke_on(cpu, &database::zscore, std::move(rk), std::move(member));
 }
 
 bool redis_service::parse_zset_args(request_wrapper& req, zset_args& ureq)
@@ -1394,7 +1394,7 @@ future<scattered_message_ptr> redis_service::zunionstore(request_wrapper& req)
         }).then([this, &state] () {
             redis_key rk{std::ref(state.dest)};
             auto cpu = rk.get_cpu();
-            return get_database().invoke_on(cpu, &database::zadds, std::move(rk), std::ref(state.result), ZADD_CH);
+            return get_database().invoke_on(cpu, &database::zadds, std::move(rk), std::move(state.result), ZADD_CH);
         });
     });
 }
@@ -1479,7 +1479,7 @@ future<scattered_message_ptr> redis_service::zremrangebyscore(request_wrapper& r
     } catch (const std::invalid_argument&) {
         return reply_builder::build(msg_syntax_err);
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::zremrangebyscore, std::move(rk), min, max);
 }
@@ -1500,7 +1500,7 @@ future<scattered_message_ptr> redis_service::zremrangebyrank(request_wrapper& re
     } catch(const std::invalid_argument& e) {
         return reply_builder::build(msg_syntax_err);
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
     return get_database().invoke_on(cpu, &database::zremrangebyrank, std::move(rk), begin, end);
 }
@@ -1585,9 +1585,9 @@ future<scattered_message_ptr> redis_service::geoadd(request_wrapper& req)
         }
         req._tmp_key_scores.emplace(std::pair<bytes, double>(member, score));
     }
-    redis_key rk{std::ref(key)};
+    redis_key rk { std::move(key) };
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::zadds, std::move(rk), std::ref(req._tmp_key_scores), ZADD_CH);
+    return get_database().invoke_on(cpu, &database::zadds, std::move(rk), std::move(req._tmp_key_scores), ZADD_CH);
 }
 
 future<scattered_message_ptr> redis_service::geodist(request_wrapper& req)
@@ -1616,7 +1616,7 @@ future<scattered_message_ptr> redis_service::geodist(request_wrapper& req)
     }
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::geodist, std::move(rk), std::ref(lpos), std::ref(rpos), geodist_flag);
+    return get_database().invoke_on(cpu, &database::geodist, std::move(rk), std::move(lpos), std::move(rpos), geodist_flag);
 }
 
 future<scattered_message_ptr> redis_service::geohash(request_wrapper& req)
@@ -1630,7 +1630,7 @@ future<scattered_message_ptr> redis_service::geohash(request_wrapper& req)
     }
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::geohash, std::move(rk), std::ref(req._tmp_keys));
+    return get_database().invoke_on(cpu, &database::geohash, std::move(rk), std::move(req._tmp_keys));
 }
 
 future<scattered_message_ptr> redis_service::geopos(request_wrapper& req)
@@ -1645,11 +1645,13 @@ future<scattered_message_ptr> redis_service::geopos(request_wrapper& req)
     }
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::geopos, std::move(rk), std::ref(members));
+    return get_database().invoke_on(cpu, &database::geopos, std::move(rk), std::move(members));
 }
 
 future<scattered_message_ptr> redis_service::georadius(request_wrapper& req, bool member)
 {
+    return make_ready_future<scattered_message_ptr>();
+    /*
     size_t option_index = member ? 4 : 5;
     if (req._args_count < option_index || req._args.empty()) {
         return reply_builder::build(msg_syntax_err);
@@ -1759,7 +1761,7 @@ future<scattered_message_ptr> redis_service::georadius(request_wrapper& req, boo
     redis_key rk {std::ref(key)};
     auto cpu = get_cpu(rk);
     auto points_ready = !member ? get_database().invoke_on(cpu, &database::georadius_coord_direct, std::move(rk), log, lat, radius, count, flags)
-                                : get_database().invoke_on(cpu, &database::georadius_member_direct, std::move(rk), std::ref(member_key), radius, count, flags);
+                                : get_database().invoke_on(cpu, &database::georadius_member_direct, std::move(rk), std::move(member_key), radius, count, flags);
     return  points_ready.then([this, flags, &req, stored_key_index] (auto&& data) {
         using data_type = std::vector<std::tuple<bytes, double, double, double, double>>;
         using return_type = std::pair<std::vector<std::tuple<bytes, double, double, double, double>>, int>;
@@ -1787,10 +1789,10 @@ future<scattered_message_ptr> redis_service::georadius(request_wrapper& req, boo
                 data_type& data;
             };
             bytes& stored_key = req._args[stored_key_index];
-            return do_with(store_state{std::move(members), std::ref(stored_key), std::ref(data_)}, [this, flags, &data_] (auto& state) {
+            return do_with(store_state{std::move(members), std::move(stored_key), std::move(data_)}, [this, flags, &data_] (auto& state) {
                 redis_key rk{std::ref(state.stored_key)};
                 auto cpu = rk.get_cpu();
-                return get_database().invoke_on(cpu, &database::zadds_direct, std::move(rk), std::ref(state.members), ZADD_CH).then([flags, &data_] (auto&& m) {
+                return get_database().invoke_on(cpu, &database::zadds_direct, std::move(rk), std::move(state.members), ZADD_CH).then([flags, &data_] (auto&& m) {
                    if (m)
                      return reply_builder::build(data_, flags);
                    else
@@ -1800,6 +1802,7 @@ future<scattered_message_ptr> redis_service::georadius(request_wrapper& req, boo
          }
          return reply_builder::build(data_, flags);
     });
+    */
 }
 
 future<scattered_message_ptr> redis_service::setbit(request_wrapper& req)
@@ -1883,7 +1886,7 @@ future<scattered_message_ptr> redis_service::pfadd(request_wrapper& req)
     redis_key rk {std::ref(key)};
     auto& elements = req._tmp_keys;
     auto cpu = get_cpu(rk);
-    return get_database().invoke_on(cpu, &database::pfadd, rk, std::ref(elements));
+    return get_database().invoke_on(cpu, &database::pfadd, rk, std::move(elements));
 }
 
 future<scattered_message_ptr> redis_service::pfcount(request_wrapper& req)

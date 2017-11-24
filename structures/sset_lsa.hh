@@ -163,7 +163,7 @@ public:
         return false;
     }
 
-    size_t insert_if_not_exists(std::unordered_map<bytes, double>& members)
+    size_t insert_if_not_exists(const std::unordered_map<bytes, double>& members)
     {
         size_t inserted = 0;
         for (auto& member : members) {
@@ -182,7 +182,7 @@ public:
         return inserted;
     }
 
-    size_t update_if_only_exists(std::unordered_map<bytes, double>& members)
+    size_t update_if_only_exists(const std::unordered_map<bytes, double>& members)
     {
         size_t inserted = 0;
         for (auto& member : members) {
@@ -202,7 +202,7 @@ public:
         return inserted;
     }
 
-    double insert_or_update(bytes& key, double delta)
+    double insert_or_update(const bytes& key, double delta)
     {
         double result = delta;
         auto it = _dict.find(key, sset_entry::compare());
@@ -218,7 +218,7 @@ public:
         return result;
     }
 
-    size_t insert_or_update(std::unordered_map<bytes, double>& members)
+    size_t insert_or_update(const std::unordered_map<bytes, double>& members)
     {
         size_t inserted = 0;
         for (auto& member : members) {
@@ -359,7 +359,7 @@ public:
         return false;
     }
 
-    size_t erase(std::vector<const sset_entry*>& entries)
+    size_t erase(const std::vector<const sset_entry*>& entries)
     {
         for (size_t i = 0; i < entries.size(); ++i) {
             auto lit = list_type::s_iterator_to(*entries[i]);
@@ -370,7 +370,7 @@ public:
         return entries.size();
     }
 
-    size_t erase(std::vector<bytes>& keys)
+    size_t erase(const std::vector<bytes>& keys)
     {
         size_t removed = 0;
         for (size_t i = 0; i < keys.size(); ++i) {
@@ -411,7 +411,7 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(const sset_entry* e)> with_entry_run(const bytes& k, Func&& func) const {
+    inline std::result_of_t<Func(const sset_entry* e)> run_with_entry(const bytes& k, Func&& func) const {
         auto it = _dict.find(k, sset_entry::compare());
         if (it != _dict.end()) {
             const auto& e = *it;
@@ -423,7 +423,7 @@ public:
     }
 
     template <typename Func>
-    inline std::result_of_t<Func(sset_entry* e)> with_entry_run(const bytes& k, Func&& func) {
+    inline std::result_of_t<Func(sset_entry* e)> run_with_entry(const bytes& k, Func&& func) {
         auto it = _dict.find(k, sset_entry::compare());
         if (it != _dict.end()) {
             auto& e = *it;
