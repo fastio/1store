@@ -95,7 +95,7 @@ public:
 };
 
 static void init_type_crc(uint32_t* type_crc) {
-  for (int i = 0; i <= MAX_RECORD_TYPE; i++) {
+  for (uint32_t i = 0; i <= MAX_RECORD_TYPE; i++) {
     char t = static_cast<char>(i);
     type_crc[i] = crc32c::value(&t, 1);
   }

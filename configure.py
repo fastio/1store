@@ -366,7 +366,7 @@ else:
 # a list element means a list of alternative packages to consider
 # the first element becomes the HAVE_pkg define
 # a string element is a package name with no alternatives
-optional_packages = [['libsystemd', 'libsystemd-daemon']]
+optional_packages = [['libsystemd', 'libsystemd-daemon', 'systemd']]
 pkgs = []
 
 def setup_first_pkg_of_list(pkglist):
