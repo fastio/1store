@@ -210,7 +210,11 @@ void server::start()
            ++_stats._connections_total;
            ++_stats._connections_current;
            auto conn = make_lw_shared<connection>(std::move(fd), addr, _use_native_parser);
-           return conn->process().finally([this, conn] {
+           do_until([conn] { return conn->_in.eof(); }, [conn] {
+               return conn->process().then([conn] {
+                   return conn->_out.flush();
+               });
+           }).finally([this, conn] {
                --_stats._connections_current;
                return conn->_out.close().finally([conn]{});
            });
