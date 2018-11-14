@@ -105,7 +105,7 @@ database::database()
              }
          });
     });
-    _commit_log = store::make_commit_log();
+    // _commit_log = store::make_commit_log();
     setup_metrics();
 }
 
@@ -282,93 +282,93 @@ future<scattered_message_ptr> database::set(redis_key rk, bytes val, long expire
     // Then, flush memtable to disk when some conditions are statisfied.
     //
     ++_stat._set;
-    auto m = make_bytes_mutation(rk.key(), val, expired, flag);
-    return _commit_log->append(m).then([this, rk = std::move(rk), val = std::move(val), expired, flag] {
-        return with_allocator(allocator(), [this, rk = std::move(rk), val = std::move(val), expired, flag] {
-            auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
-            bool result = true;
-            if (_cache.insert_if(entry, expired, flag & FLAG_SET_NX, flag & FLAG_SET_XX)) {
-                ++_stat._total_string_entries;
-            }
-            else {
-                result = false;
-                current_allocator().destroy<cache_entry>(entry);
-            }
-            return reply_builder::build(result ? msg_ok : msg_nil);
-        });
+    // auto m = make_bytes_mutation(rk.key(), val, expired, flag);
+    // return _commit_log->append(m).then([this, rk = std::move(rk), val = std::move(val), expired, flag] {
+    return with_allocator(allocator(), [this, rk = std::move(rk), val = std::move(val), expired, flag] {
+        auto entry = current_allocator().construct<cache_entry>(rk.key(), rk.hash(), val);
+        bool result = true;
+        if (_cache.insert_if(entry, expired, flag & FLAG_SET_NX, flag & FLAG_SET_XX)) {
+            ++_stat._total_string_entries;
+        }
+        else {
+            result = false;
+            current_allocator().destroy<cache_entry>(entry);
+        }
+        return reply_builder::build(result ? msg_ok : msg_nil);
     });
+    // });
 }
 
-future<bool> database::del_direct(redis_key rk)
+bool database::del_direct(redis_key rk)
 {
     ++_stat._del;
-    auto m = make_deleted_mutation(rk.key());
-    return _commit_log->append(m).then([this, rk = std::move(rk)] {
-        return _cache.run_with_entry(rk, [this] (cache_entry* e) {
-            if (!e) return false;
-            if (e->type_of_bytes()) {
-                --_stat._total_string_entries;
-            }
-            else if (e->type_of_set()) {
-                --_stat._total_set_entries;
-            }
-            else if (e->type_of_list()) {
-                --_stat._total_list_entries;
-            }
-            else if (e->type_of_map()) {
-                --_stat._total_dict_entries;
-            }
-            else if (e->type_of_sset()) {
-                --_stat._total_zset_entries;
-            }
-            else if (e->type_of_hll()) {
-                --_stat._total_hll_entries;
-            }
-            else {
-                --_stat._total_counter_entries;
-            }
-            return with_allocator(allocator(), [this, e] {
-                auto result =  _cache.erase(*e);
-                return result;
-            });
+    // auto m = make_deleted_mutation(rk.key());
+    // return _commit_log->append(m).then([this, rk = std::move(rk)] {
+    return _cache.run_with_entry(rk, [this] (cache_entry* e) {
+        if (!e) return false;
+        if (e->type_of_bytes()) {
+            --_stat._total_string_entries;
+        }
+        else if (e->type_of_set()) {
+            --_stat._total_set_entries;
+        }
+        else if (e->type_of_list()) {
+            --_stat._total_list_entries;
+        }
+        else if (e->type_of_map()) {
+            --_stat._total_dict_entries;
+        }
+        else if (e->type_of_sset()) {
+            --_stat._total_zset_entries;
+        }
+        else if (e->type_of_hll()) {
+            --_stat._total_hll_entries;
+        }
+        else {
+            --_stat._total_counter_entries;
+        }
+        return with_allocator(allocator(), [this, e] {
+            auto result =  _cache.erase(*e);
+            return result;
         });
     });
+    // });
 }
 
 future<scattered_message_ptr> database::del(redis_key rk)
 {
     ++_stat._del;
-    auto m = make_deleted_mutation(rk.key());
-    return _commit_log->append(m).then([this, rk = std::move(rk)] {
-        return _cache.run_with_entry(rk, [this] (cache_entry* e) {
-            if (!e) return reply_builder::build(msg_zero);
-            if (e->type_of_bytes()) {
-                --_stat._total_string_entries;
-            }
-            else if (e->type_of_set()) {
-                --_stat._total_set_entries;
-            }
-            else if (e->type_of_list()) {
-                --_stat._total_list_entries;
-            }
-            else if (e->type_of_map()) {
-                --_stat._total_dict_entries;
-            }
-            else if (e->type_of_sset()) {
-                --_stat._total_zset_entries;
-            }
-            else if (e->type_of_hll()) {
-                --_stat._total_hll_entries;
-            }
-            else {
-                --_stat._total_counter_entries;
-            }
-            return with_allocator(allocator(), [this, e] {
-                auto result =  _cache.erase(*e);
-                return reply_builder::build(result ? msg_one : msg_zero);
-            });
+    // auto m = make_deleted_mutation(rk.key());
+    // return _commit_log->append(m).then([this, rk = std::move(rk)] {
+    return _cache.run_with_entry(rk, [this] (cache_entry* e) {
+        if (!e) return reply_builder::build(msg_zero);
+        if (e->type_of_bytes()) {
+            --_stat._total_string_entries;
+        }
+        else if (e->type_of_set()) {
+            --_stat._total_set_entries;
+        }
+        else if (e->type_of_list()) {
+            --_stat._total_list_entries;
+        }
+        else if (e->type_of_map()) {
+            --_stat._total_dict_entries;
+        }
+        else if (e->type_of_sset()) {
+            --_stat._total_zset_entries;
+        }
+        else if (e->type_of_hll()) {
+            --_stat._total_hll_entries;
+        }
+        else {
+            --_stat._total_counter_entries;
+        }
+        return with_allocator(allocator(), [this, e] {
+            auto result =  _cache.erase(*e);
+            return reply_builder::build(result ? msg_one : msg_zero);
         });
     });
+    // });
 }
 
 bool database::exists_direct(redis_key rk)
