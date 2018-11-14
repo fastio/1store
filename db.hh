@@ -63,7 +63,7 @@ public:
     future<scattered_message_ptr> append(redis_key rk, bytes val);
 
     future<scattered_message_ptr> del(redis_key key);
-    future<bool> del_direct(redis_key key);
+    bool del_direct(redis_key key);
 
     future<scattered_message_ptr> exists(redis_key key);
     bool exists_direct(redis_key key);
@@ -191,7 +191,7 @@ private:
 private:
     cache _cache;
     seastar::metrics::metric_groups _metrics;
-    lw_shared_ptr<store::commit_log> _commit_log { nullptr };
+    // lw_shared_ptr<store::commit_log> _commit_log { nullptr };
     struct stats {
         uint64_t _read = 0;
         uint64_t _hit = 0;
