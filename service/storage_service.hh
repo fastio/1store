@@ -65,6 +65,11 @@
 namespace cql_transport {
     class cql_server;
 }
+
+namespace redis_transport {
+    class redis_server;
+}
+
 class thrift_server;
 
 namespace dht {
@@ -132,6 +137,7 @@ private:
     bool _loading_new_sstables = false;
     shared_ptr<load_broadcaster> _lb;
     shared_ptr<distributed<cql_transport::cql_server>> _cql_server;
+    shared_ptr<distributed<redis_transport::redis_server>> _redis_server;
     shared_ptr<distributed<thrift_server>> _thrift_server;
     sstring _operation_in_progress;
     bool _force_remove_completion = false;
@@ -349,10 +355,16 @@ public:
     future<> stop_native_transport();
 
     future<bool> is_native_transport_running();
+    
+    future<> start_redis_transport();
 
+    future<> stop_redis_transport();
+    
+    future<bool> is_redis_transport_running();
 private:
     future<> do_stop_rpc_server();
     future<> do_stop_native_transport();
+    future<> do_stop_redis_transport();
     future<> do_stop_ms();
     future<> do_stop_stream_manager();
 #if 0
@@ -2295,6 +2307,7 @@ public:
     }
 private:
     future<> set_cql_ready(bool ready);
+    future<> set_redis_ready(bool ready);
 private:
     void notify_down(inet_address endpoint);
     void notify_left(inet_address endpoint);

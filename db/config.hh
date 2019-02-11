@@ -517,12 +517,22 @@ public:
     val(native_transport_port, uint16_t, 9042, Used,                \
             "Port on which the CQL native transport listens for clients."  \
     )   \
+    val(redis_transport_port, uint16_t, 6379, Used,                \
+            "Port on which the REDIS transport listens for clients."  \
+    )   \
     val(native_transport_port_ssl, uint16_t, 9142, Used,                \
             "Port on which the CQL TLS native transport listens for clients."  \
             "Enabling client encryption and keeping native_transport_port_ssl disabled will use encryption" \
             "for native_transport_port. Setting native_transport_port_ssl to a different value" \
             "from native_transport_port will use encryption for native_transport_port_ssl while"    \
             "keeping native_transport_port unencrypted" \
+    )   \
+    val(redis_transport_port_ssl, uint16_t, 9142, Used,                \
+            "Port on which the REDIS TLS native transport listens for clients."  \
+            "Enabling client encryption and keeping redis_transport_port_ssl disabled will use encryption" \
+            "for redis_transport_port. Setting redis_transport_port_ssl to a different value" \
+            "from redis_transport_port will use encryption for redis_transport_port_ssl while"    \
+            "keeping redis_transport_port unencrypted" \
     )   \
     val(native_transport_max_threads, uint32_t, 128, Invalid,                \
             "The maximum number of thread handling requests. The meaning is the same as rpc_max_threads.\n"  \

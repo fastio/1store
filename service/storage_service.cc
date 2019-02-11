@@ -63,6 +63,7 @@
 #include "service/load_broadcaster.hh"
 #include "thrift/server.hh"
 #include "transport/server.hh"
+#include "transport/redis_server.hh"
 #include <seastar/core/rwlock.hh>
 #include "db/batchlog_manager.hh"
 #include "db/commitlog/commitlog.hh"
@@ -2174,6 +2175,108 @@ future<bool> storage_service::is_native_transport_running() {
     });
 }
 
+future<> storage_service::start_redis_transport() {
+    return run_with_api_lock(sstring("start_redis_transport"), [] (storage_service& ss) {
+        if (ss._redis_server) {
+            return make_ready_future<>();
+        }
+        auto rserver = make_shared<distributed<redis_transport::redis_server>>();
+        ss._redis_server = rserver;
+
+        auto& cfg = ss._db.local().get_config();
+        auto addr = cfg.rpc_address();
+        auto ceo = cfg.client_encryption_options();
+        auto keepalive = cfg.rpc_keepalive();
+        redis_transport::redis_server_config redis_server_config;
+        redis_server_config.timeout_config = make_timeout_config(cfg);
+        redis_server_config.max_request_size = ss._db.local().get_available_memory() / 10;
+        redis_transport::redis_load_balance lb = redis_transport::parse_load_balance(cfg.load_balance());
+        return seastar::net::dns::resolve_name(addr).then([&ss, rserver, addr, &cfg, lb, keepalive, ceo = std::move(ceo), redis_server_config] (seastar::net::inet_address ip) {
+                return rserver->start(std::ref(service::get_storage_proxy()), std::ref(redis::get_query_processor()), lb, redis_server_config).then([rserver, &cfg, addr, ip, ceo, keepalive]() {
+                // #293 - do not stop anything
+                //engine().at_exit([cserver] {
+                //    return cserver->stop();
+                //});
+
+                auto f = make_ready_future();
+
+                struct listen_cfg {
+                    ipv4_addr addr;
+                    std::shared_ptr<seastar::tls::credentials_builder> cred;
+                };
+
+                std::vector<listen_cfg> configs({ { ipv4_addr{ip, cfg.redis_transport_port()} }});
+
+                // main should have made sure values are clean and neatish
+                if (ceo.at("enabled") == "true") {
+                    auto cred = std::make_shared<seastar::tls::credentials_builder>();
+
+                    cred->set_dh_level(seastar::tls::dh_params::level::MEDIUM);
+                    cred->set_priority_string(db::config::default_tls_priority);
+
+                    if (ceo.count("priority_string")) {
+                        cred->set_priority_string(ceo.at("priority_string"));
+                    }
+                    if (ceo.count("require_client_auth") && ceo.at("require_client_auth") == "true") {
+                        cred->set_client_auth(seastar::tls::client_auth::REQUIRE);
+                    }
+
+                    f = cred->set_x509_key_file(ceo.at("certificate"), ceo.at("keyfile"), seastar::tls::x509_crt_format::PEM);
+
+                    if (ceo.count("truststore")) {
+                        f = f.then([cred, f = ceo.at("truststore")] { return cred->set_x509_trust_file(f, seastar::tls::x509_crt_format::PEM); });
+                    }
+
+                    slogger.info("Enabling encrypted CQL connections between client and server");
+
+                    if (cfg.redis_transport_port_ssl.is_set() && cfg.redis_transport_port_ssl() != cfg.redis_transport_port()) {
+                        configs.emplace_back(listen_cfg{ipv4_addr{ip, cfg.redis_transport_port_ssl()}, std::move(cred)});
+                    } else {
+                        configs.back().cred = std::move(cred);
+                    }
+                }
+
+                return f.then([rserver, configs = std::move(configs), keepalive] {
+                    return parallel_for_each(configs, [rserver, keepalive](const listen_cfg & cfg) {
+                        return rserver->invoke_on_all(&redis_transport::redis_server::listen, cfg.addr, cfg.cred, keepalive).then([cfg] {
+                            slogger.info("Starting listening for REDIS clients on {} ({})", cfg.addr, cfg.cred ? "encrypted" : "unencrypted");
+                        });
+                    });
+
+                });
+            });
+        }).then([&ss] {
+            return ss.set_redis_ready(true);
+        });
+    });
+}
+
+future<> storage_service::do_stop_redis_transport() {
+    auto rserver = _redis_server;
+    _redis_server = {};
+    if (rserver) {
+        // FIXME: cql_server::stop() doesn't kill existing connections and wait for them
+        // Note: We must capture cserver so that it will not be freed before cserver->stop
+        return set_redis_ready(false).then([rserver] {
+            return rserver->stop().then([rserver] {
+                slogger.info("REDIS server stopped");
+            });
+        });
+    }
+    return make_ready_future<>();
+}
+
+future<> storage_service::stop_redis_transport() {
+    return run_with_api_lock(sstring("stop_redis_transport"), [] (storage_service& ss) {
+        return ss.do_stop_redis_transport();
+    });
+}
+
+future<bool> storage_service::is_redis_transport_running() {
+    return run_with_no_api_lock([] (storage_service& ss) {
+        return bool(ss._redis_server);
+    });
+}
 future<> storage_service::decommission() {
     return run_with_api_lock(sstring("decommission"), [] (storage_service& ss) {
         return seastar::async([&ss] {
@@ -3233,6 +3336,11 @@ storage_service::view_build_statuses(sstring keyspace, sstring view_name) const 
 
 future<> storage_service::set_cql_ready(bool ready) {
     return gms::get_local_gossiper().add_local_application_state(application_state::RPC_READY, value_factory.cql_ready(ready));
+}
+
+future<> storage_service::set_redis_ready(bool ready) {
+    //return gms::get_local_gossiper().add_local_application_state(application_state::RPC_READY, value_factory.cql_ready(ready));
+    return make_ready_future<>();
 }
 
 void storage_service::notify_down(inet_address endpoint) {

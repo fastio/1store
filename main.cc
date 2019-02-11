@@ -809,6 +809,10 @@ int main(int ac, char** av) {
                     return service::get_local_storage_service().start_rpc_server();
                 }).get();
             }
+            supervisor::notify("starting redis transport");
+            with_scheduling_group(dbcfg.statement_scheduling_group, [] {
+                return service::get_local_storage_service().start_redis_transport();
+            }).get();
             if (cfg->defragment_memory_on_idle()) {
                 smp::invoke_on_all([] () {
                     engine().set_idle_cpu_handler([] (reactor::work_waiting_on_reactor check_for_work) {
