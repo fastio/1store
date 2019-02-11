@@ -1,11 +1,9 @@
 [submodule "seastar"]
 	path = seastar
-	url = git@github.com:scylladb/scylla-seastar
-	ignore = dirty
+	url = git@github.comm:scylladb/scylla-seastar
 [submodule "swagger-ui"]
 	path = swagger-ui
 	url = git@github.com:scylladb/scylla-swagger-ui
-	ignore = dirty
 [submodule "xxHash"]
 	path = xxHash
 	url = git@github.com:scylladb/xxHash
