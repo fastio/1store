@@ -65,14 +65,11 @@
       "destination": "/home/{{user `ssh_username`}}/"
     },
     {
-      "type": "file",
-      "source": "../../scripts/scylla_install_pkg",
-      "destination": "/home/{{user `ssh_username`}}/scylla_install_pkg"
-    },
-    {
       "type": "shell",
       "inline": [
-         "sudo /home/{{user `ssh_username`}}/scylla-ami/scylla_install_ami {{ user `install_args` }}"
+         "sudo yum install -y epel-release",
+         "sudo yum install -y python34",
+         "sudo /home/{{user `ssh_username`}}/scylla_install_ami {{ user `install_args` }}"
        ]
     }
   ],

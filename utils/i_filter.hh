@@ -48,6 +48,11 @@ namespace utils {
 struct i_filter;
 using filter_ptr = std::unique_ptr<i_filter>;
 
+enum class filter_format {
+    k_l_format,
+    m_format,
+};
+
 class hashed_key {
 private:
     std::array<uint64_t, 2> _hash;
@@ -78,11 +83,6 @@ struct i_filter {
      *         Asserts that the given probability can be satisfied using this
      *         filter.
      */
-    static filter_ptr get_filter(int64_t num_elements, double max_false_pos_prob);
-    /**
-     * @return A bloom_filter with the lowest practical false positive
-     *         probability for the given number of elements.
-     */
-    static filter_ptr get_filter(int64_t num_elements, int target_buckets_per_elem);
+    static filter_ptr get_filter(int64_t num_elements, double max_false_pos_prob, filter_format format);
 };
 }

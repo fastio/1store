@@ -1,11 +1,14 @@
 #!/bin/bash -e
 
+PRODUCT=scylla
+
 . /etc/os-release
 print_usage() {
-    echo "build_deb.sh -target <codename> --dist --rebuild-dep"
+    echo "build_deb.sh -target <codename> --dist --rebuild-dep --jobs 2"
     echo "  --target target distribution codename"
     echo "  --dist  create a public distribution package"
-    echo "  --rebuild-dep  rebuild dependency packages"
+    echo "  --no-clean  don't rebuild pbuilder tgz"
+    echo "  --jobs  specify number of jobs"
     exit 1
 }
 install_deps() {
@@ -16,21 +19,26 @@ install_deps() {
     sudo dpkg -P ${DEB_FILE%%_*.deb}
 }
 
-REBUILD=0
-DIST=0
+DIST="false"
 TARGET=
+NO_CLEAN=0
+JOBS=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        "--rebuild-dep")
-            REBUILD=1
-            shift 1
-            ;;
         "--dist")
-            DIST=1
+            DIST="true"
             shift 1
             ;;
         "--target")
             TARGET=$2
+            shift 2
+            ;;
+        "--no-clean")
+            NO_CLEAN=1
+            shift 1
+            ;;
+        "--jobs")
+            JOBS=$2
             shift 2
             ;;
         *)
@@ -44,6 +52,18 @@ is_redhat_variant() {
 }
 is_debian_variant() {
     [ -f /etc/debian_version ]
+}
+is_debian() {
+    case "$1" in
+        jessie|stretch) return 0;;
+        *) return 1;;
+    esac
+}
+is_ubuntu() {
+    case "$1" in
+        trusty|xenial|bionic) return 0;;
+        *) return 1;;
+    esac
 }
 
 
@@ -88,128 +108,87 @@ fi
 if [ ! -f /usr/sbin/pbuilder ]; then
     pkg_install pbuilder
 fi
-if [ ! -f /usr/bin/ant ]; then
-    pkg_install ant
-fi
 if [ ! -f /usr/bin/dh_testdir ]; then
     pkg_install debhelper
 fi
-
-CODENAME=`lsb_release -c|awk '{print $2}'`
+if [ ! -f /usr/bin/pystache ]; then
+    if is_redhat_variant; then
+        sudo yum install -y /usr/bin/pystache
+    elif is_debian_variant; then
+        sudo apt-get install -y python-pystache
+    fi
+fi
+if is_debian_variant && [ ! -f /usr/share/doc/python-pkg-resources/copyright ]; then
+    sudo apt-get install -y python-pkg-resources
+fi
 
 if [ -z "$TARGET" ]; then
     if is_debian_variant; then
         if [ ! -f /usr/bin/lsb_release ]; then
             pkg_install lsb-release
         fi
-        TARGET=$CODENAME
+        TARGET=`lsb_release -c|awk '{print $2}'`
     else
         echo "Please specify target"
         exit 1
     fi
-fi
-if [ $REBUILD -eq 1 ] && [ "$TARGET" != "$CODENAME" ]; then
-    echo "Rebuild dependencies doesn't support cross-build."
-    echo "Please run it on following distribution: $TARGET"
-    exit 1
 fi
 
 VERSION=$(./SCYLLA-VERSION-GEN)
 SCYLLA_VERSION=$(cat build/SCYLLA-VERSION-FILE | sed 's/\.rc/~rc/')
 SCYLLA_RELEASE=$(cat build/SCYLLA-RELEASE-FILE)
 echo $VERSION > version
-./scripts/git-archive-all --extra version --force-submodules --prefix scylla-server ../scylla-server_$SCYLLA_VERSION-$SCYLLA_RELEASE.orig.tar.gz 
+./scripts/git-archive-all --extra version --force-submodules --prefix $PRODUCT-server ../$PRODUCT-server_$SCYLLA_VERSION-$SCYLLA_RELEASE.orig.tar.gz
 
 cp -a dist/debian/debian debian
-cp dist/common/sysconfig/scylla-server debian/scylla-server.default
-cp dist/debian/changelog.in debian/changelog
-sed -i -e "s/@@VERSION@@/$SCYLLA_VERSION/g" debian/changelog
-sed -i -e "s/@@RELEASE@@/$SCYLLA_RELEASE/g" debian/changelog
-sed -i -e "s/@@CODENAME@@/$TARGET/g" debian/changelog
-cp dist/debian/rules.in debian/rules
-cp dist/debian/control.in debian/control
-cp dist/debian/scylla-server.install.in debian/scylla-server.install
-cp dist/debian/scylla-conf.preinst.in debian/scylla-conf.preinst
-sed -i -e "s/@@VERSION@@/$SCYLLA_VERSION/g" debian/scylla-conf.preinst
-if [ "$TARGET" = "jessie" ]; then
-    cp dist/debian/scylla-server.cron.d debian/
-    sed -i -e "s/@@REVISION@@/1~$TARGET/g" debian/changelog
-    sed -i -e "s/@@DH_INSTALLINIT@@//g" debian/rules
-    sed -i -e "s/@@COMPILER@@/g++-5/g" debian/rules
-    sed -i -e "s/@@BUILD_DEPENDS@@/libsystemd-dev, g++-5, libunwind-dev/g" debian/control
-    sed -i -e "s/@@DEPENDS@@//g" debian/control
-    sed -i -e "s#@@INSTALL@@##g" debian/scylla-server.install
-    sed -i -e "s#@@HKDOTTIMER_D@@#dist/common/systemd/scylla-housekeeping-daily.timer /lib/systemd/system#g" debian/scylla-server.install
-    sed -i -e "s#@@HKDOTTIMER_R@@#dist/common/systemd/scylla-housekeeping-restart.timer /lib/systemd/system#g" debian/scylla-server.install
-    sed -i -e "s#@@SYSCTL@@#dist/debian/sysctl.d/99-scylla.conf etc/sysctl.d#g" debian/scylla-server.install
-    sed -i -e "s#@@SCRIPTS_SAVE_COREDUMP@@#dist/debian/scripts/scylla_save_coredump usr/lib/scylla#g" debian/scylla-server.install
-    sed -i -e "s#@@SCRIPTS_FSTRIM@@#dist/debian/scripts/scylla_fstrim usr/lib/scylla#g" debian/scylla-server.install
-    sed -i -e "s#@@SCRIPTS_DELAY_FSTRIM@@#dist/debian/scripts/scylla_delay_fstrim usr/lib/scylla#g" debian/scylla-server.install
-elif [ "$TARGET" = "stretch" ] || [ "$TARGET" = "buster" ] || [ "$TARGET" = "sid" ]; then
-    cp dist/debian/scylla-server.cron.d debian/
-    sed -i -e "s/@@REVISION@@/1~$TARGET/g" debian/changelog
-    sed -i -e "s/@@DH_INSTALLINIT@@//g" debian/rules
-    sed -i -e "s/@@COMPILER@@/g++/g" debian/rules
-    sed -i -e "s/@@BUILD_DEPENDS@@/libsystemd-dev, g++, libunwind8-dev/g" debian/control
-    sed -i -e "s/@@DEPENDS@@//g" debian/control
-    sed -i -e "s#@@INSTALL@@##g" debian/scylla-server.install
-    sed -i -e "s#@@HKDOTTIMER_D@@#dist/common/systemd/scylla-housekeeping-daily.timer /lib/systemd/system#g" debian/scylla-server.install
-    sed -i -e "s#@@HKDOTTIMER_R@@#dist/common/systemd/scylla-housekeeping-restart.timer /lib/systemd/system#g" debian/scylla-server.install
-    sed -i -e "s#@@SYSCTL@@#dist/debian/sysctl.d/99-scylla.conf etc/sysctl.d#g" debian/scylla-server.install
-    sed -i -e "s#@@SCRIPTS_SAVE_COREDUMP@@#dist/debian/scripts/scylla_save_coredump usr/lib/scylla#g" debian/scylla-server.install
-    sed -i -e "s#@@SCRIPTS_FSTRIM@@#dist/debian/scripts/scylla_fstrim usr/lib/scylla#g" debian/scylla-server.install
-    sed -i -e "s#@@SCRIPTS_DELAY_FSTRIM@@#dist/debian/scripts/scylla_delay_fstrim usr/lib/scylla#g" debian/scylla-server.install
-elif [ "$TARGET" = "trusty" ]; then
-    cp dist/debian/scylla-server.cron.d debian/
-    sed -i -e "s/@@REVISION@@/0ubuntu1~$TARGET/g" debian/changelog
-    sed -i -e "s/@@DH_INSTALLINIT@@/--upstart-only/g" debian/rules
-    sed -i -e "s/@@COMPILER@@/g++-5/g" debian/rules
-    sed -i -e "s/@@BUILD_DEPENDS@@/g++-5, libunwind8-dev/g" debian/control
-    sed -i -e "s/@@DEPENDS@@/hugepages, num-utils/g" debian/control
-    sed -i -e "s#@@INSTALL@@#dist/debian/sudoers.d/scylla etc/sudoers.d#g" debian/scylla-server.install
-    sed -i -e "s#@@HKDOTTIMER_D@@##g" debian/scylla-server.install
-    sed -i -e "s#@@HKDOTTIMER_R@@##g" debian/scylla-server.install
-    sed -i -e "s#@@SYSCTL@@#dist/debian/sysctl.d/99-scylla.conf etc/sysctl.d#g" debian/scylla-server.install
-    sed -i -e "s#@@SCRIPTS_SAVE_COREDUMP@@#dist/debian/scripts/scylla_save_coredump usr/lib/scylla#g" debian/scylla-server.install
-    sed -i -e "s#@@SCRIPTS_FSTRIM@@#dist/debian/scripts/scylla_fstrim usr/lib/scylla#g" debian/scylla-server.install
-    sed -i -e "s#@@SCRIPTS_DELAY_FSTRIM@@#dist/debian/scripts/scylla_delay_fstrim usr/lib/scylla#g" debian/scylla-server.install
-elif [ "$TARGET" = "xenial" ] || [ "$TARGET" = "yakkety" ] || [ "$TARGET" = "zesty" ] || [ "$TARGET" = "artful" ]; then
-    sed -i -e "s/@@REVISION@@/0ubuntu1~$TARGET/g" debian/changelog
-    sed -i -e "s/@@DH_INSTALLINIT@@//g" debian/rules
-    sed -i -e "s/@@COMPILER@@/g++/g" debian/rules
-    sed -i -e "s/@@BUILD_DEPENDS@@/libsystemd-dev, g++, libunwind-dev/g" debian/control
-    sed -i -e "s/@@DEPENDS@@/hugepages, /g" debian/control
-    sed -i -e "s#@@INSTALL@@##g" debian/scylla-server.install
-    sed -i -e "s#@@HKDOTTIMER_D@@#dist/common/systemd/scylla-housekeeping-daily.timer /lib/systemd/system#g" debian/scylla-server.install
-    sed -i -e "s#@@HKDOTTIMER_R@@#dist/common/systemd/scylla-housekeeping-restart.timer /lib/systemd/system#g" debian/scylla-server.install
-    sed -i -e "s#@@SYSCTL@@##g" debian/scylla-server.install
-    sed -i -e "s#@@SCRIPTS_SAVE_COREDUMP@@##g" debian/scylla-server.install
-    sed -i -e "s#@@SCRIPTS_FSTRIM@@##g" debian/scylla-server.install
-    sed -i -e "s#@@SCRIPTS_DELAY_FSTRIM@@##g" debian/scylla-server.install
-else
-    echo "Unknown distribution: $TARGET"
+if [ "$PRODUCT" != "scylla" ]; then
+    for i in debian/scylla-*;do
+        mv $i ${i/scylla-/$PRODUCT-}
+    done
 fi
-if [ $DIST -gt 0 ]; then
-    sed -i -e "s#@@ADDHKCFG@@#conf/housekeeping.cfg etc/scylla.d/#g" debian/scylla-server.install
-else
-    sed -i -e "s#@@ADDHKCFG@@##g" debian/scylla-server.install
+cp dist/common/sysconfig/scylla-server debian/$PRODUCT-server.default
+if [ "$TARGET" = "trusty" ]; then
+    cp dist/debian/scylla-server.cron.d debian/
 fi
-cp dist/common/systemd/scylla-server.service.in debian/scylla-server.service
-sed -i -e "s#@@SYSCONFDIR@@#/etc/default#g" debian/scylla-server.service
-cp dist/common/systemd/scylla-housekeeping-daily.service debian/scylla-server.scylla-housekeeping-daily.service
-cp dist/common/systemd/scylla-housekeeping-restart.service debian/scylla-server.scylla-housekeeping-restart.service
-cp dist/common/systemd/node-exporter.service debian/scylla-server.node-exporter.service
+if is_debian $TARGET; then
+    REVISION="1~$TARGET"
+elif is_ubuntu $TARGET; then
+    REVISION="0ubuntu1~$TARGET"
+else
+   echo "Unknown distribution: $TARGET"
+fi
+MUSTACHE_DIST="\"debian\": true, \"$TARGET\": true, \"product\": \"$PRODUCT\", \"$PRODUCT\": true"
+pystache dist/debian/changelog.mustache "{ $MUSTACHE_DIST, \"version\": \"$SCYLLA_VERSION\", \"release\": \"$SCYLLA_RELEASE\", \"revision\": \"$REVISION\", \"codename\": \"$TARGET\" }" > debian/changelog
+pystache dist/debian/rules.mustache "{ $MUSTACHE_DIST }" > debian/rules
+pystache dist/debian/control.mustache "{ $MUSTACHE_DIST }" > debian/control
+pystache dist/debian/scylla-server.install.mustache "{ $MUSTACHE_DIST, \"dist\": $DIST }" > debian/$PRODUCT-server.install
+pystache dist/debian/scylla-conf.preinst.mustache "{ \"version\": \"$SCYLLA_VERSION\" }" > debian/$PRODUCT-conf.preinst
+chmod a+rx debian/rules
 
-if [ $REBUILD -eq 1 ]; then
-    ./dist/debian/dep/build_dependency.sh
+if [ "$TARGET" != "trusty" ]; then
+    if [ "$PRODUCT" != "scylla" ]; then
+        SERVER_SERVICE_PREFIX="$PRODUCT-server."
+    fi
+    pystache dist/common/systemd/scylla-server.service.mustache "{ $MUSTACHE_DIST }" > debian/${SERVER_SERVICE_PREFIX}scylla-server.service
+    pystache dist/common/systemd/scylla-housekeeping-daily.service.mustache "{ $MUSTACHE_DIST }" > debian/$PRODUCT-server.scylla-housekeeping-daily.service
+    pystache dist/common/systemd/scylla-housekeeping-restart.service.mustache "{ $MUSTACHE_DIST }" > debian/$PRODUCT-server.scylla-housekeeping-restart.service
+    cp dist/common/systemd/scylla-fstrim.service debian/$PRODUCT-server.scylla-fstrim.service
+    cp dist/common/systemd/node-exporter.service debian/$PRODUCT-server.node-exporter.service
 fi
 
-cp ./dist/debian/pbuilderrc ~/.pbuilderrc
-sudo rm -fv /var/cache/pbuilder/scylla-server-$TARGET.tgz
-sudo -E DIST=$TARGET REBUILD=$REBUILD /usr/sbin/pbuilder clean
-sudo -E DIST=$TARGET REBUILD=$REBUILD /usr/sbin/pbuilder create
-sudo -E DIST=$TARGET REBUILD=$REBUILD /usr/sbin/pbuilder update
-if [ $REBUILD -eq 1 ]; then
-    sudo -E DIST=$TARGET REBUILD=$REBUILD /usr/sbin/pbuilder execute --save-after-exec dist/debian/dep/pbuilder_install_deps.sh
+if [ $NO_CLEAN -eq 0 ]; then
+    sudo rm -fv /var/cache/pbuilder/$PRODUCT-server-$TARGET.tgz
+    sudo PRODUCT=$PRODUCT DIST=$TARGET /usr/sbin/pbuilder clean --configfile ./dist/debian/pbuilderrc
+    sudo PRODUCT=$PRODUCT DIST=$TARGET /usr/sbin/pbuilder create --configfile ./dist/debian/pbuilderrc --allow-untrusted
 fi
-sudo -E DIST=$TARGET REBUILD=$REBUILD pdebuild --buildresult build/debs
+if [ $JOBS -ne 0 ]; then
+    DEB_BUILD_OPTIONS="parallel=$JOBS"
+fi
+sudo PRODUCT=$PRODUCT DIST=$TARGET /usr/sbin/pbuilder update --configfile ./dist/debian/pbuilderrc --allow-untrusted
+if [ "$TARGET" = "trusty" ] || [ "$TARGET" = "xenial" ] || [ "$TARGET" = "yakkety" ] || [ "$TARGET" = "zesty" ] || [ "$TARGET" = "artful" ] || [ "$TARGET" = "bionic" ]; then
+    sudo PRODUCT=$PRODUCT DIST=$TARGET /usr/sbin/pbuilder execute --configfile ./dist/debian/pbuilderrc --save-after-exec dist/debian/ubuntu_enable_ppa.sh
+elif [ "$TARGET" = "jessie" ] || [ "$TARGET" = "stretch" ]; then
+    sudo PRODUCT=$PRODUCT DIST=$TARGET /usr/sbin/pbuilder execute --configfile ./dist/debian/pbuilderrc --save-after-exec dist/debian/debian_install_gpgkey.sh
+fi
+sudo -E PRODUCT=$PRODUCT DIST=$TARGET DEB_BUILD_OPTIONS=$DEB_BUILD_OPTIONS pdebuild --configfile ./dist/debian/pbuilderrc --buildresult build/debs
+sudo chown -Rv $(id -u -n):$(id -g -n) build/debs

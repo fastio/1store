@@ -46,6 +46,7 @@
 #include <vector>
 #include <chrono>
 #include "core/metrics_types.hh"
+#include <seastar/core/print.hh>
 
 namespace utils {
 
@@ -71,6 +72,7 @@ struct estimated_histogram {
     std::vector<int64_t> buckets;
 
     int64_t _count = 0;
+    int64_t _sample_sum = 0;
 
     estimated_histogram(int bucket_count = 90) {
 
@@ -81,32 +83,25 @@ struct estimated_histogram {
     seastar::metrics::histogram get_histogram(size_t lower_bucket = 1, size_t max_buckets = 16) const {
         seastar::metrics::histogram res;
         res.buckets.resize(max_buckets);
-        double last_bound = lower_bucket;
+        int64_t last_bound = lower_bucket;
+        uint64_t cummulative_count = 0;
         size_t pos = 0;
-        size_t last = buckets.size() - 1;
-        while (last > 0 && buckets[last] == 0) {
-            last--;
-        }
+
         res.sample_count = _count;
+        res.sample_sum = _sample_sum;
         for (size_t i = 0; i < res.buckets.size(); i++) {
             auto& v = res.buckets[i];
             v.upper_bound = last_bound;
 
             while (bucket_offsets[pos] <= last_bound) {
-                if (pos > last) {
-                    res.buckets.resize(i + 1);
-                    return res;
-                }
-                v.count += buckets[pos];
+                cummulative_count += buckets[pos];
                 pos++;
             }
-            last_bound *= 2;
-        }
-        while (pos < buckets.size()) {
-            res.buckets[max_buckets - 1].count += buckets[pos];
-            pos++;
-        }
 
+            v.count = cummulative_count;
+
+            last_bound <<= 1;
+        }
         return res;
     }
 
@@ -159,19 +154,21 @@ public:
     void clear() {
         std::fill(buckets.begin(), buckets.end(), 0);
         _count = 0;
+        _sample_sum = 0;
     }
     /**
      * Increments the count of the bucket closest to n, rounding UP.
      * @param n
      */
     void add(int64_t n) {
+        auto pos = bucket_offsets.size();
         auto low = std::lower_bound(bucket_offsets.begin(), bucket_offsets.end(), n);
-        if (low == bucket_offsets.end()) {
-            low--;
+        if (low != bucket_offsets.end()) {
+            pos = std::distance(bucket_offsets.begin(), low);
         }
-        auto pos = std::distance(bucket_offsets.begin(), low);
         buckets.at(pos)++;
         _count++;
+        _sample_sum += n;
     }
 
     /**
@@ -186,12 +183,13 @@ public:
         if (new_count <= _count) {
             return;
         }
+        auto pos = bucket_offsets.size();
         auto low = std::lower_bound(bucket_offsets.begin(), bucket_offsets.end(), n);
-        if (low == bucket_offsets.end()) {
-            low--;
+        if (low != bucket_offsets.end()) {
+            pos = std::distance(bucket_offsets.begin(), low);
         }
-        auto pos = std::distance(bucket_offsets.begin(), low);
         buckets.at(pos)+= new_count - _count;
+        _sample_sum += n * (new_count - _count);
         _count = new_count;
     }
 
@@ -242,6 +240,8 @@ public:
         for (auto p: b.buckets) {
             buckets[i++] += p;
         }
+        _count += b._count;
+        _sample_sum += b._sample_sum;
         return *this;
     }
 
@@ -306,33 +306,34 @@ public:
         }
         return 0;
     }
+#endif
 
     /**
      * @param percentile
      * @return estimated value at given percentile
      */
-    public long percentile(double percentile)
-    {
-        assert percentile >= 0 && percentile <= 1.0;
-        int lastBucket = buckets.length() - 1;
-        if (buckets.get(lastBucket) > 0)
-            throw new IllegalStateException("Unable to compute when histogram overflowed");
+    int64_t percentile(double perc) const {
+        assert(perc >= 0 && perc <= 1.0);
+        auto last_bucket = buckets.size() - 1;
 
-        long pcount = (long) Math.floor(count() * percentile);
-        if (pcount == 0)
-            return 0;
+        auto c = count();
 
-        long elements = 0;
-        for (int i = 0; i < lastBucket; i++)
-        {
-            elements += buckets.get(i);
-            if (elements >= pcount)
-                return bucketOffsets[i];
+        if (!c) {
+            return 0; // no data
         }
-        return 0;
-    }
 
-#endif
+        auto pcount = int64_t(std::floor(c * perc));
+        int64_t elements = 0;
+        for (size_t i = 0; i < last_bucket; i++) {
+            if (buckets[i]) {
+                elements += buckets[i];
+                if (elements >= pcount) {
+                    return bucket_offsets[i];
+                }
+            }
+        }
+        return round(bucket_offsets.back() * 1.2); // overflowed value is in the requested percentile
+    }
 
     /**
      * @return the mean histogram value (average of bucket offsets, weighted by count)
@@ -360,6 +361,13 @@ public:
         }
         return sum;
     }
+
+    estimated_histogram& operator*=(double v) {
+        for (size_t i = 0; i < buckets.size(); i++) {
+            buckets[i] *= v;
+        }
+        return *this;
+    }
 #if 0
     /**
      * @return true if this histogram has overflowed -- that is, a value larger than our largest bucket could bound was added
@@ -368,70 +376,64 @@ public:
     {
         return buckets.get(buckets.length() - 1) > 0;
     }
+#endif
 
-    /**
-     * log.debug() every record in the histogram
-     *
-     * @param log
-     */
-    public void log(Logger log)
-    {
+    friend std::ostream& operator<<(std::ostream& out, const estimated_histogram& h) {
         // only print overflow if there is any
-        int nameCount;
-        if (buckets.get(buckets.length() - 1) == 0)
-            nameCount = buckets.length() - 1;
-        else
-            nameCount = buckets.length();
-        String[] names = new String[nameCount];
+        size_t name_count;
+        if (h.buckets[h.buckets.size() - 1] == 0) {
+            name_count = h.buckets.size() - 1;
+        } else {
+            name_count = h.buckets.size();
+        }
+        std::vector<sstring> names;
+        names.reserve(name_count);
 
-        int maxNameLength = 0;
-        for (int i = 0; i < nameCount; i++)
-        {
-            names[i] = nameOfRange(bucketOffsets, i);
-            maxNameLength = Math.max(maxNameLength, names[i].length());
+        size_t max_name_len = 0;
+        for (size_t i = 0; i < name_count; i++) {
+            names.push_back(h.name_of_range(i));
+            max_name_len = std::max(max_name_len, names.back().size());
         }
 
-        // emit log records
-        String formatstr = "%" + maxNameLength + "s: %d";
-        for (int i = 0; i < nameCount; i++)
-        {
-            long count = buckets.get(i);
+        sstring formatstr = sprint("%%%ds: %%d\n", max_name_len);
+        for (size_t i = 0; i < name_count; i++) {
+            int64_t count = h.buckets[i];
             // sort-of-hack to not print empty ranges at the start that are only used to demarcate the
             // first populated range. for code clarity we don't omit this record from the maxNameLength
             // calculation, and accept the unnecessary whitespace prefixes that will occasionally occur
-            if (i == 0 && count == 0)
+            if (i == 0 && count == 0) {
                 continue;
-            log.debug(String.format(formatstr, names[i], count));
+            }
+            out << sprint(formatstr, names[i], count);
         }
+        return out;
     }
 
-    private static String nameOfRange(long[] bucketOffsets, int index)
-    {
-        StringBuilder sb = new StringBuilder();
-        appendRange(sb, bucketOffsets, index);
-        return sb.toString();
-    }
-
-    private static void appendRange(StringBuilder sb, long[] bucketOffsets, int index)
-    {
-        sb.append("[");
-        if (index == 0)
-            if (bucketOffsets[0] > 0)
+    sstring name_of_range(size_t index) const {
+        sstring s;
+        s += "[";
+        if (index == 0) {
+            if (bucket_offsets[0] > 0) {
                 // by original definition, this histogram is for values greater than zero only;
                 // if values of 0 or less are required, an entry of lb-1 must be inserted at the start
-                sb.append("1");
-            else
-                sb.append("-Inf");
-        else
-            sb.append(bucketOffsets[index - 1] + 1);
-        sb.append("..");
-        if (index == bucketOffsets.length)
-            sb.append("Inf");
-        else
-            sb.append(bucketOffsets[index]);
-        sb.append("]");
+                s += "1";
+            } else {
+                s += "-Inf";
+            }
+        } else {
+            s += sprint("%d", bucket_offsets[index - 1] + 1);
+        }
+        s += "..";
+        if (index == bucket_offsets.size()) {
+            s += "Inf";
+        } else {
+            s += sprint("%d", bucket_offsets[index]);
+        }
+        s += "]";
+        return s;
     }
 
+#if 0
     @Override
     public boolean equals(Object o)
     {

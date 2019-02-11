@@ -58,6 +58,16 @@ if ! is_rhel7_variant; then
     exit 1
 fi
 
+if [ "$ID" = "centos" ]; then
+    if [ ! -f /etc/yum.repos.d/epel.repo ]; then
+        sudo yum install -y epel-release
+    fi
+else
+    if [ ! -f /etc/yum.repos.d/epel.repo ]; then
+        sudo rpm -Uvh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+    fi
+fi
+
 if [ ! -f /usr/bin/yumdownloader ]; then
     sudo yum -y install yum-utils
 fi
@@ -81,7 +91,27 @@ mkdir -p build/offline_installer
 cp dist/offline_installer/redhat/header build/offline_installer
 sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve scylla
 # XXX: resolve option doesn't fetch some dependencies, need to manually fetch them
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve sudo.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve ntp.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve libedit.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve ntpdate.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve net-tools.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve kernel
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve grubby.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve linux-firmware
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve initscripts.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve iproute.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve iptables.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve libnfnetlink.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve libnetfilter_conntrack.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve libmnl.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve sysvinit-tools.x86_64
 sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve yajl.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve mdadm.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve libreport-filesystem.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve xfsprogs.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve PyYAML.x86_64
+sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve libyaml.x86_64
 sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve libjpeg-turbo.x86_64
 sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve libaio.x86_64
 sudo yumdownloader --installroot=`pwd`/build/installroot --archlist=x86_64 --destdir=build/offline_installer --resolve snappy.x86_64

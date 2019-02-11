@@ -53,10 +53,10 @@ namespace utils {
 namespace filter {
 
 template<typename Func>
-void for_each_index(hashed_key hk, int count, int64_t max, Func&& func) {
+void for_each_index(hashed_key hk, int count, int64_t max, filter_format format, Func&& func) {
     auto h = hk.hash();
-    int64_t base = h[0];
-    int64_t inc = h[1];
+    int64_t base = (format == filter_format::k_l_format) ? h[0] : h[1];
+    int64_t inc = (format == filter_format::k_l_format) ? h[1] : h[0];
     for (int i = 0; i < count; i++) {
         if (func(std::abs(base % max)) == stop_iteration::yes) {
             break;
@@ -67,7 +67,7 @@ void for_each_index(hashed_key hk, int count, int64_t max, Func&& func) {
 
 bool bloom_filter::is_present(hashed_key key) {
     bool result = true;
-    for_each_index(key, _hash_count, _bitset.size(), [this, &result] (auto i) {
+    for_each_index(key, _hash_count, _bitset.size(), _format, [this, &result] (auto i) {
         if (!_bitset.test(i)) {
             result = false;
             return stop_iteration::yes;
@@ -78,7 +78,7 @@ bool bloom_filter::is_present(hashed_key key) {
 }
 
 void bloom_filter::add(const bytes_view& key) {
-    for_each_index(make_hashed_key(key), _hash_count, _bitset.size(), [this] (auto i) {
+    for_each_index(make_hashed_key(key), _hash_count, _bitset.size(), _format, [this] (auto i) {
         _bitset.set(i);
         return stop_iteration::no;
     });
@@ -88,15 +88,15 @@ bool bloom_filter::is_present(const bytes_view& key) {
     return is_present(make_hashed_key(key));
 }
 
-filter_ptr create_filter(int hash, large_bitset&& bitset) {
-    return std::make_unique<murmur3_bloom_filter>(hash, std::move(bitset));
+filter_ptr create_filter(int hash, large_bitset&& bitset, filter_format format) {
+    return std::make_unique<murmur3_bloom_filter>(hash, std::move(bitset), format);
 }
 
-filter_ptr create_filter(int hash, int64_t num_elements, int buckets_per) {
+filter_ptr create_filter(int hash, int64_t num_elements, int buckets_per, filter_format format) {
     int64_t num_bits = (num_elements * buckets_per) + bloom_calculations::EXCESS;
     num_bits = align_up<int64_t>(num_bits, 64);  // Seems to be implied in origin
     large_bitset bitset(num_bits);
-    return std::make_unique<murmur3_bloom_filter>(hash, std::move(bitset));
+    return std::make_unique<murmur3_bloom_filter>(hash, std::move(bitset), format);
 }
 }
 }

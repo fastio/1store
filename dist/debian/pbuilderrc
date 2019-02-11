@@ -1,44 +1,26 @@
 USENETWORK=yes
 BUILD_HOME=/tmp
-BASETGZ="/var/cache/pbuilder/scylla-server-$DIST.tgz"
+BASETGZ="/var/cache/pbuilder/$PRODUCT-server-$DIST.tgz"
 DISTRIBUTION="$DIST"
-BUILDRESULT="/var/cache/pbuilder/scylla-server-$DIST/result/"
-APTCACHE="/var/cache/pbuilder/scylla-server-$DIST/aptcache/"
-ALLOWUNTRUSTED=yes
+BUILDRESULT="/var/cache/pbuilder/$PRODUCT-server-$DIST/result/"
+APTCACHE="/var/cache/pbuilder/$PRODUCT-server-$DIST/aptcache/"
 EXTRAPACKAGES="sudo"
-if [ $REBUILD -eq 1 ]; then
-    BINDMOUNTS="/var/tmp/pbuilder"
-fi
 
-if [ "$DIST" = "trusty" ] || [ "$DIST" = "xenial" ] || [ "$DIST" = "yakkety" ] || [ "$DIST" = "zesty" ] || [ "$DIST" = "artful" ]; then
+if [ "$DIST" = "trusty" ] || [ "$DIST" = "xenial" ] || [ "$DIST" = "yakkety" ] || [ "$DIST" = "zesty" ] || [ "$DIST" = "artful" ] || [ "$DIST" = "bionic" ]; then
     MIRRORSITE="http://archive.ubuntu.com/ubuntu/"
     COMPONENTS="main restricted universe multiverse"
     DEBOOTSTRAPOPTS="--keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg"
-    if [ "$DIST" = "trusty" ]; then
-        OTHERMIRROR="deb http://archive.ubuntu.com/ubuntu/ trusty-updates main restricted universe multiverse|deb http://ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu trusty main|deb http://ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu trusty main"
-        if [ $REBUILD -eq 0 ]; then
-            OTHERMIRROR="$OTHERMIRROR|deb [arch=amd64] http://downloads.scylladb.com/deb/3rdparty/trusty trusty scylladb/multiverse"
-        fi
-    else
-        OTHERMIRROR="deb http://archive.ubuntu.com/ubuntu/ $DIST-updates main restricted universe multiverse"
-        if [ $REBUILD -eq 0 ]; then
-            OTHERMIRROR="$OTHERMIRROR|deb [arch=amd64] http://downloads.scylladb.com/deb/3rdparty/$DIST $DIST scylladb/multiverse"
-        fi
-    fi
+    OTHERMIRROR="deb http://archive.ubuntu.com/ubuntu/ $DIST-updates main restricted universe multiverse"
 elif [ "$DIST" = "jessie" ]; then
     MIRRORSITE="http://deb.debian.org/debian/"
     COMPONENTS="main contrib non-free"
     DEBOOTSTRAPOPTS="--keyring=/usr/share/keyrings/debian-archive-keyring.gpg"
-    if [ $REBUILD -eq 0 ]; then
-        OTHERMIRROR="deb [arch=amd64] http://downloads.scylladb.com/deb/3rdparty/jessie jessie scylladb/non-free"
-    fi
-elif [ "$DIST" = "stretch" ] || [ "$DIST" = "buster" ] || [ "$DIST" = "sid" ]; then
+    OTHERMIRROR="deb [arch=amd64] http://download.opensuse.org/repositories/home:/scylladb:/scylla-3rdparty-jessie/Debian_8.0/ ./"
+elif [ "$DIST" = "stretch" ]; then
     MIRRORSITE="http://deb.debian.org/debian/"
     COMPONENTS="main contrib non-free"
     DEBOOTSTRAPOPTS="--keyring=/usr/share/keyrings/debian-archive-keyring.gpg"
-    if [ $REBUILD -eq 0 ]; then
-        OTHERMIRROR="deb [arch=amd64] http://downloads.scylladb.com/deb/3rdparty/$DIST $DIST scylladb/non-free"
-    fi
+    OTHERMIRROR="deb [arch=amd64] http://download.opensuse.org/repositories/home:/scylladb:/scylla-3rdparty-stretch/Debian_9.0/ ./"
 else
     echo "Unknown distribution: $DIST"
     exit 1

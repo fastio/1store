@@ -21,25 +21,34 @@
 
 #pragma once
 
+#include <any>
 #include <cstdlib>
 #include <seastar/core/memory.hh>
+#include <seastar/util/alloc_failure_injector.hh>
 #include <malloc.h>
-#include <memory>
+
 // A function used by compacting collectors to migrate objects during
 // compaction. The function should reconstruct the object located at src
 // in the location pointed by dst. The object at old location should be
 // destroyed. See standard_migrator() above for example. Both src and dst
 // are aligned as requested during alloc()/construct().
 class migrate_fn_type {
+    // Migrators may be registered by thread-local objects. The table of all
+    // registered migrators is also thread-local which may cause problems with
+    // the order of object destruction and lead to use-after-free.
+    // This can be worked around by making migrators keep a shared pointer
+    // to the table of migrators. std::any is used so that its type doesn't
+    // have to be made public.
+    std::any _migrators;
     uint32_t _align = 0;
     uint32_t _index;
 private:
-    static uint32_t register_migrator(const migrate_fn_type* m);
+    static uint32_t register_migrator(migrate_fn_type* m);
     static void unregister_migrator(uint32_t index);
 public:
     explicit migrate_fn_type(size_t align) : _align(align), _index(register_migrator(this)) {}
     virtual ~migrate_fn_type() { unregister_migrator(_index); }
-    virtual void migrate(void* src, void* dsts) const noexcept = 0;
+    virtual void migrate(void* src, void* dsts, size_t size) const noexcept = 0;
     virtual size_t size(const void* obj) const = 0;
     size_t align() const { return _align; }
     uint32_t index() const { return _index; }
@@ -58,7 +67,7 @@ template <typename T>
 class standard_migrator final : public migrate_fn_type {
 public:
     standard_migrator() : migrate_fn_type(alignof(T)) {}
-    virtual void migrate(void* src, void* dst) const noexcept override {
+    virtual void migrate(void* src, void* dst, size_t size) const noexcept override {
         static_assert(std::is_nothrow_move_constructible<T>::value, "T must be nothrow move-constructible.");
         static_assert(std::is_nothrow_destructible<T>::value, "T must be nothrow destructible.");
 
@@ -69,11 +78,14 @@ public:
     virtual size_t size(const void* obj) const override {
         return size_for_allocation_strategy(*static_cast<const T*>(obj));
     }
-    static standard_migrator object;  // would like to use variable templates, but only available in gcc 5
 };
 
 template <typename T>
-standard_migrator<T> standard_migrator<T>::object;
+standard_migrator<T>& get_standard_migrator()
+{
+    static thread_local standard_migrator<T> instance;
+    return instance;
+}
 
 //
 // Abstracts allocation strategy for managed objects.
@@ -100,6 +112,7 @@ standard_migrator<T> standard_migrator<T>::object;
 class allocation_strategy {
 protected:
     size_t _preferred_max_contiguous_allocation = std::numeric_limits<size_t>::max();
+    uint64_t _invalidate_counter = 1;
 public:
     using migrate_fn = const migrate_fn_type*;
 
@@ -119,6 +132,7 @@ public:
     // Releases storage for the object. Doesn't invoke object's destructor.
     // Doesn't invalidate references to objects allocated with this strategy.
     virtual void free(void* object, size_t size) = 0;
+    virtual void free(void* object) = 0;
 
     // Returns the total immutable memory size used by the allocator to host
     // this object.  This will be at least the size of the object itself, plus
@@ -133,7 +147,7 @@ public:
     // requirement.
     template<typename T, typename... Args>
     T* construct(Args&&... args) {
-        void* storage = alloc(&standard_migrator<T>::object, sizeof(T), alignof(T));
+        void* storage = alloc(&get_standard_migrator<T>(), sizeof(T), alignof(T));
         try {
             return new (storage) T(std::forward<Args>(args)...);
         } catch (...) {
@@ -154,13 +168,31 @@ public:
     size_t preferred_max_contiguous_allocation() const {
         return _preferred_max_contiguous_allocation;
     }
+
+    // Returns a number which is increased when references to objects managed by this allocator
+    // are invalidated, e.g. due to internal events like compaction or eviction.
+    // When the value returned by this method doesn't change, references obtained
+    // between invocations remain valid.
+    uint64_t invalidate_counter() const {
+        return _invalidate_counter;
+    }
+
+    void invalidate_references() {
+        ++_invalidate_counter;
+    }
 };
 
 class standard_allocation_strategy : public allocation_strategy {
 public:
     virtual void* alloc(migrate_fn, size_t size, size_t alignment) override {
+        seastar::memory::on_alloc_point();
         // ASAN doesn't intercept aligned_alloc() and complains on free().
         void* ret;
+        // The system posix_memalign will return EINVAL if alignment is not
+        // a multiple of pointer size.
+        if (alignment < sizeof(void*)) {
+            alignment = sizeof(void*);
+        }
         if (posix_memalign(&ret, alignment, size) != 0) {
             throw std::bad_alloc();
         }
@@ -168,6 +200,10 @@ public:
     }
 
     virtual void free(void* obj, size_t size) override {
+        ::free(obj);
+    }
+
+    virtual void free(void* obj) override {
         ::free(obj);
     }
 

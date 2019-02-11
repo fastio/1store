@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 # Copyright (C) 2017 ScyllaDB
 #
@@ -19,13 +19,13 @@
 
 import os
 import re
-from string import atoi
 import scylla_util
 import subprocess
 import argparse
 import yaml
 import logging
 import sys
+import scylla_blocktune as blocktune
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='IO Setup script for Scylla.')
@@ -37,25 +37,37 @@ if __name__ == "__main__":
     if not scylla_util.is_developer_mode():
         if args.ami:
             idata = scylla_util.aws_instance()
-            nr_io_queues = cpudata.nr_shards()
 
-            if idata.instance_class() == "i3":
-                sysfs_file = "/sys/block/%s/queue/nr_requests"
-                max_seastar_shard_req = 128
-                max_sysfs_shard_req = sum([ atoi(file(sysfs_file % x).readline().strip()) for x in idata.ephemeral_disks() ])
-                # obtained running iotune multiple times against a single i3 disk.
-                max_iotune_disk = 192 * len(idata.ephemeral_disks())
-                nr_reqs = min(max_seastar_shard_req * cpudata.nr_shards(), max_sysfs_shard_req, max_iotune_disk)
+            disk_properties = {}
+            disk_properties["mountpoint"] = "/var/lib/scylla"
+            nr_disks = len(idata.ephemeral_disks())
+            ## both i3 and i2 can run with 1 I/O Queue per shard
+            if idata.instance() == "i3.large":
+                disk_properties["read_iops"] = 111000
+                disk_properties["read_bandwidth"] = 653925080
+                disk_properties["write_iops"] = 36800
+                disk_properties["write_bandwidth"] = 215066473
+            elif idata.instance() == "i3.xlarge":
+                disk_properties["read_iops"] = 200800
+                disk_properties["read_bandwidth"] = 1185106376
+                disk_properties["write_iops"] = 53180
+                disk_properties["write_bandwidth"] = 423621267
+            elif idata.instance_class() == "i3":
+                disk_properties["read_iops"] = 411200 * nr_disks
+                disk_properties["read_bandwidth"] = 2015342735 * nr_disks
+                disk_properties["write_iops"] = 181500 * nr_disks
+                disk_properties["write_bandwidth"] = 808775652 * nr_disks
             elif idata.instance_class() == "i2":
-                nr_reqs = 32 * len(idata.ephemeral_disks())
-            else:
-                nr_reqs = 16 * max(len(idata.ephemeral_disks()), 2)
-            if nr_reqs/nr_io_queues < 4:
-                nr_io_queues = nr_reqs / 4
-            ioconf = file("/etc/scylla.d/io.conf", "w")
-            ioconf.write("SEASTAR_IO=\"--num-io-queues {} --max-io-requests {}\"\n".format(nr_io_queues, nr_reqs))
+                disk_properties["read_iops"] = 64000 * nr_disks
+                disk_properties["read_bandwidth"] = 507338935 * nr_disks
+                disk_properties["write_iops"] = 57100 * nr_disks
+                disk_properties["write_bandwidth"] = 483141731 * nr_disks
+            properties_file = open("/etc/scylla.d/io_properties.yaml", "w")
+            yaml.dump({ "disks": [ disk_properties ] }, properties_file,  default_flow_style=False)
+            ioconf = open("/etc/scylla.d/io.conf", "w")
+            ioconf.write("SEASTAR_IO=\"--io-properties-file={}\"\n".format(properties_file.name))
         else:
-            if os.environ.has_key("SCYLLA_CONF"):
+            if "SCYLLA_CONF" in os.environ:
                 conf_dir = os.environ["SCYLLA_CONF"]
             else:
                 conf_dir = "/etc/scylla"
@@ -66,17 +78,25 @@ if __name__ == "__main__":
                              len(data_dirs), data_dirs[0])
 
             data_dir = data_dirs[0]
+            if os.path.exists(data_dir) == False:
+                logging.error("%s is not found. please check the configuration and run scylla_io_setup again.\n", data_dir)
+                sys.exit(1)
+            if os.path.isdir(data_dir) == False:
+                logging.error("%s is not a directory. please check the configuration and run scylla_io_setup again.\n", data_dir)
+                sys.exit(1)
             iotune_args = []
             if cpudata.cpuset():
                 iotune_args += [ "--cpuset", ",".join(map(str, cpudata.cpuset())) ]
             elif cpudata.smp():
                 iotune_args += [ "--smp", cpudata.smp() ]
 
+            blocktune.tune_fs(data_dir, '2')
             try:
                 subprocess.check_call(["iotune",
                                        "--evaluation-directory", data_dir,
                                        "--format", "envfile",
-                                       "--options-file", "/etc/scylla.d/io.conf"] + iotune_args)
+                                       "--options-file", "/etc/scylla.d/io.conf",
+                                       "--properties-file", "/etc/scylla.d/io_properties.yaml"] + iotune_args)
             except Exception:
                 logging.error("%s did not pass validation tests, it may not be on XFS and/or has limited disk space.\n"
                               "This is a non-supported setup, and performance is expected to be very bad.\n"

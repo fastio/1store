@@ -21,10 +21,13 @@
 
 #pragma once
 
-#include "utils/types.hh"
 #include "net/ip.hh"
 #include "utils/serialization.hh"
 #include <sstream>
+
+namespace seastar::net {
+    class inet_address;
+}
 
 namespace gms {
 
@@ -50,10 +53,14 @@ public:
             throw std::invalid_argument("IPv6 socket addresses are not supported.");
         }
     }
+    // Note: for now, will throw if given an ipv6 address
+    inet_address(const seastar::net::inet_address&);
 
     const net::ipv4_address& addr() const {
         return _addr;
     }
+
+    operator seastar::net::inet_address() const;
 
     inet_address(const sstring& addr) {
         // FIXME: We need a real DNS resolver

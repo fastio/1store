@@ -38,6 +38,7 @@
 
 #pragma once
 
+#include "unimplemented.hh"
 #include "core/sstring.hh"
 #include "core/shared_ptr.hh"
 #include "core/distributed.hh"
@@ -57,7 +58,7 @@ class endpoint_state;
 
 class arrival_window {
 public:
-    using clk = std::chrono::system_clock;
+    using clk = seastar::lowres_system_clock;
 private:
     clk::time_point _tlast{clk::time_point::min()};
     utils::bounded_stats_deque _arrival_intervals;
@@ -85,6 +86,8 @@ public:
 
     // see CASSANDRA-2597 for an explanation of the math at work here.
     double phi(clk::time_point tnow);
+
+    size_t size() { return _arrival_intervals.size(); }
 
     friend std::ostream& operator<<(std::ostream& os, const arrival_window& w);
 
@@ -153,7 +156,7 @@ public:
     }
 
 private:
-    void append_endpoint_state(std::stringstream& ss, endpoint_state& state);
+    void append_endpoint_state(std::stringstream& ss, const endpoint_state& state);
 
 public:
     /**

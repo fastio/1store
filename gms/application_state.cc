@@ -42,9 +42,10 @@
 #include <seastar/core/sstring.hh>
 #include <ostream>
 #include <map>
+#include "seastarx.hh"
 
 namespace gms {
-using namespace seastar;
+
 static const std::map<application_state, sstring> application_state_names = {
     {application_state::STATUS,                 "STATUS"},
     {application_state::LOAD,                   "LOAD"},
@@ -60,6 +61,10 @@ static const std::map<application_state, sstring> application_state_names = {
     {application_state::HOST_ID,                "HOST_ID"},
     {application_state::TOKENS,                 "TOKENS"},
     {application_state::SUPPORTED_FEATURES,     "SUPPORTED_FEATURES"},
+    {application_state::CACHE_HITRATES,         "CACHE_HITRATES"},
+    {application_state::SCHEMA_TABLES_VERSION,  "SCHEMA_TABLES_VERSION"},
+    {application_state::RPC_READY,              "RPC_READY"},
+    {application_state::VIEW_BACKLOG,           "VIEW_BACKLOG"},
 };
 
 std::ostream& operator<<(std::ostream& os, const application_state& m) {

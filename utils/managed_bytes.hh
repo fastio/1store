@@ -27,9 +27,10 @@
 #include "bytes.hh"
 #include "utils/allocation_strategy.hh"
 #include <seastar/core/unaligned.hh>
+#include <seastar/util/alloc_failure_injector.hh>
 #include <unordered_map>
 #include <type_traits>
-#include "seastarx.hh"
+
 struct blob_storage {
     struct [[gnu::packed]] ref_type {
         blob_storage* ptr;
@@ -75,18 +76,22 @@ struct blob_storage {
 
 // A managed version of "bytes" (can be used with LSA).
 class managed_bytes {
+    static thread_local std::unordered_map<const blob_storage*, std::unique_ptr<bytes_view::value_type[]>> _lc_state;
     struct linearization_context {
         unsigned _nesting = 0;
         // Map from first blob_storage address to linearized version
         // We use the blob_storage address to be insentive to moving
         // a managed_bytes object.
-        std::unordered_map<const blob_storage*, std::unique_ptr<bytes_view::value_type[]>> _state;
+        // linearization_context is entered often in the fast path, but it is
+        // actually used only in rare (slow) cases.
+        std::unordered_map<const blob_storage*, std::unique_ptr<bytes_view::value_type[]>>* _state_ptr = nullptr;
         void enter() {
             ++_nesting;
         }
         void leave() {
-            if (!--_nesting) {
-                _state.clear();
+            if (!--_nesting && _state_ptr) {
+                _state_ptr->clear();
+                _state_ptr = nullptr;
             }
         }
         void forget(const blob_storage* p) noexcept;
@@ -133,6 +138,7 @@ private:
         }
     }
     const bytes_view::value_type* read_linearize() const {
+        seastar::memory::on_alloc_point();
         if (!external()) {
             return _u.small.data;
         } else  if (!_u.ptr->next) {
@@ -167,6 +173,7 @@ public:
     managed_bytes(const bytes& b) : managed_bytes(static_cast<bytes_view>(b)) {}
 
     managed_bytes(initialized_later, size_type size) {
+        memory::on_alloc_point();
         if (size <= max_inline_size) {
             _u.small.size = size;
         } else {
@@ -174,7 +181,7 @@ public:
             auto& alctr = current_allocator();
             auto maxseg = max_seg(alctr);
             auto now = std::min(size_t(size), maxseg);
-            void* p = alctr.alloc(&standard_migrator<blob_storage>::object,
+            void* p = alctr.alloc(&get_standard_migrator<blob_storage>(),
                 sizeof(blob_storage) + now, alignof(blob_storage));
             auto first = new (p) blob_storage(&_u.ptr, size, now);
             auto last = first;
@@ -182,7 +189,7 @@ public:
             try {
                 while (size) {
                     auto now = std::min(size_t(size), maxseg);
-                    void* p = alctr.alloc(&standard_migrator<blob_storage>::object,
+                    void* p = alctr.alloc(&get_standard_migrator<blob_storage>(),
                         sizeof(blob_storage) + now, alignof(blob_storage));
                     last = new (p) blob_storage(&last->next, 0, now);
                     size -= now;
@@ -334,12 +341,11 @@ public:
         return external() && _u.ptr->next;
     }
 
-    /*
     operator bytes_mutable_view() {
         assert(!is_fragmented());
         return { data(), size() };
     };
-    */
+
     bytes_view::value_type& operator[](size_type index) {
         return value_at_index(index);
     }

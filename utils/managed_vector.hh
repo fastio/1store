@@ -181,7 +181,7 @@ public:
         if (new_capacity <= _capacity) {
             return;
         }
-        auto ptr = current_allocator().alloc(&standard_migrator<external>::object,
+        auto ptr = current_allocator().alloc(&get_standard_migrator<external>(),
             sizeof(external) + sizeof(T) * new_capacity, alignof(external));
         auto ext = static_cast<external*>(ptr);
         ext->_backref = this;
@@ -211,10 +211,11 @@ public:
         emplace_back(std::move(value));
     }
     template<typename... Args>
-    void emplace_back(Args&&... args) {
+    T& emplace_back(Args&&... args) {
         maybe_grow(_size + 1);
-        new (_data + _size) T(std::forward<Args>(args)...);
+        T* elem = new (_data + _size) T(std::forward<Args>(args)...);
         _size++;
+        return *elem;
     }
     void pop_back() {
         _data[_size - 1].~T();
@@ -240,10 +241,11 @@ public:
         }
     }
 
-    // Returns the amount of external memory used.
-    size_t external_memory_usage() const {
+    // Returns the amount of external memory used to hold inserted items.
+    // Ignores reserved space.
+    size_t used_space_external_memory_usage() const {
         if (is_external()) {
-            return sizeof(external) + _capacity * sizeof(T);
+            return sizeof(external) + _size * sizeof(T);
         }
         return 0;
     }

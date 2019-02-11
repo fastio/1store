@@ -19,33 +19,28 @@
 
 . /etc/os-release
 
-if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
-    if [ "$VERSION_ID" = "14.04" ]; then
-        if [ ! -f /usr/bin/add-apt-repository ]; then
-            apt-get -y install software-properties-common
-        fi
+bash seastar/install-dependencies.sh
 
-        add-apt-repository -y ppa:ubuntu-toolchain-r/test
-        apt-get -y update
+if [ "$ID" = "ubuntu" ]; then
+    echo "Adding /etc/apt/sources.list.d/scylla.list"
+
+    if wget "http://downloads.scylladb.com/deb/3rdparty/${VERSION_CODENAME}/scylla-3rdparty.list" -q -O /dev/null; then
+        echo "deb  [trusted=yes arch=amd64] http://downloads.scylladb.com/deb/3rdparty/${VERSION_CODENAME} ${VERSION_CODENAME} scylladb/multiverse" > /etc/apt/sources.list.d/scylla-3rdparty.list
+    else
+        echo "Packages are not available for your Ubuntu release yet, using the Xenial (16.04) list instead"
+
+        echo "deb  [trusted=yes arch=amd64] http://downloads.scylladb.com/deb/3rdparty/xenial xenial scylladb/multiverse" > /etc/apt/sources.list.d/scylla-3rdparty.list
     fi
-    apt-get install -y libaio-dev ninja-build ragel libhwloc-dev libnuma-dev libpciaccess-dev libcrypto++-dev libboost-all-dev libxen-dev libxml2-dev xfslibs-dev libgnutls28-dev liblz4-dev libsctp-dev gcc make libprotobuf-dev protobuf-compiler python3 libunwind8-dev systemtap-sdt-dev
-    if [ "$ID" = "ubuntu" ]; then
-        apt-get install -y g++-5
-        echo "g++-5 is installed for Seastar. To build Seastar with g++-5, specify '--compiler=g++-5' on configure.py"
-    else # debian
-        apt-get install -y g++
-    fi
-elif [ "$ID" = "centos" ] || [ "$ID" = "fedora" ]; then
-    if [ "$ID" = "centos" ]; then
-        yum install -y epel-release
-        curl -o /etc/yum.repos.d/scylla-1.2.repo http://downloads.scylladb.com/rpm/centos/scylla-1.2.repo
-    fi
-    yum install -y libaio-devel hwloc-devel numactl-devel libpciaccess-devel cryptopp-devel libxml2-devel xfsprogs-devel gnutls-devel lksctp-tools-devel lz4-devel gcc make protobuf-devel protobuf-compiler libunwind-devel systemtap-sdt-devel
-    if [ "$ID" = "fedora" ]; then
-        dnf install -y gcc-c++ ninja-build ragel boost-devel xen-devel libubsan libasan
-    else # centos
-        yum install -y scylla-binutils scylla-gcc-c++ scylla-ninja-build scylla-ragel scylla-boost-devel scylla-libubsan scylla-libasan scylla-libstdc++-static python34
-        echo "g++-5 is installed for Seastar. To build Seastar with g++-5, specify '--compiler=/opt/scylladb/bin/g++ --static-stdc++' on configure.py"
-        echo "Before running ninja-build, execute following command: . /etc/profile.d/scylla.sh"
-    fi
+
+    apt -y update
+
+    apt -y install libsystemd-dev python3-pyparsing libsnappy-dev libjsoncpp-dev libyaml-cpp-dev libthrift-dev antlr3-c++-dev antlr3 thrift-compiler
+elif [ "$ID" = "debian" ]; then
+    apt -y install libyaml-cpp-dev libjsoncpp-dev libsnappy-dev
+    echo antlr3 and thrift still missing - waiting for ppa
+elif [ "$ID" = "fedora" ]; then
+    yum install -y yaml-cpp-devel thrift-devel antlr3-tool antlr3-C++-devel jsoncpp-devel snappy-devel
+elif [ "$ID" = "centos" ]; then
+    yum install -y yaml-cpp-devel thrift-devel scylla-antlr35-tool scylla-antlr35-C++-devel jsoncpp-devel snappy-devel scylla-boost163-static scylla-python34-pyparsing20 systemd-devel
+    echo -e "Configure example:\n\tpython3.4 ./configure.py --enable-dpdk --mode=release --static-boost --compiler=/opt/scylladb/bin/g++-7.3 --python python3.4 --ldflag=-Wl,-rpath=/opt/scylladb/lib64 --cflags=-I/opt/scylladb/include --with-antlr3=/opt/scylladb/bin/antlr3"
 fi

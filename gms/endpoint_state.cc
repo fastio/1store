@@ -42,12 +42,12 @@
 
 namespace gms {
 
-std::experimental::optional<versioned_value> endpoint_state::get_application_state(application_state key) const {
+const versioned_value* endpoint_state::get_application_state_ptr(application_state key) const {
     auto it = _application_state.find(key);
     if (it == _application_state.end()) {
-        return {};
+        return nullptr;
     } else {
-        return _application_state.at(key);
+        return &it->second;
     }
 }
 
@@ -59,6 +59,18 @@ std::ostream& operator<<(std::ostream& os, const endpoint_state& x) {
         os << " { " << state << " : " << value << " } ";
     }
     return os;
+}
+
+bool endpoint_state::is_cql_ready() const {
+    auto* app_state = get_application_state_ptr(application_state::RPC_READY);
+    if (!app_state) {
+        return false;
+    }
+    try {
+        return boost::lexical_cast<int>(app_state->value);
+    } catch (...) {
+        return false;
+    }
 }
 
 }

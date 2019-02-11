@@ -413,32 +413,50 @@ def vector_add_method(current, base_state):
 def add_param_writer_basic_type(name, base_state, typ, var_type = "", var_index = None, root_node = False):
     if isinstance(var_index, Number):
         var_index = "uint32_t(" + str(var_index) +")"
+    create_variant_state = Template("auto state = state_of_${base_state}__$name<Output> { start_frame(_out), std::move(_state) };").substitute(locals()) if var_index and root_node else ""
     set_varient_index = "serialize(_out, " + var_index +");\n" if var_index is not None else ""
-    set_command = "_state.f.end(_out);" if var_type is not "" else ""
+    set_command = ("_state.f.end(_out);" if not root_node else "state.f.end(_out);") if var_type is not "" else ""
     return_command = "{ _out, std::move(_state._parent) }" if var_type is not "" and not root_node else "{ _out, std::move(_state) }"
 
+    allow_fragmented = False
     if typ in ['bytes', 'sstring']:
         typ += '_view'
+        allow_fragmented = True
     else:
         typ = 'const ' + typ + '&'
 
-    return Template(reindent(4, """
+    writer = Template(reindent(4, """
         after_${base_state}__$name<Output> write_$name$var_type($typ t) && {
+            $create_variant_state
             $set_varient_index
             serialize(_out, t);
             $set_command
             return $return_command;
         }""")).substitute(locals())
+    if allow_fragmented:
+        writer += Template(reindent(4, """
+        template<typename FragmentedBuffer>
+        GCC6_CONCEPT(requires FragmentRange<FragmentedBuffer>)
+        after_${base_state}__$name<Output> write_fragmented_$name$var_type(FragmentedBuffer&& fragments) && {
+            $set_varient_index
+            serialize_fragmented(_out, std::forward<FragmentedBuffer>(fragments));
+            $set_command
+            return $return_command;
+        }""")).substitute(locals())
+    return writer
 
 def add_param_writer_object(name, base_state, typ, var_type = "", var_index = None, root_node = False):
     var_type1 = "_" + var_type if var_type != "" else ""
     if isinstance(var_index, Number):
         var_index = "uint32_t(" + str(var_index) +")"
+    create_variant_state = Template("auto state = state_of_${base_state}__$name<Output> { start_frame(_out), std::move(_state) };").substitute(locals()) if var_index and root_node else ""
     set_varient_index = "serialize(_out, " + var_index +");\n" if var_index is not None else ""
+    state = "std::move(_state)" if not var_index or not root_node else "std::move(state)"
     ret = Template(reindent(4,"""
         ${base_state}__${name}$var_type1<Output> start_${name}$var_type() && {
+            $create_variant_state
             $set_varient_index
-            return { _out, std::move(_state) };
+            return { _out, $state };
         }
     """)).substitute(locals())
     if not is_stub(typ) and is_local_type(typ):
@@ -784,17 +802,29 @@ def add_view(hout, info):
         """)).substitute({'type' : cls["name"]}))
 
     skip = "" if is_final(cls) else "ser::skip(in, boost::type<size_type>());"
+    local_names = {}
     for m in members:
+        name = get_member_name(m["name"])
+        local_names[name] = "this->" + name + "()"
         full_type = param_view_type(m["type"])
+        if "attribute" in m:
+            deflt = m["default"][0] if "default" in m else param_type(m["type"]) + "()"
+            if deflt in local_names:
+                deflt = local_names[deflt]
+            deser = Template("(in.size()>0) ? $func(in, boost::type<$typ>()) : $default").substitute(
+                    {'func' : DESERIALIZER, 'typ' : full_type, 'default': deflt})
+        else:
+            deser = Template("$func(in, boost::type<$typ>())").substitute({'func' : DESERIALIZER, 'typ' : full_type})
+
         fprintln(hout, Template(reindent(4, """
             auto $name() const {
-              return seastar::with_serialized_stream(v, [] (auto& v) {
+              return seastar::with_serialized_stream(v, [this] (auto& v) -> decltype($func(std::declval<utils::input_stream&>(), boost::type<$type>())) {
                auto in = v;
                $skip
-               return deserialize(in, boost::type<$type>());
+               return $deser;
               });
             }
-        """)).substitute({'name' : get_member_name(m["name"]), 'type' : full_type, 'skip' : skip}))
+        """)).substitute({'name' : name, 'type' : full_type, 'skip' : skip, 'deser' : deser, 'func' : DESERIALIZER}))
 
         skip = skip + Template("\n       ser::skip(in, boost::type<${type}>());").substitute({'type': full_type})
 
@@ -886,7 +916,11 @@ $template
 template <typename Input>
 $name$temp_param serializer<$name$temp_param>::read(Input& buf) {
  return seastar::with_serialized_stream(buf, [] (auto& buf) {""").substitute({'func' : DESERIALIZER, 'name' : name, 'template': template, 'temp_param' : template_class_param}))
-    if not is_final:
+    if not cls["members"]:
+        if not is_final:
+            fprintln(cout, Template("""  $size_type size = $func(buf, boost::type<$size_type>());
+  buf.skip(size - sizeof($size_type));""").substitute({'func' : DESERIALIZER, 'size_type' : SIZETYPE}))
+    elif not is_final:
         fprintln(cout, Template("""  $size_type size = $func(buf, boost::type<$size_type>());
   auto in = buf.read_substream(size - sizeof($size_type));""").substitute({'func' : DESERIALIZER, 'size_type' : SIZETYPE}))
     else:

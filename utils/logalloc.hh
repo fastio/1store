@@ -33,6 +33,7 @@
 #include "allocation_strategy.hh"
 #include <boost/heap/binomial_heap.hpp>
 #include "seastarx.hh"
+#include "db/timeout_clock.hh"
 
 namespace logalloc {
 
@@ -41,8 +42,9 @@ class region;
 class region_impl;
 class allocating_section;
 
-constexpr int segment_size_shift = 18; // 256K; see #151, #152
+constexpr int segment_size_shift = 17; // 128K; see #151, #152
 constexpr size_t segment_size = 1 << segment_size_shift;
+constexpr size_t max_zone_segments = 256;
 
 //
 // Frees some amount of objects from the region to which it's attached.
@@ -131,8 +133,6 @@ public:
 
 // Groups regions for the purpose of statistics.  Can be nested.
 class region_group {
-    using timeout_clock = lowres_clock;
-
     static region_group_reclaimer no_reclaimer;
 
     struct region_evictable_occupancy_ascending_less_comparator {
@@ -222,7 +222,7 @@ class region_group {
     //
     // This allows us to easily provide strong execution guarantees while keeping all re-check
     // complication in release_requests and keep the main request execution path simpler.
-    expiring_fifo<std::unique_ptr<allocating_function>, on_request_expiry, timeout_clock> _blocked_requests;
+    expiring_fifo<std::unique_ptr<allocating_function>, on_request_expiry, db::timeout_clock> _blocked_requests;
 
     uint64_t _blocked_requests_counter = 0;
 
@@ -243,7 +243,7 @@ class region_group {
     bool _shutdown_requested = false;
 
     bool reclaimer_can_block() const;
-    future<> start_releaser();
+    future<> start_releaser(scheduling_group deferered_work_sg);
     void notify_relief();
     friend void region_group_binomial_group_sanity_check(const region_group::region_heap& bh);
 public:
@@ -252,8 +252,15 @@ public:
     // method run_when_memory_available(), to make sure that a given function is only executed when
     // the total memory for the region group (and all of its parents) is lower or equal to the
     // region_group's throttle_treshold (and respectively for its parents).
-    region_group(region_group_reclaimer& reclaimer = no_reclaimer) : region_group(nullptr, reclaimer) {}
-    region_group(region_group* parent, region_group_reclaimer& reclaimer = no_reclaimer);
+    //
+    // The deferred_work_sg parameter specifies a scheduling group in which to run allocations
+    // (given to run_when_memory_available()) when they must be deferred due to lack of memory
+    // at the time the call to run_when_memory_available() was made.
+    region_group(region_group_reclaimer& reclaimer = no_reclaimer,
+            scheduling_group deferred_work_sg = default_scheduling_group())
+            : region_group(nullptr, reclaimer, deferred_work_sg) {}
+    region_group(region_group* parent, region_group_reclaimer& reclaimer = no_reclaimer,
+            scheduling_group deferred_work_sg = default_scheduling_group());
     region_group(region_group&& o) = delete;
     region_group(const region_group&) = delete;
     ~region_group() {
@@ -288,8 +295,12 @@ public:
         update(delta);
     }
 
-    void decrease_usage(region_heap::handle_type& r_handle, ssize_t delta) {
+    void decrease_evictable_usage(region_heap::handle_type& r_handle) {
         _regions.decrease(r_handle);
+    }
+
+    void decrease_usage(region_heap::handle_type& r_handle, ssize_t delta) {
+        decrease_evictable_usage(r_handle);
         update(delta);
     }
 
@@ -310,7 +321,7 @@ public:
     //
     // When timeout is reached first, the returned future is resolved with timed_out_error exception.
     template <typename Func>
-    futurize_t<std::result_of_t<Func()>> run_when_memory_available(Func&& func, timeout_clock::time_point timeout = timeout_clock::time_point::max()) {
+    futurize_t<std::result_of_t<Func()>> run_when_memory_available(Func&& func, db::timeout_clock::time_point timeout = db::no_timeout) {
         // We disallow future-returning functions here, because otherwise memory may be available
         // when we start executing it, but no longer available in the middle of the execution.
         static_assert(!is_future<std::result_of_t<Func()>>::value, "future-returning functions are not permitted.");
@@ -455,6 +466,9 @@ public:
     // Returns statistics for all segments allocated by LSA on this shard.
     occupancy_stats occupancy();
 
+    // Returns amount of allocated memory not managed by LSA
+    size_t non_lsa_used_space() const;
+
     impl& get_impl() { return *_impl; }
 
     // Set the minimum number of segments reclaimed during single reclamation cycle.
@@ -530,6 +544,19 @@ public:
     friend std::ostream& operator<<(std::ostream&, const occupancy_stats&);
 };
 
+class basic_region_impl : public allocation_strategy {
+protected:
+    bool _reclaiming_enabled = true;
+public:
+    void set_reclaiming_enabled(bool enabled) {
+        _reclaiming_enabled = enabled;
+    }
+
+    bool reclaiming_enabled() const {
+        return _reclaiming_enabled;
+    }
+};
+
 //
 // Log-structured allocator region.
 //
@@ -549,7 +576,10 @@ class region {
 public:
     using impl = region_impl;
 private:
-    shared_ptr<impl> _impl;
+    shared_ptr<basic_region_impl> _impl;
+private:
+    region_impl& get_impl();
+    const region_impl& get_impl() const;
 public:
     region();
     explicit region(region_group& group);
@@ -560,13 +590,18 @@ public:
 
     occupancy_stats occupancy() const;
 
-    allocation_strategy& allocator();
+    allocation_strategy& allocator() {
+        return *_impl;
+    }
+    const allocation_strategy& allocator() const {
+        return *_impl;
+    }
 
     region_group* group();
 
     // Merges another region into this region. The other region is left empty.
     // Doesn't invalidate references to allocated objects.
-    void merge(region& other);
+    void merge(region& other) noexcept;
 
     // Compacts everything. Mainly for testing.
     // Invalidates references to allocated objects.
@@ -578,15 +613,20 @@ public:
     // Changes the reclaimability state of this region. When region is not
     // reclaimable, it won't be considered by tracker::reclaim(). By default region is
     // reclaimable after construction.
-    void set_reclaiming_enabled(bool);
+    void set_reclaiming_enabled(bool e) { _impl->set_reclaiming_enabled(e); }
 
     // Returns the reclaimability state of this region.
-    bool reclaiming_enabled() const;
+    bool reclaiming_enabled() const { return _impl->reclaiming_enabled(); }
 
     // Returns a value which is increased when this region is either compacted or
     // evicted from, which invalidates references into the region.
     // When the value returned by this method doesn't change, references remain valid.
-    uint64_t reclaim_counter() const;
+    uint64_t reclaim_counter() const {
+        return allocator().invalidate_counter();
+    }
+
+    // Will cause subsequent calls to evictable_occupancy() to report empty occupancy.
+    void ground_evictable_occupancy();
 
     // Makes this region an evictable region. Supplied function will be called
     // when data from this region needs to be evicted in order to reclaim space.
@@ -622,42 +662,35 @@ struct reclaim_lock {
 class allocating_section {
     size_t _lsa_reserve = 10; // in segments
     size_t _std_reserve = 1024; // in bytes
+    size_t _minimum_lsa_emergency_reserve = 0;
 private:
     struct guard {
         size_t _prev;
         guard();
         ~guard();
-        void enter(allocating_section&);
     };
-    void on_alloc_failure();
+    void reserve();
+    void on_alloc_failure(logalloc::region&);
 public:
+
     void set_lsa_reserve(size_t);
     void set_std_reserve(size_t);
 
     //
-    // Invokes func with reclaim_lock on region r. If LSA allocation fails
-    // inside func it is retried after increasing LSA segment reserve. The
-    // memory reserves are increased with region lock off allowing for memory
-    // reclamation to take place in the region.
+    // Reserves standard allocator and LSA memory for subsequent operations that
+    // have to be performed with memory reclamation disabled.
     //
     // Throws std::bad_alloc when reserves can't be increased to a sufficient level.
     //
     template<typename Func>
-    decltype(auto) operator()(logalloc::region& r, Func&& func) {
+    decltype(auto) with_reserve(Func&& fn) {
         auto prev_lsa_reserve = _lsa_reserve;
         auto prev_std_reserve = _std_reserve;
         try {
-            while (true) {
-                assert(r.reclaiming_enabled());
-                guard g;
-                g.enter(*this);
-                try {
-                    logalloc::reclaim_lock _(r);
-                    return func();
-                } catch (const std::bad_alloc&) {
-                    on_alloc_failure();
-                }
-            }
+            guard g;
+            _minimum_lsa_emergency_reserve = g._prev;
+            reserve();
+            return fn();
         } catch (const std::bad_alloc&) {
             // roll-back limits to protect against pathological requests
             // preventing future requests from succeeding.
@@ -666,6 +699,54 @@ public:
             throw;
         }
     }
+
+    //
+    // Invokes func with reclaim_lock on region r. If LSA allocation fails
+    // inside func it is retried after increasing LSA segment reserve. The
+    // memory reserves are increased with region lock off allowing for memory
+    // reclamation to take place in the region.
+    //
+    // References in the region are invalidated when allocating section is re-entered
+    // on allocation failure.
+    //
+    // Throws std::bad_alloc when reserves can't be increased to a sufficient level.
+    //
+    template<typename Func>
+    decltype(auto) with_reclaiming_disabled(logalloc::region& r, Func&& fn) {
+        assert(r.reclaiming_enabled());
+        while (true) {
+            try {
+                logalloc::reclaim_lock _(r);
+                return fn();
+            } catch (const std::bad_alloc&) {
+                on_alloc_failure(r);
+            }
+        }
+    }
+
+    //
+    // Reserves standard allocator and LSA memory and
+    // invokes func with reclaim_lock on region r. If LSA allocation fails
+    // inside func it is retried after increasing LSA segment reserve. The
+    // memory reserves are increased with region lock off allowing for memory
+    // reclamation to take place in the region.
+    //
+    // References in the region are invalidated when allocating section is re-entered
+    // on allocation failure.
+    //
+    // Throws std::bad_alloc when reserves can't be increased to a sufficient level.
+    //
+    template<typename Func>
+    decltype(auto) operator()(logalloc::region& r, Func&& func) {
+        return with_reserve([this, &r, &func] {
+            return with_reclaiming_disabled(r, func);
+        });
+    }
 };
+
+future<> prime_segment_pool(size_t available_memory, size_t min_free_memory);
+
+uint64_t memory_allocated();
+uint64_t memory_compacted();
 
 }

@@ -38,7 +38,6 @@
 
 #pragma once
 
-#include "utils/types.hh"
 #include "core/sstring.hh"
 #include "utils/serialization.hh"
 #include "gms/inet_address.hh"
