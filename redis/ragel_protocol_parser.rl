@@ -174,7 +174,7 @@ protected:
         return std::move(s);
     }
 public:
-    request _req;
+    redis::request _req;
     uint32_t _u32;
     uint32_t _arg_size;
     uint32_t _size_left;
@@ -214,7 +214,7 @@ public:
     bool eof() const {
         return _req._state == protocol_state::eof;
     }
-    virtual request get_request() { return std::move(_req); }
+    virtual redis::request get_request() { return std::move(_req); }
 };
 
 }
