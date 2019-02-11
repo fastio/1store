@@ -366,7 +366,7 @@ perf_tests = [
 ]
 
 apps = [
-    'scylla',
+    'pedis',
 ]
 
 tests = scylla_tests + perf_tests
@@ -539,7 +539,7 @@ scylla_core = (['database.cc',
                 'thrift/server.cc',
                 'thrift/thrift_validation.cc',
                 'redis/query_processor.cc',
-                'redis/query_processor.cc',
+                'redis/protocol_parser.cc',
                 'redis/ragel_protocol_parser.rl',
                 'utils/runtime.cc',
                 'utils/murmur_hash.cc',
@@ -773,7 +773,7 @@ scylla_tests_seastar_deps = [
 ]
 
 deps = {
-    'scylla': idls + ['main.cc', 'release.cc'] + scylla_core + api,
+    'pedis': idls + ['main.cc', 'release.cc'] + scylla_core + api,
 }
 
 pure_boost_tests = set([
