@@ -14,27 +14,9 @@
 * KIND, either express or implied.  See the License for the
 * specific language governing permissions and limitations
 * under the License.
-* 
-*  Copyright (c) 2016-2026, Peng Jian, pengjian.uestc@gmail.com. All rights reserved.
+*
+*  Copyright (c) 2016-2026, Peng Jian, pstack@163.com. All rights reserved.
 *
 */
-#pragma once
-#include <iomanip>
-#include <sstream>
-#include <functional>
-#include <unordered_map>
-#include <vector>
-#include "bytes.hh"
-#include  <experimental/vector>
-#include "seastar/core/sharded.hh"
-#include "seastar/core/shared_ptr.hh"
-#include "seastar/core/scattered_message.hh"
-namespace redis {
-using namespace seastar;
-using message_ptr = foreign_ptr<lw_shared_ptr<bytes>>;
-struct reply {
-    reply() : _reply(nullptr) {}
-    reply(message_ptr reply) : _reply(std::move(reply)) {}
-    message_ptr _reply;
-};
-}
+#include "reply_builder.hh"
+namespace redis {}

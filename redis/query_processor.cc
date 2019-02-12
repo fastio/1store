@@ -18,14 +18,15 @@
 #define CRYPTOPP_ENABLE_NAMESPACE_WEAK 1
 
 #include "redis/query_processor.hh"
+#include "redis/command_factory.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
-
+#include "redis/reply_builder.hh"
+#include "redis/abstract_command.hh"
 #include <seastar/core/metrics.hh>
 
 
 namespace redis {
-
 
 distributed<query_processor> _the_query_processor;
 
@@ -43,7 +44,8 @@ future<> query_processor::stop() {
     return make_ready_future<>();
 }
 
-future<reply> query_processor::process(request&& request) {
-    return make_ready_future<reply>();
+future<reply> query_processor::process(request&& req) {
+    return command_factory::create(std::move(req))->execute();
 }
+
 }

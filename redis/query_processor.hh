@@ -42,7 +42,6 @@ struct reply;
 class query_processor {
     service::storage_proxy& _proxy;
     distributed<database>& _db;
-
     seastar::metrics::metric_groups _metrics;
 
 public:
@@ -59,6 +58,7 @@ public:
     }
 
     future<reply> process(request&&);
+
     future<> stop();
 };
 
