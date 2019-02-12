@@ -88,6 +88,14 @@ static constexpr auto SSTABLE_ACTIVITY = "sstable_activity";
 static constexpr auto SIZE_ESTIMATES = "size_estimates";
 static constexpr auto LARGE_PARTITIONS = "large_partitions";
 
+namespace redis {
+static constexpr auto NAME = "redis";
+static constexpr auto SIMPLE_OBJECTS = "simple_objects";
+static constexpr auto LISTS = "lists";
+static constexpr auto SETS = "sets";
+static constexpr auto MAPS = "maps";
+}
+
 namespace v3 {
 static constexpr auto BATCHES = "batches";
 static constexpr auto PAXOS = "paxos";
@@ -139,6 +147,16 @@ extern schema_ptr batchlog();
 extern schema_ptr paxos();
 extern schema_ptr built_indexes(); // TODO (from Cassandra): make private
 
+namespace redis {
+extern schema_ptr simple_objects();
+extern schema_ptr lists();
+extern schema_ptr sets();
+extern schema_ptr maps();
+
+std::vector<schema_ptr> all_tables();
+void make(database& db, bool durable, bool volatile_testing_only = false);
+}
+
 namespace legacy {
 
 schema_ptr keyspaces();
@@ -175,6 +193,7 @@ future<> update_hints_dropped(gms::inet_address ep, utils::UUID time_period, int
 
 std::vector<schema_ptr> all_tables();
 void make(database& db, bool durable, bool volatile_testing_only = false);
+
 
 future<foreign_ptr<lw_shared_ptr<reconcilable_result>>>
 query_mutations(distributed<service::storage_proxy>& proxy, const sstring& cf_name);

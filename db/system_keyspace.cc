@@ -116,6 +116,144 @@ table_schema_version generate_schema_version(utils::UUID table_id) {
 // problems (we need the type variables to be constructed first), and using
 // functions will solve this problem. So we use functions right now.
 
+namespace redis {
+schema_ptr simple_objects() {
+    static thread_local auto simple_object = [] {
+        schema_builder builder(make_lw_shared(schema(generate_legacy_id(NAME, SIMPLE_OBJECTS), NAME, SIMPLE_OBJECTS,
+        // partition key
+        {{"key", bytes_type}},
+        // clustering key
+        {},
+        // regular columns
+        {{"ttl", timestamp_type}, {"data", bytes_type}},
+        // static columns
+        {},
+        // regular column name type
+        utf8_type,
+        // comment
+        "redis simple object"
+       )));
+       builder.set_gc_grace_seconds(0);
+       builder.set_compaction_strategy_options({{ "enabled", "true" }});
+       builder.with_version(generate_schema_version(builder.uuid()));
+       return builder.build(schema_builder::compact_storage::yes);
+    }();
+    return simple_object;
+}
+
+schema_ptr lists() {
+    static thread_local auto list_schema = [] {
+        schema_builder builder(make_lw_shared(schema(generate_legacy_id(NAME, LISTS), NAME, LISTS,
+        // partition key
+        {{"key", bytes_type}},
+        // clustering key
+        {},
+        // regular columns
+        {{"ttl", timestamp_type}, {"size", int32_type}, {"data", list_type_impl::get_instance(bytes_type, true)}},
+        // static columns
+        {},
+        // regular column name type
+        utf8_type,
+        // comment
+        "redis list"
+       )));
+       builder.set_gc_grace_seconds(0);
+       builder.set_compaction_strategy_options({{ "enabled", "true" }});
+       builder.with_version(generate_schema_version(builder.uuid()));
+       return builder.build(schema_builder::compact_storage::yes);
+    }();
+    return list_schema;
+}
+
+schema_ptr sets() {
+    static thread_local auto set_schema = [] {
+        schema_builder builder(make_lw_shared(schema(generate_legacy_id(NAME, SETS), NAME, SETS,
+        // partition key
+        {{"key", bytes_type}},
+        // clustering key
+        {},
+        // regular columns
+        {{"ttl", timestamp_type}, {"size", int32_type}, {"data", set_type_impl::get_instance(bytes_type, true)}},
+        // static columns
+        {},
+        // regular column name type
+        utf8_type,
+        // comment
+        "redis set"
+       )));
+       builder.set_gc_grace_seconds(0);
+       builder.set_compaction_strategy_options({{ "enabled", "true" }});
+       builder.with_version(generate_schema_version(builder.uuid()));
+       return builder.build(schema_builder::compact_storage::yes);
+    }();
+    return set_schema;
+}
+
+schema_ptr maps() {
+    static thread_local auto map_schema = [] {
+        schema_builder builder(make_lw_shared(schema(generate_legacy_id(NAME, MAPS), NAME, MAPS,
+        // partition key
+        {{"key", bytes_type}},
+        // clustering key
+        {},
+        // regular columns
+        {{"ttl", timestamp_type}, {"size", int32_type}, {"data", map_type_impl::get_instance(bytes_type, bytes_type, true)}},
+        // static columns
+        {},
+        // regular column name type
+        utf8_type,
+        // comment
+        "redis map"
+       )));
+       builder.set_gc_grace_seconds(0);
+       builder.set_compaction_strategy_options({{ "enabled", "true" }});
+       builder.with_version(generate_schema_version(builder.uuid()));
+       return builder.build(schema_builder::compact_storage::yes);
+    }();
+    return map_schema;
+}
+
+sstring redis_keyspace_name() {
+    return NAME;
+}
+
+std::vector<schema_ptr> all_tables() {
+    return { simple_objects(), lists(), sets(), maps() };
+}
+
+void make(database& db, bool durable, bool volatile_testing_only) {
+    for (auto&& table : redis::all_tables()) {
+        auto ks_name = table->ks_name();
+        if (!db.has_keyspace(ks_name)) {
+            auto ksm = make_lw_shared<keyspace_metadata>(ks_name,
+                    "org.apache.cassandra.locator.SimpleStrategy",
+                    std::map<sstring, sstring>{},
+                    durable
+                    );
+            auto kscfg = db.make_keyspace_config(*ksm);
+            kscfg.enable_disk_reads = !volatile_testing_only;
+            kscfg.enable_disk_writes = !volatile_testing_only;
+            kscfg.enable_commitlog = !volatile_testing_only;
+            kscfg.enable_cache = true;
+            // don't make system keyspace reads wait for user reads
+            kscfg.read_concurrency_semaphore = &db.user_read_concurrency_sem();
+            // don't make system keyspace writes wait for user writes (if under pressure)
+            kscfg.dirty_memory_manager = &db._dirty_memory_manager;
+            keyspace _ks{ksm, std::move(kscfg)};
+            auto rs(locator::abstract_replication_strategy::create_replication_strategy(NAME, "SimpleStrategy", service::get_local_storage_service().get_token_metadata(), ksm->strategy_options()));
+            _ks.set_replication_strategy(std::move(rs));
+            db.add_keyspace(ks_name, std::move(_ks));
+        }
+        auto& ks = db.find_keyspace(ks_name);
+        auto cfg = ks.make_column_family_config(*table, db.get_config(), db.get_large_partition_handler());
+        cfg.dirty_memory_manager = &db._dirty_memory_manager;
+        //    cfg.memtable_scheduling_group = default_scheduling_group();
+        //    cfg.memtable_to_cache_scheduling_group = default_scheduling_group();
+        db.add_column_family(ks, table, std::move(cfg));
+    }
+}
+
+} // end redis namespace
 
 schema_ptr hints() {
     static thread_local auto hints = [] {
@@ -1115,6 +1253,8 @@ future<> setup(distributed<database>& db, distributed<cql3::query_processor>& qp
     }).then([] {
         // #2514 - make sure "system" is written to system_schema.keyspaces.
         return db::schema_tables::save_system_schema(NAME);
+    }).then([] {
+        return db::schema_tables::save_system_schema(redis::NAME);
     }).then([] {
         return netw::get_messaging_service().invoke_on_all([] (auto& ms){
             return ms.init_local_preferred_ip_cache();

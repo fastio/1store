@@ -31,6 +31,7 @@
 #include "bytes.hh"
 #include "redis/protocol_parser.hh"
 #include "redis/request.hh"
+#include "log.hh"
 using namespace seastar;
 using namespace redis;
 %%{
