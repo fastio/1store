@@ -28,16 +28,11 @@ public:
         , _flag(flag)
     {
     }
-    set(bytes&& name, bytes&& key, bytes&& data) 
-        : abstract_command(std::move(name))
-        , _key(std::move(key))
-        , _data(std::move(data))
-        , _ttl(0)
-        , _flag(flag_t::FLAG_SET_NO)
+    set(bytes&& name, bytes&& key, bytes&& data) : set(std::move(name), std::move(key), std::move(data), 0, flag_t::FLAG_SET_NO)
     {
     }
     ~set() {}
-    future<reply> execute() override;
+    future<reply> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, tracing::trace_state_ptr) override;
 };
 }
 }

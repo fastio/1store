@@ -13,7 +13,7 @@ shared_ptr<abstract_command> get::prepare(request&& req)
     return make_shared<get>(std::move(req._command), std::move(req._args[0]));
 }
 
-future<reply> get::execute()
+future<reply> get::execute(service::storage_proxy&, db::consistency_level cl, db::timeout_clock::time_point timeout, tracing::trace_state_ptr trace_state)
 {
     return make_ready_future<reply>();
 }

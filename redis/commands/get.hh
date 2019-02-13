@@ -13,7 +13,7 @@ public:
     {
     }
     ~get() {}
-    future<reply> execute() override;
+    future<reply> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, tracing::trace_state_ptr) override;
 };
 }
 }

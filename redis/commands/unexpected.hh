@@ -3,6 +3,8 @@
 #include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
+#include "tracing/trace_state.hh"
+
 namespace redis {
 namespace commands {
 class unexpected : public abstract_command {
@@ -24,7 +26,7 @@ public:
     static shared_ptr<abstract_command> prepare(bytes&& name, bytes&& message) {
         return make_shared<unexpected>(std::move(name), std::move(message));
     }
-    virtual future<reply> execute() override {
+    virtual future<reply> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, tracing::trace_state_ptr) override {
         return reply_builder::build(_exception_message);
     }
 };
