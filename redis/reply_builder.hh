@@ -79,13 +79,11 @@ template<typename tag>
 static future<reply> build()
 {
     auto m = make_lw_shared<scattered_message<char>>();
-    m->append_static(reply_builder::to_sstring(msg_num_tag));
     if (std::is_same<ok_tag, tag>::value) {
-        m->append(seastar::to_sstring(1));
+        m->append(to_sstring(msg_one));
     } else {
-        m->append(seastar::to_sstring(0));
+        m->append(to_sstring(msg_zero));
     }
-    m->append_static(reply_builder::to_sstring(msg_crlf));
     return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
 }
 

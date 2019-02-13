@@ -1,6 +1,7 @@
 #pragma once
 #include "bytes.hh"
 #include "seastar/core/future.hh"
+#include "seastar/core/sstring.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "mutation.hh"
@@ -29,6 +30,9 @@ public:
     virtual ~abstract_command() {};
     virtual future<reply> execute(service::storage_proxy&, db::consistency_level cl, db::timeout_clock::time_point, const timeout_config& tc, tracing::trace_state_ptr) = 0;
     const bytes& name() const { return _name; }
+    static sstring make_sstring(bytes b) {
+        return sstring{reinterpret_cast<char*>(b.data()), b.size()};
+    }
 };
 
 class mutation_helper {
