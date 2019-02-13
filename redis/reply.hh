@@ -31,7 +31,7 @@
 #include "seastar/core/scattered_message.hh"
 namespace redis {
 using namespace seastar;
-using message_ptr = foreign_ptr<lw_shared_ptr<bytes>>;
+using message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
 struct reply {
     reply() : _reply(nullptr) {}
     reply(message_ptr reply) : _reply(std::move(reply)) {}

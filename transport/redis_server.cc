@@ -77,13 +77,14 @@ redis_load_balance parse_load_balance(sstring value)
     }
 }
 
-redis_server::redis_server(distributed<service::storage_proxy>& proxy, distributed<redis::query_processor>& qp, redis_load_balance lb, redis_server_config config)
+redis_server::redis_server(distributed<service::storage_proxy>& proxy, distributed<redis::query_processor>& qp, redis_load_balance lb, auth::service& auth_service, redis_server_config config)
     : _proxy(proxy)
     , _query_processor(qp)
     , _config(config)
     , _max_request_size(config.max_request_size)
     , _memory_available(_max_request_size)
     , _lb(lb)
+    , _auth_service(auth_service)
 {
     namespace sm = seastar::metrics;
 }
@@ -161,10 +162,10 @@ redis_server::do_accepts(int which, bool keepalive, ipv4_addr server_addr) {
     });
 }
 
-future<redis_server::connection::result> redis_server::connection::process_request_one(redis::request&& request) {
-    return futurize_apply([this, request = std::move(request)] () mutable {
+future<redis_server::connection::result> redis_server::connection::process_request_one(redis::request&& request,  service::client_state cs, tracing_request_type rt) {
+    return futurize_apply([this, request = std::move(request), cs = std::move(cs)] () mutable {
             // FIXME: proccess the request.
-        return _server._query_processor.local().process(std::move(request));
+        return _server._query_processor.local().process(std::move(request), cs);
     }).then_wrapped([this] (future<redis::reply> f) -> future<redis_server::connection::result> {
         --_server._requests_serving;
         try { f.get(); } catch (...) {}
@@ -179,6 +180,7 @@ redis_server::connection::connection(redis_server& server, ipv4_addr server_addr
     , _read_buf(_fd.input())
     , _write_buf(_fd.output())
     , _parser(redis::make_ragel_protocol_parser())
+    , _client_state(service::client_state::external_tag{}, server._auth_service, addr)
 {
     ++_server._total_connections;
     ++_server._current_connections;
@@ -238,13 +240,14 @@ future<> redis_server::connection::process_request() {
         ++_server._requests_serving;
         _pending_requests_gate.enter();
         auto leave = defer([this] { _pending_requests_gate.leave(); });
+        tracing_request_type tracing_requested = tracing_request_type::not_requested;
         [&] {
             auto cpu = pick_request_cpu();
             if (cpu == engine().cpu_id()) {
-                return _process_request_stage(this, _parser.get_request());
+                return _process_request_stage(this, _parser.get_request(), service::client_state(service::client_state::request_copy_tag{}, _client_state, _client_state.get_timestamp()), tracing_requested);
             } else {
-                return smp::submit_to(cpu, [this, request = std::move(_parser.get_request())] () mutable {
-                    return _process_request_stage(this, request);
+                return smp::submit_to(cpu, [this, request = std::move(_parser.get_request()), client_state = _client_state, tracing_requested, ts = _client_state.get_timestamp()] () mutable {
+                    return _process_request_stage(this, request, service::client_state(service::client_state::request_copy_tag{}, client_state, ts), tracing_requested);
                 });
             }
         } ().then_wrapped([this, leave = std::move(leave)] (future<result> result_future) {

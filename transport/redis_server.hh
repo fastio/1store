@@ -73,8 +73,9 @@ private:
     uint64_t _requests_serving = 0;
     uint64_t _requests_blocked_memory = 0;
     redis_load_balance _lb;
+    auth::service& _auth_service;
 public:
-    redis_server(distributed<service::storage_proxy>& proxy, distributed<redis::query_processor>& qp, redis_load_balance lb, redis_server_config config);
+    redis_server(distributed<service::storage_proxy>& proxy, distributed<redis::query_processor>& qp, redis_load_balance lb, auth::service& auth_service, redis_server_config config);
     future<> listen(ipv4_addr addr, std::shared_ptr<seastar::tls::credentials_builder> = {}, bool keepalive = false);
     future<> do_accepts(int which, bool keepalive, ipv4_addr server_addr);
     future<> stop();
@@ -94,13 +95,22 @@ private:
         output_stream<char> _write_buf;
         redis::protocol_parser _parser;
         seastar::gate _pending_requests_gate;
+        service::client_state _client_state;
         future<> _ready_to_respond = make_ready_future<>();
         unsigned _request_cpu = 0;
     private:
+        enum class tracing_request_type : uint8_t {
+            not_requested,
+            no_write_on_close,
+            write_on_close
+        };  
+
         using execution_stage_type = inheriting_concrete_execution_stage<
                 future<redis_server::connection::result>,
                 redis_server::connection*,
-                redis::request&&
+                redis::request&&,
+                service::client_state,
+                tracing_request_type
         >;
         static thread_local execution_stage_type _process_request_stage;
     public:
@@ -112,7 +122,7 @@ private:
     private:
         const ::timeout_config& timeout_config() { return _server.timeout_config(); }
         friend class process_request_executor;
-        future<result> process_request_one(redis::request&& request);
+        future<result> process_request_one(redis::request&& request,  service::client_state cs, tracing_request_type rt);
         unsigned pick_request_cpu();
     };
 

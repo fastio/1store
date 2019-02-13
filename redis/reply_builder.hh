@@ -22,9 +22,11 @@
 #include "seastar/core/shared_ptr.hh"
 #include "seastar/core/sharded.hh"
 #include "seastar/core/future.hh"
+#include "seastar/core/sstring.hh"
 #include "bytes.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
+using namespace seastar;
 namespace redis {
 
 static const bytes msg_crlf {"\r\n"};
@@ -64,36 +66,34 @@ static const bytes msg_type_set {"+set\r\n"};
 static const bytes msg_type_zset {"+zset\r\n"};
 static const bytes msg_type_hash {"+hash\r\n"};
 
+class ok_tag {};
+class error_tag {};
+
 class reply_builder final {
 public:
-/*
-static future<reply> build(size_t size)
-{
-    auto m = make_lw_shared<scattered_message<char>>();
-    m->append_static(msg_num_tag);
-    m->append(to_sstring(size));
-    m->append_static(msg_crlf);
-    return make_ready_future<scattered_message_ptr>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
+static sstring to_sstring(bytes b) {
+   return sstring{reinterpret_cast<char*>(b.data()), b.size()};
 }
 
-static future<reply> build(double number)
+template<typename tag>
+static future<reply> build()
 {
     auto m = make_lw_shared<scattered_message<char>>();
-    auto&& n = to_sstring(number);
-    m->append_static(msg_batch_tag);
-    m->append(to_sstring(n.size()));
-    m->append_static(msg_crlf);
-    m->append(std::move(n));
-    m->append_static(msg_crlf);
-    return make_ready_future<scattered_message_ptr>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
+    m->append_static(reply_builder::to_sstring(msg_num_tag));
+    if (std::is_same<ok_tag, tag>::value) {
+        m->append(seastar::to_sstring(1));
+    } else {
+        m->append(seastar::to_sstring(0));
+    }
+    m->append_static(reply_builder::to_sstring(msg_crlf));
+    return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
 }
-*/
-static future<reply> build(const bytes& message)
+
+static future<reply> build(bytes message)
 {
-   //auto m = make_lw_shared<scattered_message<char>>();
-   //m->append(message);
-   //return make_ready_future<scattered_message_ptr>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
-   return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<bytes>> () });
+   auto m = make_lw_shared<scattered_message<char>>();
+   m->append(reply_builder::to_sstring(message));
+   return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
 }
 /*
 template<bool Key, bool Value>

@@ -57,7 +57,7 @@ public:
         return _proxy;
     }
 
-    future<reply> process(request&&);
+    future<reply> process(request&&, service::client_state&);
 
     future<> stop();
 };

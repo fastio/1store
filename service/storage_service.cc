@@ -2192,7 +2192,7 @@ future<> storage_service::start_redis_transport() {
         redis_server_config.max_request_size = ss._db.local().get_available_memory() / 10;
         redis_transport::redis_load_balance lb = redis_transport::parse_load_balance(cfg.load_balance());
         return seastar::net::dns::resolve_name(addr).then([&ss, rserver, addr, &cfg, lb, keepalive, ceo = std::move(ceo), redis_server_config] (seastar::net::inet_address ip) {
-                return rserver->start(std::ref(service::get_storage_proxy()), std::ref(redis::get_query_processor()), lb, redis_server_config).then([rserver, &cfg, addr, ip, ceo, keepalive]() {
+                return rserver->start(std::ref(service::get_storage_proxy()), std::ref(redis::get_query_processor()), lb, std::ref(ss._auth_service), redis_server_config).then([rserver, &cfg, addr, ip, ceo, keepalive]() {
                 // #293 - do not stop anything
                 //engine().at_exit([cserver] {
                 //    return cserver->stop();
