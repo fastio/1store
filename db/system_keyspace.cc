@@ -125,7 +125,7 @@ schema_ptr simple_objects() {
         // clustering key
         {},
         // regular columns
-        {{"ttl", timestamp_type}, {"data", utf8_type}},
+        {{"data", utf8_type}},
         // static columns
         {},
         // regular column name type
@@ -149,7 +149,7 @@ schema_ptr lists() {
         // clustering key
         {},
         // regular columns
-        {{"ttl", timestamp_type}, {"size", int32_type}, {"data", list_type_impl::get_instance(utf8_type, true)}},
+        {{"data", list_type_impl::get_instance(utf8_type, true)}},
         // static columns
         {},
         // regular column name type
@@ -173,7 +173,7 @@ schema_ptr sets() {
         // clustering key
         {},
         // regular columns
-        {{"ttl", timestamp_type}, {"size", int32_type}, {"data", set_type_impl::get_instance(utf8_type, true)}},
+        {{"data", set_type_impl::get_instance(utf8_type, true)}},
         // static columns
         {},
         // regular column name type
@@ -197,7 +197,7 @@ schema_ptr maps() {
         // clustering key
         {},
         // regular columns
-        {{"ttl", timestamp_type}, {"size", int32_type}, {"data", map_type_impl::get_instance(utf8_type, utf8_type, true)}},
+        {{"data", map_type_impl::get_instance(utf8_type, utf8_type, true)}},
         // static columns
         {},
         // regular column name type
