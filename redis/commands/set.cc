@@ -7,6 +7,7 @@
 #include "db/system_keyspace.hh"
 #include "types.hh"
 #include "service/storage_proxy.hh"
+#include "service/client_state.hh"
 #include "mutation.hh"
 #include "timeout_config.hh"
 #include "log.hh"
@@ -27,7 +28,7 @@ shared_ptr<abstract_command> set::prepare(request&& req)
     return make_shared<set> (std::move(req._command), std::move(req._args[0]), std::move(req._args[1]));
 }
 
-future<reply> set::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, tracing::trace_state_ptr trace_state)
+future<reply> set::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
     auto& db = proxy.get_db().local();
@@ -41,7 +42,7 @@ future<reply> set::execute(service::storage_proxy& proxy, db::consistency_level 
     auto data_cell = utf8_type->decompose(make_sstring(_data));
     m.set_clustered_cell(clustering_key::make_empty(), data_def, atomic_cell::make_live(*utf8_type, 0, std::move(data_cell)));
     // call service::storage_proxy::mutate_automicly to apply the mutation.
-    return proxy.mutate_atomically(std::vector<mutation> { m }, cl, timeout, trace_state).then_wrapped([] (future<> f) {
+    return proxy.mutate_atomically(std::vector<mutation> { m }, cl, timeout, cs.get_trace_state()).then_wrapped([] (future<> f) {
         try {
             f.get();
         } catch (...) {

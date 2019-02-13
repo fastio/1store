@@ -26,7 +26,7 @@ public:
     static shared_ptr<abstract_command> prepare(bytes&& name, bytes&& message) {
         return make_shared<unexpected>(std::move(name), std::move(message));
     }
-    virtual future<reply> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config&, tracing::trace_state_ptr) override {
+    virtual future<reply> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config&, service::client_state&) override {
         return reply_builder::build(_exception_message);
     }
 };
