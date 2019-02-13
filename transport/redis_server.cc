@@ -249,6 +249,7 @@ future<> redis_server::connection::process_request() {
         } ().then_wrapped([this, leave = std::move(leave)] (future<result> result_future) {
             try {
                 auto result = result_future.get0();
+                --_server._requests_serving;
                 _write_buf.write(std::move(*(result._reply))).then([this] {
                     _write_buf.flush();
                 });
