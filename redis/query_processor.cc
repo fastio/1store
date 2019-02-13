@@ -24,7 +24,7 @@
 #include "redis/reply_builder.hh"
 #include "redis/abstract_command.hh"
 #include <seastar/core/metrics.hh>
-
+#include "timeout_config.hh"
 
 namespace redis {
 
@@ -44,10 +44,10 @@ future<> query_processor::stop() {
     return make_ready_future<>();
 }
 
-future<reply> query_processor::process(request&& req, service::client_state& client_state) {
+future<reply> query_processor::process(request&& req, service::client_state& client_state, const timeout_config& config) {
     // FIXME: timeout, consistency level should be configurable.
     auto timeout = db::timeout_clock::now();
-    return command_factory::create(std::move(req))->execute(_proxy, db::consistency_level::LOCAL_ONE, timeout, client_state.get_trace_state());
+    return command_factory::create(std::move(req))->execute(_proxy, db::consistency_level::LOCAL_ONE, timeout, config, client_state.get_trace_state());
 }
 
 }

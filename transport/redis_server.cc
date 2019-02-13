@@ -165,7 +165,8 @@ redis_server::do_accepts(int which, bool keepalive, ipv4_addr server_addr) {
 future<redis_server::connection::result> redis_server::connection::process_request_one(redis::request&& request,  service::client_state cs, tracing_request_type rt) {
     return futurize_apply([this, request = std::move(request), cs = std::move(cs)] () mutable {
             // FIXME: proccess the request.
-        return _server._query_processor.local().process(std::move(request), cs);
+        auto& config = _server._config.timeout_config;
+        return _server._query_processor.local().process(std::move(request), cs, config);
     }).then_wrapped([this] (future<redis::reply> f) -> future<redis_server::connection::result> {
         --_server._requests_serving;
         try { f.get(); } catch (...) {}

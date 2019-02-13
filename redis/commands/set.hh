@@ -1,6 +1,8 @@
 #pragma once
 #include "redis/abstract_command.hh"
 #include "redis/request.hh"
+
+class timeout_config;
 namespace redis {
 namespace commands {
 class set final : public abstract_command {
@@ -32,7 +34,7 @@ public:
     {
     }
     ~set() {}
-    future<reply> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, tracing::trace_state_ptr) override;
+    future<reply> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, tracing::trace_state_ptr) override;
 };
 }
 }

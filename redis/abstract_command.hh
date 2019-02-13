@@ -9,6 +9,8 @@
 #include "keys.hh"
 using namespace seastar;
 
+class timeout_config;
+
 namespace service {
 class storage_proxy;
 }
@@ -19,14 +21,13 @@ class trace_state_ptr;
 namespace redis {
 
 
-
 class abstract_command : public enable_shared_from_this<abstract_command> {
 protected:
     bytes _name;
 public:
     abstract_command(bytes&& name) : _name(std::move(name)) {}
     virtual ~abstract_command() {};
-    virtual future<reply> execute(service::storage_proxy&, db::consistency_level cl, db::timeout_clock::time_point, tracing::trace_state_ptr) = 0;
+    virtual future<reply> execute(service::storage_proxy&, db::consistency_level cl, db::timeout_clock::time_point, const timeout_config& tc, tracing::trace_state_ptr) = 0;
     const bytes& name() const { return _name; }
 };
 

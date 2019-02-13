@@ -34,6 +34,8 @@
 #include "service/query_state.hh"
 #include "transport/messages/result_message.hh"
 
+class timeout_config;
+
 namespace redis {
 
 struct request;
@@ -43,7 +45,6 @@ class query_processor {
     service::storage_proxy& _proxy;
     distributed<database>& _db;
     seastar::metrics::metric_groups _metrics;
-
 public:
     query_processor(service::storage_proxy& proxy, distributed<database>& db);
 
@@ -57,7 +58,7 @@ public:
         return _proxy;
     }
 
-    future<reply> process(request&&, service::client_state&);
+    future<reply> process(request&&, service::client_state&, const timeout_config& config);
 
     future<> stop();
 };

@@ -64,6 +64,7 @@
 #include "sstables/compaction_manager.hh"
 #include "sstables/sstables.hh"
 #include <db/view/view_update_from_staging_generator.hh>
+#include "redis/query_processor.hh"
 
 seastar::metrics::metric_groups app_metrics;
 
@@ -327,6 +328,7 @@ int main(int ac, char** av) {
     seastar::sharded<service::cache_hitrate_calculator> cf_cache_hitrate_calculator;
     debug::db = &db;
     auto& qp = cql3::get_query_processor();
+    auto& redis_qp = redis::get_query_processor();
     auto& proxy = service::get_storage_proxy();
     auto& mm = service::get_migration_manager();
     api::http_context ctx(db, proxy);
@@ -360,7 +362,7 @@ int main(int ac, char** av) {
 
         tcp_syncookies_sanity();
 
-        return seastar::async([cfg, ext, &db, &qp, &proxy, &mm, &ctx, &opts, &dirs, &pctx, &prometheus_server, &return_value, &cf_cache_hitrate_calculator] {
+        return seastar::async([cfg, ext, &db, &qp, &redis_qp, &proxy, &mm, &ctx, &opts, &dirs, &pctx, &prometheus_server, &return_value, &cf_cache_hitrate_calculator] {
             read_config(opts, *cfg).get();
             configurable::init_all(opts, *cfg, *ext).get();
 
@@ -631,6 +633,8 @@ int main(int ac, char** av) {
             supervisor::notify("starting query processor");
             cql3::query_processor::memory_config qp_mcfg = {memory::stats().total_memory() / 256, memory::stats().total_memory() / 2560};
             qp.start(std::ref(proxy), std::ref(db), qp_mcfg).get();
+            supervisor::notify("starting redis query processor");
+            redis_qp.start(std::ref(proxy), std::ref(db)).get();
             // #293 - do not stop anything
             // engine().at_exit([&qp] { return qp.stop(); });
             supervisor::notify("initializing batchlog manager");

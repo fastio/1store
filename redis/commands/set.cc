@@ -8,6 +8,7 @@
 #include "types.hh"
 #include "service/storage_proxy.hh"
 #include "mutation.hh"
+#include "timeout_config.hh"
 namespace redis {
 namespace commands {
 shared_ptr<abstract_command> set::prepare(request&& req)
@@ -21,8 +22,9 @@ shared_ptr<abstract_command> set::prepare(request&& req)
     return make_shared<set> (std::move(req._command), std::move(req._args[0]), std::move(req._args[1]));
 }
 
-future<reply> set::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point timeout, tracing::trace_state_ptr trace_state)
+future<reply> set::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, tracing::trace_state_ptr trace_state)
 {
+    auto timeout = now + tc.write_timeout;
     auto& db = proxy.get_db().local();
     auto schema = db.find_schema(db::system_keyspace::redis::NAME, db::system_keyspace::redis::SIMPLE_OBJECTS);
     // construct the mutation.
