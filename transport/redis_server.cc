@@ -164,13 +164,8 @@ redis_server::do_accepts(int which, bool keepalive, ipv4_addr server_addr) {
 
 future<redis_server::connection::result> redis_server::connection::process_request_one(redis::request&& request,  service::client_state cs, tracing_request_type rt) {
     return futurize_apply([this, request = std::move(request), cs = std::move(cs)] () mutable {
-            // FIXME: proccess the request.
         auto& config = _server._config.timeout_config;
         return _server._query_processor.local().process(std::move(request), cs, config);
-    }).then_wrapped([this] (future<redis::reply> f) -> future<redis_server::connection::result> {
-        --_server._requests_serving;
-        try { f.get(); } catch (...) {}
-        return make_ready_future<redis_server::connection::result>();
     });
 }
 
@@ -252,13 +247,14 @@ future<> redis_server::connection::process_request() {
                 });
             }
         } ().then_wrapped([this, leave = std::move(leave)] (future<result> result_future) {
-              try {
-                auto result = result_future.get();
-                (void) result;
-                //write_response(std::move(response.cql_response), _compression);
-              } catch (...) {
+            try {
+                auto result = result_future.get0();
+                _write_buf.write(std::move(*(result._reply))).then([this] {
+                    _write_buf.flush();
+                });
+            } catch (...) {
                 logging.error("request processing failed: {}", std::current_exception());
-              }
+            }
         });
         return make_ready_future<>();
     });

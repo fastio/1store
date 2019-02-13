@@ -85,9 +85,7 @@ private:
     class fmt_visitor;
     friend class connection;
     class connection : public boost::intrusive::list_base_hook<> {
-        struct result {
-            result () {}
-        };
+        using result = redis::reply;
         redis_server& _server;
         ipv4_addr _server_addr;
         connected_socket _fd;
