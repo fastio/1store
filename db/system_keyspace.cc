@@ -121,11 +121,11 @@ schema_ptr simple_objects() {
     static thread_local auto simple_object = [] {
         schema_builder builder(make_lw_shared(schema(generate_legacy_id(NAME, SIMPLE_OBJECTS), NAME, SIMPLE_OBJECTS,
         // partition key
-        {{"key", bytes_type}},
+        {{"key", utf8_type}},
         // clustering key
         {},
         // regular columns
-        {{"ttl", timestamp_type}, {"data", bytes_type}},
+        {{"ttl", timestamp_type}, {"data", utf8_type}},
         // static columns
         {},
         // regular column name type
@@ -145,11 +145,11 @@ schema_ptr lists() {
     static thread_local auto list_schema = [] {
         schema_builder builder(make_lw_shared(schema(generate_legacy_id(NAME, LISTS), NAME, LISTS,
         // partition key
-        {{"key", bytes_type}},
+        {{"key", utf8_type}},
         // clustering key
         {},
         // regular columns
-        {{"ttl", timestamp_type}, {"size", int32_type}, {"data", list_type_impl::get_instance(bytes_type, true)}},
+        {{"ttl", timestamp_type}, {"size", int32_type}, {"data", list_type_impl::get_instance(utf8_type, true)}},
         // static columns
         {},
         // regular column name type
@@ -169,11 +169,11 @@ schema_ptr sets() {
     static thread_local auto set_schema = [] {
         schema_builder builder(make_lw_shared(schema(generate_legacy_id(NAME, SETS), NAME, SETS,
         // partition key
-        {{"key", bytes_type}},
+        {{"key", utf8_type}},
         // clustering key
         {},
         // regular columns
-        {{"ttl", timestamp_type}, {"size", int32_type}, {"data", set_type_impl::get_instance(bytes_type, true)}},
+        {{"ttl", timestamp_type}, {"size", int32_type}, {"data", set_type_impl::get_instance(utf8_type, true)}},
         // static columns
         {},
         // regular column name type
@@ -193,11 +193,11 @@ schema_ptr maps() {
     static thread_local auto map_schema = [] {
         schema_builder builder(make_lw_shared(schema(generate_legacy_id(NAME, MAPS), NAME, MAPS,
         // partition key
-        {{"key", bytes_type}},
+        {{"key", utf8_type}},
         // clustering key
         {},
         // regular columns
-        {{"ttl", timestamp_type}, {"size", int32_type}, {"data", map_type_impl::get_instance(bytes_type, bytes_type, true)}},
+        {{"ttl", timestamp_type}, {"size", int32_type}, {"data", map_type_impl::get_instance(utf8_type, utf8_type, true)}},
         // static columns
         {},
         // regular column name type
