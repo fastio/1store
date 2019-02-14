@@ -71,6 +71,7 @@ class error_tag {};
 class error_message_tag {};
 class null_message_tag{};
 class message_tag{};
+class number_tag {};
 
 class reply_builder final {
 public:
@@ -97,8 +98,7 @@ template<typename tag>
 static future<reply> build(bytes&& data) {
     auto m = make_lw_shared<scattered_message<char>>();
     if (std::is_same<message_tag, tag>::value) {
-        m->append(to_sstring(msg_batch_tag));
-        m->append(sstring(sprint("%d\r\n", data.size())));
+        m->append(sstring(sprint("$%d\r\n", data.size())));
         m->append(to_sstring(data));
         m->append_static(to_sstring(msg_crlf));
     }
@@ -108,6 +108,13 @@ static future<reply> build(bytes&& data) {
     return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
 }
 
+template<typename tag>
+static future<reply> build(size_t n)
+{
+    auto m = make_lw_shared<scattered_message<char>>();
+    m->append(sstring(sprint(":%zu\r\n", n)));
+    return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
+}
 /*
 template<bool Key, bool Value>
 static future<reply> build(const cache_entry* e)

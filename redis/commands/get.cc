@@ -22,7 +22,9 @@ shared_ptr<abstract_command> get::prepare(request&& req)
     return make_shared<get>(std::move(req._command), std::move(req._args[0]));
 }
 
-future<reply> get::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+using query_result_type = foreign_ptr<lw_shared_ptr<query::result>>;
+future<reply> get::do_execute_with_action(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now,
+        const timeout_config& tc, service::client_state& cs, std::function<future<reply>(schema_ptr, query_result_type&&)> action)
 {
     auto timeout = now + tc.read_timeout;
     // find the schema.
@@ -38,13 +40,21 @@ future<reply> get::execute(service::storage_proxy& proxy, db::consistency_level 
     auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
     dht::partition_range_vector partition_ranges;
     partition_ranges.emplace_back(std::move(partition_range));
-    return proxy.query(schema, command, std::move(partition_ranges), cl, {timeout, cs.get_trace_state()}).then([full_slice = std::move(full_slice), schema] (auto q_result) {
-        if (!q_result.query_result) {
+    return proxy.query(schema, command, std::move(partition_ranges), cl, {timeout, cs.get_trace_state()}).then([full_slice = std::move(full_slice), schema, action = std::move(action)] (auto q_result) {
+        return action(schema, std::move(q_result.query_result));
+    });
+}
+
+future<reply> get::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+{
+    return do_execute_with_action(proxy, cl, now, tc, cs, [this] (schema_ptr schema, query_result_type&& q_result) {
+        if (!q_result) {
             return reply_builder::build<null_message_tag>();
         }    
-        auto& partition_count = q_result.query_result->partition_count();
+        auto& partition_count = q_result->partition_count();
         if (partition_count && *partition_count > 0) {
-            auto result_s = query::result_set::from_raw_result(schema, full_slice, *(q_result.query_result));
+            auto full_slice = partition_slice_builder(*schema).build();
+            auto result_s = query::result_set::from_raw_result(schema, full_slice, *(q_result));
             const auto& row = result_s.row(0);
             if (row.has(sstring("data"))) {
                 const auto& data = row.get_data_value("data");
