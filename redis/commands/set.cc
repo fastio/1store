@@ -40,7 +40,8 @@ future<reply> set::execute(service::storage_proxy& proxy, db::consistency_level 
     const column_definition& data_def = *schema->get_column_definition("data");
     // empty clustering key.
     auto data_cell = utf8_type->decompose(make_sstring(_data));
-    m.set_clustered_cell(clustering_key::make_empty(), data_def, atomic_cell::make_live(*utf8_type, 0, std::move(data_cell)));
+    //m.set_clustered_cell(clustering_key::make_empty(), data_def, atomic_cell::make_live(*utf8_type, 0, std::move(data_cell)));
+    m.set_clustered_cell(clustering_key::make_empty(), data_def, atomic_cell::make_live(*utf8_type, api::timestamp_clock::now().time_since_epoch().count(), std::move(data_cell)));
     // call service::storage_proxy::mutate_automicly to apply the mutation.
     return proxy.mutate_atomically(std::vector<mutation> { m }, cl, timeout, cs.get_trace_state()).then_wrapped([] (future<> f) {
         try {

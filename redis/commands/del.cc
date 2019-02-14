@@ -34,8 +34,7 @@ future<reply> del::execute(service::storage_proxy& proxy, db::consistency_level 
     //auto m = mutation_helper::make_mutation(schema, _key);
     auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(_key)));
     auto m = std::move(mutation(schema, std::move(pkey)));
-    m.partition().apply_delete(*schema, clustering_key::make_empty(), tombstone { api::new_timestamp(), gc_clock::now() });
-    // call service::storage_proxy::mutate_automicly to apply the mutation.
+    m.partition().apply(tombstone { api::new_timestamp(), gc_clock::now() });
     return proxy.mutate_atomically(std::vector<mutation> { m }, cl, timeout, cs.get_trace_state()).then_wrapped([] (future<> f) {
         try {
             f.get();
