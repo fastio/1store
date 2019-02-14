@@ -10,8 +10,10 @@
 #include "partition_slice_builder.hh"
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
+#include "log.hh"
 namespace redis {
 namespace commands {
+static logging::logger log("command_get");
 shared_ptr<abstract_command> get::prepare(request&& req)
 {
     if (req._args_count < 1) {
@@ -36,8 +38,22 @@ future<reply> get::execute(service::storage_proxy& proxy, db::consistency_level 
     auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
     dht::partition_range_vector partition_ranges;
     partition_ranges.emplace_back(std::move(partition_range));
-    return proxy.query(schema, command, std::move(partition_ranges), cl, {timeout, cs.get_trace_state()}).then([] (auto result) {
-        return reply_builder::build<ok_tag>();
+    return proxy.query(schema, command, std::move(partition_ranges), cl, {timeout, cs.get_trace_state()}).then([full_slice = std::move(full_slice), schema] (auto q_result) {
+        if (!q_result.query_result) {
+            return reply_builder::build<null_message_tag>();
+        }    
+        auto& partition_count = q_result.query_result->partition_count();
+        if (partition_count && *partition_count > 0) {
+            auto result_s = query::result_set::from_raw_result(schema, full_slice, *(q_result.query_result));
+            const auto& row = result_s.row(0);
+            if (row.has(sstring("data"))) {
+                const auto& data = row.get_data_value("data");
+                auto b = utf8_type->decompose(data);
+                auto s = make_sstring(b);
+                return reply_builder::build<message_tag>(std::move(b));
+            }
+        }
+        return reply_builder::build<null_message_tag>();
     });
 }
 }

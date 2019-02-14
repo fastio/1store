@@ -27,7 +27,7 @@ public:
         return make_shared<unexpected>(std::move(name), std::move(message));
     }
     virtual future<reply> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config&, service::client_state&) override {
-        return reply_builder::build(_exception_message);
+        return reply_builder::build<error_message_tag>(std::move(_exception_message));
     }
 };
 }
