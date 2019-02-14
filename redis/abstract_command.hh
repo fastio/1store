@@ -39,7 +39,7 @@ public:
 class mutation_helper {
 public:
     static mutation make_mutation(schema_ptr schema, bytes& key) {
-        auto pkey = partition_key::from_bytes(key);
+        auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(abstract_command::make_sstring(key)));
         return std::move(mutation(schema, std::move(pkey)));
     }
 };
