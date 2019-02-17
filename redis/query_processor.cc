@@ -46,8 +46,9 @@ future<> query_processor::stop() {
 
 future<reply> query_processor::process(request&& req, service::client_state& client_state, const timeout_config& config) {
     // FIXME: timeout, consistency level should be configurable.
-    auto timeout = db::timeout_clock::now();
-    return command_factory::create(std::move(req))->execute(_proxy, db::consistency_level::LOCAL_ONE, timeout, config, client_state);
+    return do_with(command_factory::create(std::move(req)), [this, &client_state, config] (auto& e) {
+        return e->execute(_proxy, db::consistency_level::LOCAL_ONE, db::timeout_clock::now(), config, client_state);
+    });
 }
 
 }

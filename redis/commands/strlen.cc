@@ -31,7 +31,7 @@ future<reply> strlen::execute(service::storage_proxy& proxy, db::consistency_lev
         if (pd && pd->fetched()) {
             return reply_builder::build<number_tag>(pd->_data.size());
         }
-        return reply_builder::build<number_tag>(0);
+        return reply_builder::build<number_tag>(size_t { 0 } );
     });
 }
 }

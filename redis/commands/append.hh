@@ -6,7 +6,8 @@
 class timeout_config;
 namespace redis {
 namespace commands {
-class append final : public get {
+class append : public get {
+protected:
     bytes _data;
 public:
     static shared_ptr<abstract_command> prepare(request&& req);
@@ -15,8 +16,6 @@ public:
     }
     ~append() {}
     future<reply> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
-private: 
-    future<reply> write_back(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs, schema_ptr schema, bytes&&);
 };
 }
 }

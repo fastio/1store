@@ -72,6 +72,7 @@ class error_message_tag {};
 class null_message_tag{};
 class message_tag{};
 class number_tag {};
+class counter_tag {};
 
 class reply_builder final {
 public:
@@ -113,6 +114,13 @@ static future<reply> build(size_t n)
 {
     auto m = make_lw_shared<scattered_message<char>>();
     m->append(sstring(sprint(":%zu\r\n", n)));
+    return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
+}
+template<typename tag>
+static future<reply> build(long n)
+{
+    auto m = make_lw_shared<scattered_message<char>>();
+    m->append(sstring(sprint(":%lld\r\n", n)));
     return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
 }
 /*

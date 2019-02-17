@@ -21,6 +21,22 @@ static logging::logger log("command");
 bytes keyspace() {
     return db::system_keyspace::redis::NAME;
 }
+
+bytes simple_objects() {
+    return db::system_keyspace::redis::SIMPLE_OBJECTS;
+}
+
+bytes lists() {
+    return db::system_keyspace::redis::LISTS;
+}
+
+bytes sets() {
+    return db::system_keyspace::redis::SETS;
+}
+
+bytes maps() {
+    return db::system_keyspace::redis::MAPS;
+}
 // Read required partition for write-before-read operations.
 class prefetch_partition_builder {
     prefetched_partition_collection& _data;
@@ -144,7 +160,7 @@ future<std::unique_ptr<prefetched_partition_simple>> prefetch_partition_helper::
     auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
     dht::partition_range_vector partition_ranges;
     partition_ranges.emplace_back(std::move(partition_range));
-    return proxy.query(schema, command, std::move(partition_ranges), cl, {timeout, cs.get_trace_state()}).then([schema] (auto co_result) {
+    return proxy.query(schema, command, std::move(partition_ranges), cl, {timeout, /*cs.get_trace_state()*/ nullptr}).then([schema] (auto co_result) {
         const auto& q_result = co_result.query_result; 
         if (q_result && q_result->partition_count() && (*(q_result->partition_count()) > 0)) {
             auto full_slice = partition_slice_builder(*schema).build();
@@ -169,6 +185,6 @@ future<> mutation_helper::write_mutation(service::storage_proxy& proxy, schema_p
     auto data_cell = utf8_type->decompose(make_sstring(data));
     m.set_clustered_cell(clustering_key::make_empty(), data_def, atomic_cell::make_live(*utf8_type, api::timestamp_clock::now().time_since_epoch().count(), std::move(data_cell)));
     // call service::storage_proxy::mutate_automicly to apply the mutation.
-    return proxy.mutate_atomically(std::vector<mutation> { std::move(m) }, cl, timeout, cs.get_trace_state());
+    return proxy.mutate_atomically(std::vector<mutation> { std::move(m) }, cl, timeout, nullptr/*cs.get_trace_state()*/);
 }
 } // end of redis namespace

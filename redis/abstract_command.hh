@@ -28,6 +28,10 @@ class trace_state_ptr;
 namespace redis {
 
 bytes keyspace();
+bytes simple_objects();
+bytes lists();
+bytes sets();
+bytes maps();
 
 class abstract_command : public enable_shared_from_this<abstract_command> {
 protected:
@@ -37,9 +41,26 @@ public:
     virtual ~abstract_command() {};
     virtual future<reply> execute(service::storage_proxy&, db::consistency_level cl, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& client_state) = 0;
     const bytes& name() const { return _name; }
-    static sstring make_sstring(bytes b) {
-        return sstring{reinterpret_cast<char*>(b.data()), b.size()};
+    static sstring make_sstring(const bytes& b) {
+        return sstring{reinterpret_cast<const char*>(b.data()), b.size()};
     }
+    long bytes2long(const bytes& b) {
+        try {
+            return std::atol(make_sstring(b).data());
+        } catch (std::exception const & e) {
+            throw e;
+        }
+    }
+    bytes long2bytes(long l) {
+        auto s = sprint("%lld", l);
+        //return bytes(reinterpret_cast<const signed char*>(s.c_str()), s.size());
+        return to_bytes(s);
+    }
+    inline bool is_number(const bytes& b)
+    {
+        return !b.empty() && std::find_if(b.begin(), b.end(), [] (auto c) { return !std::isdigit((char)c); }) == b.end();
+    }
+
 };
 
 class mutation_helper final {
