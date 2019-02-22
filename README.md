@@ -20,33 +20,18 @@ Now, the redis commands were supported by Pedis as follow:
   * **HyperLogLog**: PFADD, PFCOUNT, PFMERGE
   * **OTHER**: ECHO, PING, SELECT
 
-## Building Pedis
-
-In fact, the building instructions of Seastar also works for Pedis.
-
-See building instructions for [Fedora](docs/building-fedora.md), [CentOS](docs/building-centos.md) and [Ubuntu](docs/building-ubuntu.md).
-
 ## Getting started
 
-```
-./build/release/pedis --c 1 -m 1G
-
-```
+* ```git clone git@github.com:fastio/pedis.git```
+* ```sudo ./install-dependencies.sh```
+* ``` git submodule update --init --recursive```
+* ```./configure.py --mode=release --with=pedis```
+* ```ninja-build -j16``` # Assuming 4 system threads.
+* ```build/release/pedis --max-io-requests 1024 --smp 2```
 
 ## Current Roadmap
 
-We will build the next generation of redis cluster.
-
-### Short-term
-
-* Implement the redis commands.
-* Output the necessary metrics.
-
-### Long-term
-
-* Build the redis cluster, using GOSSIP protocol to broadcast redis node's status.
-* Build the data replication mechanism between redis cluster.
-* Persist the data to disk based on Structured-logs-merged tree.
+Pedis will be build on Scylla.
 
 ## Benchmark
 
