@@ -1,4 +1,5 @@
 #include "redis/command_factory.hh"
+#include "service/storage_proxy.hh"
 #include "redis/commands/set.hh"
 #include "redis/commands/get.hh"
 #include "redis/commands/del.hh"
@@ -7,26 +8,29 @@
 #include "redis/commands/strlen.hh"
 #include "redis/commands/append.hh"
 #include "redis/commands/counter.hh"
+#include "redis/commands/lpush.hh"
+#include "redis/commands/lpush.hh"
 namespace redis {
-shared_ptr<abstract_command> command_factory::create(request&& req)
+shared_ptr<abstract_command> command_factory::create(service::storage_proxy& proxy, request&& req)
 {
-    static thread_local std::unordered_map<bytes, std::function<shared_ptr<abstract_command> (request&& req)>> _commands = {
-    { "set",  [] (request&& req) { return commands::set::prepare(std::move(req)); } }, 
-    { "get",  [] (request&& req) { return commands::get::prepare(std::move(req)); } }, 
-    { "getset",  [] (request&& req) { return commands::getset::prepare(std::move(req)); } }, 
-    { "del",  [] (request&& req) { return commands::del::prepare(std::move(req)); } }, 
-    { "exists",  [] (request&& req) { return commands::exists::prepare(std::move(req)); } }, 
-    { "strlen",  [] (request&& req) { return commands::strlen::prepare(std::move(req)); } }, 
-    { "append",  [] (request&& req) { return commands::append::prepare(std::move(req)); } }, 
-    { "incr",  [] (request&& req) { return commands::counter::prepare(commands::counter::incr_tag {}, std::move(req)); } }, 
-    { "decr",  [] (request&& req) { return commands::counter::prepare(commands::counter::decr_tag {}, std::move(req)); } }, 
-    { "incrby",  [] (request&& req) { return commands::counter::prepare(commands::counter::incrby_tag {}, std::move(req)); } }, 
-    { "decrby",  [] (request&& req) { return commands::counter::prepare(commands::counter::decrby_tag {}, std::move(req)); } }, 
+    static thread_local std::unordered_map<bytes, std::function<shared_ptr<abstract_command> (service::storage_proxy& proxy, request&& req)>> _commands = {
+    { "set",  [] (service::storage_proxy& proxy, request&& req) { return commands::set::prepare(proxy, std::move(req)); } }, 
+    { "get",  [] (service::storage_proxy& proxy, request&& req) { return commands::get::prepare(proxy, std::move(req)); } }, 
+    { "getset",  [] (service::storage_proxy& proxy, request&& req) { return commands::getset::prepare(proxy, std::move(req)); } }, 
+    { "del",  [] (service::storage_proxy& proxy, request&& req) { return commands::del::prepare(proxy, std::move(req)); } }, 
+    { "exists",  [] (service::storage_proxy& proxy, request&& req) { return commands::exists::prepare(proxy, std::move(req)); } }, 
+    { "strlen",  [] (service::storage_proxy& proxy, request&& req) { return commands::strlen::prepare(proxy, std::move(req)); } }, 
+    { "append",  [] (service::storage_proxy& proxy, request&& req) { return commands::append::prepare(proxy, std::move(req)); } }, 
+    { "incr",  [] (service::storage_proxy& proxy, request&& req) { return commands::counter::prepare(proxy, commands::counter::incr_tag {}, std::move(req)); } }, 
+    { "decr",  [] (service::storage_proxy& proxy, request&& req) { return commands::counter::prepare(proxy, commands::counter::decr_tag {}, std::move(req)); } }, 
+    { "incrby",  [] (service::storage_proxy& proxy, request&& req) { return commands::counter::prepare(proxy, commands::counter::incrby_tag {}, std::move(req)); } }, 
+    { "decrby",  [] (service::storage_proxy& proxy, request&& req) { return commands::counter::prepare(proxy, commands::counter::decrby_tag {}, std::move(req)); } }, 
+    { "lpush",  [] (service::storage_proxy& proxy, request&& req) { return commands::lpush::prepare(proxy, std::move(req)); } }, 
     };
     std::transform(req._command.begin(), req._command.end(), req._command.begin(), ::tolower);
     auto&& command = _commands.find(req._command);
     if (command != _commands.end()) {
-        return (command->second)(std::move(req));
+        return (command->second)(proxy, std::move(req));
     }
     return commands::unexpected::prepare(std::move(req._command));
 }

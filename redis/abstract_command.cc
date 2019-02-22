@@ -3,7 +3,6 @@
 #include "timeout_config.hh"
 #include "service/client_state.hh"
 #include "service/storage_proxy.hh"
-#include "db/system_keyspace.hh"
 #include "dht/i_partitioner.hh"
 #include "partition_slice_builder.hh"
 #include "query-result-reader.hh"
@@ -18,25 +17,6 @@
 namespace redis {
 
 static logging::logger log("command");
-bytes keyspace() {
-    return db::system_keyspace::redis::NAME;
-}
-
-bytes simple_objects() {
-    return db::system_keyspace::redis::SIMPLE_OBJECTS;
-}
-
-bytes lists() {
-    return db::system_keyspace::redis::LISTS;
-}
-
-bytes sets() {
-    return db::system_keyspace::redis::SETS;
-}
-
-bytes maps() {
-    return db::system_keyspace::redis::MAPS;
-}
 // Read required partition for write-before-read operations.
 class prefetch_partition_builder {
     prefetched_partition_collection& _data;
@@ -55,10 +35,11 @@ private:
             cell->with_linearized([&] (bytes_view cell_view) {
                  auto v = map_type->deserialize(cell_view);
                  for (auto&& el : value_cast<map_type_impl::native_type>(v)) {
-                    log.debug(" name = {}, key = {}, value = {} ", def.name(), el.first.serialize(), el.second.serialize());
+                    log.info(" name = {}, key = {}, value = {} ", make_sstring(def.name()), make_sstring(el.first.serialize()), make_sstring(el.second.serialize()));
                     list.emplace_back(prefetched_partition_collection::cell { el.first.serialize(), el.second.serialize() });
                  }
-                 cells.emplace(def.name(), std::move(list));
+                 //cells.emplace(def.name(), std::move(list));
+                 cells = std::move(list);
             });
         }
     }
@@ -176,15 +157,46 @@ future<std::unique_ptr<prefetched_partition_simple>> prefetch_partition_helper::
     });
 }
 
-future<> mutation_helper::write_mutation(service::storage_proxy& proxy, schema_ptr schema, const bytes& key, bytes&& data, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs)
+future<bool> prefetch_partition_helper::exists(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& raw_key,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs)
+{
+    auto full_slice = partition_slice_builder(*schema).build();
+    auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(raw_key)));
+    auto command = ::make_lw_shared<query::read_command>(schema->id(), schema->version(),
+        full_slice, std::numeric_limits<int32_t>::max(), gc_clock::now(), tracing::make_trace_info(cs.get_trace_state()), query::max_partitions, utils::UUID(), cs.get_timestamp());
+
+    auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
+    dht::partition_range_vector partition_ranges;
+    partition_ranges.emplace_back(std::move(partition_range));
+    return proxy.query(schema, command, std::move(partition_ranges), cl, {timeout, /*cs.get_trace_state()*/ nullptr}).then([schema] (auto co_result) {
+        const auto& q_result = co_result.query_result; 
+        return q_result && q_result->partition_count() && (*(q_result->partition_count()) > 0);
+    });
+}
+
+future<> abstract_command::write_mutation(service::storage_proxy& proxy, const schema_ptr schema, const bytes& key, bytes&& data, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs)
 {
     // construct the mutation.
-    auto m = mutation_helper::make_mutation(schema, key);
-    const column_definition& data_def = *schema->get_column_definition("data");
+    auto m = make_mutation(schema, key);
+    const column_definition& column = *schema->get_column_definition("data");
     // empty clustering key.
-    auto data_cell = utf8_type->decompose(make_sstring(data));
-    m.set_clustered_cell(clustering_key::make_empty(), data_def, atomic_cell::make_live(*utf8_type, api::timestamp_clock::now().time_since_epoch().count(), std::move(data_cell)));
+    //auto data_cell = utf8_type->decompose(make_sstring(data));
+    //m.set_clustered_cell(clustering_key::make_empty(), data_def, atomic_cell::make_live(*utf8_type, api::timestamp_clock::now().time_since_epoch().count(), std::move(data_cell)));
+    auto cell = make_cell(schema, *(column.type.get()), data); 
+    m.set_clustered_cell(clustering_key::make_empty(), column, std::move(cell));
     // call service::storage_proxy::mutate_automicly to apply the mutation.
     return proxy.mutate_atomically(std::vector<mutation> { std::move(m) }, cl, timeout, nullptr/*cs.get_trace_state()*/);
+}
+
+future<> abstract_command::write_mutation(service::storage_proxy& proxy, const schema_ptr schema, const bytes& key, partition_dead_tag, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs) 
+{
+    // construct the mutation.
+    auto m = make_mutation(schema, key);
+    m.partition().apply(tombstone { api::new_timestamp(), gc_clock::now() });
+    return proxy.mutate_atomically(std::vector<mutation> { std::move(m) }, cl, timeout, cs.get_trace_state());
 }
 } // end of redis namespace

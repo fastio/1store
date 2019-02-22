@@ -1,11 +1,11 @@
 #pragma once
-#include "redis/abstract_command.hh"
+#include "redis/command_with_single_schema.hh"
 #include "redis/request.hh"
 
 class timeout_config;
 namespace redis {
 namespace commands {
-class set final : public abstract_command {
+class set final : public command_with_single_schema {
 public:
     enum flag_t : uint8_t {
         FLAG_SET_NO = 1 << 0,
@@ -17,20 +17,20 @@ public:
 private:
     bytes _key;
     bytes _data;
-    long _ttl;
     flag_t _flag;
 public:
 
-    static shared_ptr<abstract_command> prepare(request&& req);
-    set(bytes&& name, bytes&& key, bytes&& data, long ttl, flag_t flag) 
-        : abstract_command(std::move(name))
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    set(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data, const gc_clock::duration ttl) 
+        : command_with_single_schema(std::move(name), schema, ttl)
         , _key(std::move(key))
         , _data(std::move(data))
-        , _ttl(ttl)
-        , _flag(flag)
     {
     }
-    set(bytes&& name, bytes&& key, bytes&& data) : set(std::move(name), std::move(key), std::move(data), 0, flag_t::FLAG_SET_NO)
+    set(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data) 
+        : command_with_single_schema(std::move(name), schema) 
+        , _key(std::move(key))
+        , _data(std::move(data))
     {
     }
     ~set() {}

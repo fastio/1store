@@ -15,28 +15,26 @@
 namespace redis {
 namespace commands {
 static logging::logger log("command_append");
-shared_ptr<abstract_command> append::prepare(request&& req)
+shared_ptr<abstract_command> append::prepare(service::storage_proxy& proxy, request&& req)
 {
     if (req._args_count < 2) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
     }
-    return make_shared<append>(std::move(req._command), std::move(req._args[0]), std::move(req._args[1]));
+    return make_shared<append>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
 }
 
 future<reply> append::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
-    auto& db = proxy.get_db().local();
-    auto schema = db.find_schema(db::system_keyspace::redis::NAME, db::system_keyspace::redis::SIMPLE_OBJECTS);
     auto timeout = now + tc.read_timeout;
-    auto fetched = prefetch_partition_helper::prefetch_simple(proxy, schema, _key, cl, timeout, cs);
-    return fetched.then([this, &proxy, cl, timeout, &cs, schema] (auto pd) {
+    auto fetched = prefetch_partition_helper::prefetch_simple(proxy, _schema, _key, cl, timeout, cs);
+    return fetched.then([this, &proxy, cl, timeout, &cs] (auto pd) {
         bytes new_data;
         if (pd && pd->fetched()) {
             new_data = std::move(pd->_data + _data);
         } else {
             new_data = std::move(_data);
         }
-        return mutation_helper::write_mutation(proxy, schema, _key, std::move(new_data), cl, timeout, cs).then_wrapped([this] (auto f) {
+        return write_mutation(proxy, _schema, _key, std::move(new_data), cl, timeout, cs).then_wrapped([this] (auto f) {
             try {
                 f.get();
             } catch(...) {

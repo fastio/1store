@@ -1,15 +1,15 @@
 #pragma once
-#include "redis/abstract_command.hh"
 #include "redis/request.hh"
-#include "redis/commands/get.hh"
-
+#include "redis/commands/del.hh"
+#include "redis/command_with_multi_schemas.hh"
 class timeout_config;
 namespace redis {
 namespace commands {
-class exists final : public get {
+class exists final : public del {
 public:
-    static shared_ptr<abstract_command> prepare(request&& req);
-    exists(bytes&& name, bytes&& key) : get(std::move(name), std::move(key))
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    exists(bytes&& name, std::vector<schema_ptr> schemas, bytes&& key)
+        : del(std::move(name), std::move(schemas), std::move(key))
     {
     }
     ~exists() {}

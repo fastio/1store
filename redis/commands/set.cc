@@ -17,7 +17,7 @@ namespace commands {
 
 static logging::logger log("command_set");
 
-shared_ptr<abstract_command> set::prepare(request&& req)
+shared_ptr<abstract_command> set::prepare(service::storage_proxy& proxy, request&& req)
 {
     if (req._args_count < 2) {
         return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
@@ -25,22 +25,13 @@ shared_ptr<abstract_command> set::prepare(request&& req)
     else if (req._args_count > 2) {
         // FIXME: more other options
     }
-    return make_shared<set> (std::move(req._command), std::move(req._args[0]), std::move(req._args[1]));
+    return make_shared<set> (std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
 }
 
 future<reply> set::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
-    auto& db = proxy.get_db().local();
-    auto schema = db.find_schema(db::system_keyspace::redis::NAME, db::system_keyspace::redis::SIMPLE_OBJECTS);
-    // construct the mutation.
-    auto m = mutation_helper::make_mutation(schema, _key);
-    const column_definition& data_def = *schema->get_column_definition("data");
-    // empty clustering key.
-    auto data_cell = utf8_type->decompose(make_sstring(_data));
-    m.set_clustered_cell(clustering_key::make_empty(), data_def, atomic_cell::make_live(*utf8_type, api::timestamp_clock::now().time_since_epoch().count(), std::move(data_cell)));
-    // call service::storage_proxy::mutate_automicly to apply the mutation.
-    return proxy.mutate_atomically(std::vector<mutation> { std::move(m) }, cl, timeout, cs.get_trace_state()).then_wrapped([] (future<> f) {
+    return write_mutation(proxy, _schema, _key, std::move(_data), cl, timeout, cs).then_wrapped([this] (auto f) {
         try {
             f.get();
         } catch (...) {

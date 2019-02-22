@@ -14,11 +14,11 @@ public:
     struct decr_tag {};
     struct incrby_tag {};
     struct decrby_tag {};
-    static shared_ptr<abstract_command> prepare(incr_tag tag, request&& req);
-    static shared_ptr<abstract_command> prepare(decr_tag tag, request&& req);
-    static shared_ptr<abstract_command> prepare(incrby_tag tag, request&& req);
-    static shared_ptr<abstract_command> prepare(decrby_tag tag, request&& req);
-    counter(bytes&& name, bytes&& key, bytes&& data, bool incr) : append(std::move(name), std::move(key), std::move(data)), _incr(incr)
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, incr_tag tag, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, decr_tag tag, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, incrby_tag tag, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, decrby_tag tag, request&& req);
+    counter(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data, bool incr) : append(std::move(name), schema, std::move(key), std::move(data)), _incr(incr)
     {
     }
     ~counter() {}

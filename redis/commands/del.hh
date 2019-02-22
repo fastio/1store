@@ -1,17 +1,18 @@
 #pragma once
-#include "redis/abstract_command.hh"
+#include "redis/command_with_multi_schemas.hh"
 #include "redis/request.hh"
 
 class timeout_config;
 namespace redis {
 namespace commands {
-class del final : public abstract_command {
+class del : public command_with_multi_schemas {
+protected:
     bytes _key;
 public:
 
-    static shared_ptr<abstract_command> prepare(request&& req);
-    del(bytes&& name, bytes&& key) 
-        : abstract_command(std::move(name))
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    del(bytes&& name, std::vector<schema_ptr> schemas, bytes&& key) 
+        : command_with_multi_schemas(std::move(name), std::move(schemas))
         , _key(std::move(key))
     {
     }

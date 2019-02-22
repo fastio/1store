@@ -1,5 +1,5 @@
 #pragma once
-#include "redis/abstract_command.hh"
+#include "redis/command_with_single_schema.hh"
 #include "redis/request.hh"
 
 namespace query {
@@ -9,13 +9,13 @@ class result;
 class timeout_config;
 namespace redis {
 namespace commands {
-class get : public abstract_command {
+class get : public command_with_single_schema {
 protected:
     bytes _key;
 public:
-    static shared_ptr<abstract_command> prepare(request&& req);
-    get(bytes&& name, bytes&& key) 
-        : abstract_command(std::move(name))
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    get(bytes&& name, const schema_ptr schema, bytes&& key) 
+        : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))
     {
     }
@@ -26,9 +26,9 @@ public:
 class getset : public get {
     bytes _data;
 public:
-    static shared_ptr<abstract_command> prepare(request&& req);
-    getset(bytes&& name, bytes&& key, bytes&& data) 
-        : get(std::move(name), std::move(key))
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    getset(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data) 
+        : get(std::move(name), schema, std::move(key))
         , _data(std::move(data))
     {
     }
