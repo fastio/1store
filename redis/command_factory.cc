@@ -9,7 +9,11 @@
 #include "redis/commands/append.hh"
 #include "redis/commands/counter.hh"
 #include "redis/commands/lpush.hh"
-#include "redis/commands/lpush.hh"
+#include "redis/commands/lpop.hh"
+#include "redis/commands/lrange.hh"
+#include "redis/commands/llen.hh"
+#include "redis/commands/lindex.hh"
+#include "redis/commands/lrem.hh"
 namespace redis {
 shared_ptr<abstract_command> command_factory::create(service::storage_proxy& proxy, request&& req)
 {
@@ -26,6 +30,15 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "incrby",  [] (service::storage_proxy& proxy, request&& req) { return commands::counter::prepare(proxy, commands::counter::incrby_tag {}, std::move(req)); } }, 
     { "decrby",  [] (service::storage_proxy& proxy, request&& req) { return commands::counter::prepare(proxy, commands::counter::decrby_tag {}, std::move(req)); } }, 
     { "lpush",  [] (service::storage_proxy& proxy, request&& req) { return commands::lpush::prepare(proxy, std::move(req)); } }, 
+    { "lpushx",  [] (service::storage_proxy& proxy, request&& req) { return commands::lpushx::prepare(proxy, std::move(req)); } }, 
+    { "rpush",  [] (service::storage_proxy& proxy, request&& req) { return commands::rpush::prepare(proxy, std::move(req)); } }, 
+    { "rpushx",  [] (service::storage_proxy& proxy, request&& req) { return commands::rpushx::prepare(proxy, std::move(req)); } }, 
+    { "lpop",  [] (service::storage_proxy& proxy, request&& req) { return commands::lpop::prepare(proxy, std::move(req)); } }, 
+    { "rpop",  [] (service::storage_proxy& proxy, request&& req) { return commands::rpop::prepare(proxy, std::move(req)); } }, 
+    { "lrange",  [] (service::storage_proxy& proxy, request&& req) { return commands::lrange::prepare(proxy, std::move(req)); } }, 
+    { "llen",  [] (service::storage_proxy& proxy, request&& req) { return commands::llen::prepare(proxy, std::move(req)); } }, 
+    { "lindex",  [] (service::storage_proxy& proxy, request&& req) { return commands::lindex::prepare(proxy, std::move(req)); } }, 
+    { "lrem",  [] (service::storage_proxy& proxy, request&& req) { return commands::lrem::prepare(proxy, std::move(req)); } }, 
     };
     std::transform(req._command.begin(), req._command.end(), req._command.begin(), ::tolower);
     auto&& command = _commands.find(req._command);

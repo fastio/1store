@@ -96,6 +96,20 @@ static future<reply> build()
 }
 
 template<typename tag>
+static future<reply> build(const bytes& data) {
+    auto m = make_lw_shared<scattered_message<char>>();
+    if (std::is_same<message_tag, tag>::value) {
+        m->append(sstring(sprint("$%d\r\n", data.size())));
+        m->append(to_sstring(data));
+        m->append_static(to_sstring(msg_crlf));
+    }
+    else if (std::is_same<error_message_tag, tag>::value) {
+        m->append(to_sstring(data));
+    }
+    return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
+}
+
+template<typename tag>
 static future<reply> build(bytes&& data) {
     auto m = make_lw_shared<scattered_message<char>>();
     if (std::is_same<message_tag, tag>::value) {
@@ -123,53 +137,19 @@ static future<reply> build(long n)
     m->append(sstring(sprint(":%lld\r\n", n)));
     return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
 }
-/*
-template<bool Key, bool Value>
-static future<reply> build(const cache_entry* e)
-{
-    if (e) {
-        //build reply
-        auto m = make_lw_shared<scattered_message<char>>();
-        if (Key) {
-            m->append(msg_batch_tag);
-            m->append(to_sstring(e->key_size()));
-            m->append_static(msg_crlf);
-            m->append(sstring{e->key_data(), e->key_size()});
-            m->append_static(msg_crlf);
-        }
-        if (Value) {
-            m->append_static(msg_batch_tag);
-            if (e->type_of_integer()) {
-               auto&& n = to_sstring(e->value_integer());
-               m->append(to_sstring(n.size()));
-               m->append_static(msg_crlf);
-               m->append(n);
-               m->append_static(msg_crlf);
-            }
-            else if (e->type_of_float()) {
-               auto&& n = to_sstring(e->value_float());
-               m->append(to_sstring(n.size()));
-               m->append_static(msg_crlf);
-               m->append(n);
-               m->append_static(msg_crlf);
-            }
-            else if (e->type_of_bytes()) {
-                m->append(to_sstring(e->value_bytes_size()));
-                m->append_static(msg_crlf);
-                m->append(sstring{e->value_bytes_data(), e->value_bytes_size()});
-                m->append_static(msg_crlf);
-            }
-            else {
-               m->append_static(msg_type_err);
-            }
-            return make_ready_future<scattered_message_ptr>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
-        }
-    }
-    else {
-        return reply_builder::build(msg_not_found);
-    }
-}
 
+static future<reply> build(std::vector<bytes>&& data)
+{
+    auto m = make_lw_shared<scattered_message<char>>();
+    m->append(sstring(sprint("*%zu\r\n", data.size())));
+    for (size_t i = 0; i < data.size(); ++i) {
+        m->append(sstring(sprint("$%zu\r\n", data[i].size())));
+        m->append(to_sstring(data[i]));
+        m->append(to_sstring("\r\n"));
+    }
+    return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
+}
+/*
 template<bool Key, bool Value>
 static future<reply> build(const std::vector<const dict_entry*>& entries)
 {

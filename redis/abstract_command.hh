@@ -30,11 +30,11 @@ class trace_state_ptr;
 
 namespace redis {
 
-static inline decltype(auto) keyspace() { return db::system_keyspace::redis::NAME; }
-static inline decltype(auto) simple_objects() { return db::system_keyspace::redis::SIMPLE_OBJECTS; }
-static inline decltype(auto) lists() { return db::system_keyspace::redis::LISTS; }
-static inline decltype(auto) sets() { return db::system_keyspace::redis::SETS; }
-static inline decltype(auto) maps() { return db::system_keyspace::redis::MAPS; }
+static inline decltype(auto) keyspace() {/* return db::system_keyspace::redis::NAME;*/ return sstring("redis"); }
+static inline decltype(auto) simple_objects() { /*return db::system_keyspace::redis::SIMPLE_OBJECTS;*/ return sstring("simple_objects"); }
+static inline decltype(auto) lists() { /*return db::system_keyspace::redis::LISTS;*/ return sstring("lists"); }
+static inline decltype(auto) sets() { /*return db::system_keyspace::redis::SETS;*/ return sstring("sets"); }
+static inline decltype(auto) maps() { /*return db::system_keyspace::redis::MAPS;*/ return sstring("maps"); }
 static inline const schema_ptr simple_objects_schema(service::storage_proxy& proxy) {
     auto& db = proxy.get_db().local();
     auto schema = db.find_schema(keyspace(), simple_objects());
@@ -56,7 +56,36 @@ static inline const schema_ptr maps_schema(service::storage_proxy& proxy) {
     return schema;
 }
 
+inline long bytes2long(const bytes& b) {
+    try {
+        return std::atol(make_sstring(b).data());
+    } catch (std::exception const & e) {
+        throw e;
+    }
+}
+inline bytes long2bytes(long l) {
+    auto s = sprint("%lld", l);
+    return to_bytes(s);
+}
+inline bool is_number(const bytes& b)
+{
+    return !b.empty() && std::find_if(b.begin(), b.end(), [] (auto c) { return !std::isdigit((char)c); }) == b.end();
+}
+
+class precision_time {
+   public:
+       static constexpr db_clock::time_point REFERENCE_TIME{std::chrono::milliseconds(1262304000000)};
+   private:
+       static thread_local precision_time _last;
+   public:
+       db_clock::time_point _millis;
+       int32_t _nanos;
+
+       static precision_time get_next(db_clock::time_point millis);
+};  
+
 struct partition_dead_tag {}; 
+struct cell_dead_tag {}; 
 class abstract_command : public enable_shared_from_this<abstract_command> {
 protected:
     bytes _name;
@@ -90,24 +119,11 @@ public:
         return db_clock::from_time_t({ 0 }) + std::chrono::milliseconds(ttl * 1000);
     }
     */
-    inline long bytes2long(const bytes& b) {
-        try {
-            return std::atol(make_sstring(b).data());
-        } catch (std::exception const & e) {
-            throw e;
-        }
-    }
-    inline bytes long2bytes(long l) {
-        auto s = sprint("%lld", l);
-        return to_bytes(s);
-    }
-    inline bool is_number(const bytes& b)
-    {
-        return !b.empty() && std::find_if(b.begin(), b.end(), [] (auto c) { return !std::isdigit((char)c); }) == b.end();
-    }
 
     atomic_cell make_dead_cell() const {
-        return atomic_cell::make_dead(_timestamp, _local_deletion_time);
+        // _timestamp(api::new_timestamp())
+        // _local_deletion_time(gc_clock::now())
+        return atomic_cell::make_dead(api::new_timestamp(), gc_clock::now());
     }   
 
     atomic_cell make_cell(const schema_ptr schema, const abstract_type& type, const fragmented_temporary_buffer::view& value, atomic_cell::collection_member cm = atomic_cell::collection_member::no) const {
@@ -134,12 +150,16 @@ public:
     }
     future<> write_mutation(service::storage_proxy&, const schema_ptr schema, const bytes& key, bytes&& data, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& client_state);
     future<> write_mutation(service::storage_proxy&, const schema_ptr schema, const bytes& key, partition_dead_tag, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& client_state);
+    future<> write_list_mutation(service::storage_proxy& proxy, const schema_ptr schema, const bytes& key, std::vector<bytes>&& data, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs, bool left);
+    future<> write_list_dead_cell_mutation(service::storage_proxy& proxy, const schema_ptr schema, const bytes& key, std::vector<bytes>&& cell_keys, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs);
 };
 
 // Read required partition for write-before-read operations.
-struct prefetched_partition_collection {
+struct prefetched_list {
     const schema_ptr _schema;
     bool _inited = false;
+    bool _has_more = false;
+    size_t _size = 0;
     struct cell {
         bytes _key;
         bytes _value;
@@ -147,8 +167,11 @@ struct prefetched_partition_collection {
     using cell_list = std::vector<cell>;
     using row = cell_list; //std::unordered_map<bytes, cell_list>;
     row _row;
-    prefetched_partition_collection(const schema_ptr schema) : _schema(schema) {}
-    row& partition() { return _row; }
+    prefetched_list(const schema_ptr schema) : _schema(schema) {}
+    row& cells() { return _row; }
+    bool fetched() const { return _inited; }
+    bool has_more() const { return _has_more; }
+    size_t only_size() const { return _size; }
 };
 
 struct prefetched_partition_simple {
@@ -160,20 +183,55 @@ struct prefetched_partition_simple {
     const bool& fetched() const { return _inited; }
 };
 
+struct only_size_tag {};
 class prefetch_partition_helper final {
 public:
-    static future<std::unique_ptr<prefetched_partition_simple>> prefetch_simple(service::storage_proxy& proxy,
+    static future<std::shared_ptr<prefetched_partition_simple>> prefetch_simple(service::storage_proxy& proxy,
         const schema_ptr schema,
         const bytes& raw_key,
         db::consistency_level cl,
         db::timeout_clock::time_point timeout,
         service::client_state& cs);
-    static future<std::unique_ptr<prefetched_partition_collection>> prefetch_collection(service::storage_proxy& proxy,
+    static future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
         const schema_ptr schema,
         const bytes& raw_key,
         db::consistency_level cl,
         db::timeout_clock::time_point timeout,
-        service::client_state& cs);
+        service::client_state& cs,
+        bool left);
+    static future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
+        const schema_ptr schema,
+        const bytes& raw_key,
+        db::consistency_level cl,
+        db::timeout_clock::time_point timeout,
+        service::client_state& cs,
+        long start,
+        long end);
+    static future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
+        const schema_ptr schema,
+        const bytes& raw_key,
+        db::consistency_level cl,
+        db::timeout_clock::time_point timeout,
+        service::client_state& cs,
+        only_size_tag
+        );
+    static future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
+        const schema_ptr schema,
+        const bytes& raw_key,
+        db::consistency_level cl,
+        db::timeout_clock::time_point timeout,
+        service::client_state& cs,
+        long index 
+        );
+    static future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
+        const schema_ptr schema,
+        const bytes& raw_key,
+        db::consistency_level cl,
+        db::timeout_clock::time_point timeout,
+        service::client_state& cs,
+        bytes&& target,
+        long count 
+        );
     static future<bool> exists(service::storage_proxy& proxy,
         const schema_ptr schema,
         const bytes& raw_key,
