@@ -24,11 +24,9 @@ shared_ptr<abstract_command> get::prepare(service::storage_proxy& proxy, request
 
 future<reply> get::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
-    auto& db = proxy.get_db().local();
-    auto schema = db.find_schema(db::system_keyspace::redis::NAME, db::system_keyspace::redis::SIMPLE_OBJECTS);
     auto timeout = now + tc.read_timeout;
-    auto fetched = prefetch_partition_helper::prefetch_simple(proxy, schema, _key, cl, timeout, cs);
-    return fetched.then([this, &proxy, cl, timeout, &cs, schema] (auto pd) {
+    auto fetched = prefetch_partition_helper::prefetch_simple(proxy, _schema, _key, cl, timeout, cs);
+    return fetched.then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->fetched()) {
             return reply_builder::build<message_tag>(std::move(pd->_data));
         }

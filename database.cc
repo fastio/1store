@@ -173,7 +173,7 @@ public:
 };
 
 static const std::unordered_set<sstring> system_keyspaces = {
-    db::system_keyspace::NAME, db::schema_tables::NAME, db::system_keyspace::redis::NAME
+                db::system_keyspace::NAME, db::schema_tables::NAME
 };
 
 bool is_system_keyspace(const sstring& name) {
@@ -183,7 +183,6 @@ bool is_system_keyspace(const sstring& name) {
 static const std::unordered_set<sstring> internal_keyspaces = {
         db::system_distributed_keyspace::NAME,
         db::system_keyspace::NAME,
-        db::system_keyspace::redis::NAME,
         db::schema_tables::NAME,
         auth::meta::AUTH_KS,
         tracing::trace_keyspace_helper::KEYSPACE_NAME
@@ -2602,12 +2601,6 @@ future<> distributed_loader::init_system_keyspace(distributed<database>& db) {
             auto& cfg = db.get_config();
             bool durable = cfg.data_file_directories().size() > 0;
             db::system_keyspace::make(db, durable, cfg.volatile_system_keyspace_for_testing());
-        }).get();
-        // redis keyspace 
-        db.invoke_on_all([] (database& db) {
-            auto& cfg = db.get_config();
-            bool durable = cfg.data_file_directories().size() > 0;
-            db::system_keyspace::redis::make(db, durable, cfg.volatile_system_keyspace_for_testing());
         }).get();
 
         const auto& cfg = db.local().get_config();
