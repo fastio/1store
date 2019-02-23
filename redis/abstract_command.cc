@@ -221,6 +221,7 @@ future<std::shared_ptr<prefetched_list>> prefetch_partition_helper::prefetch_lis
         auto map_type = map_type_impl::get_instance(ctype->name_comparator(), ctype->value_comparator(), true);
         auto v = map_type->deserialize(cell_view);
         auto&& n = value_cast<map_type_impl::native_type>(v);
+        data._origin_size = n.size();
         size_t c = 0, i = 0;
         if (count < 0) {
             c = 0 - static_cast<size_t>(count);
