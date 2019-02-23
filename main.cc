@@ -65,6 +65,7 @@
 #include "sstables/sstables.hh"
 #include <db/view/view_update_from_staging_generator.hh>
 #include "redis/query_processor.hh"
+#include "redis/redis_keyspace.hh"
 
 seastar::metrics::metric_groups app_metrics;
 
@@ -814,8 +815,10 @@ int main(int ac, char** av) {
                 }).get();
             }
             supervisor::notify("starting redis transport");
-            with_scheduling_group(dbcfg.statement_scheduling_group, [] {
-                return service::get_local_storage_service().start_redis_transport();
+            with_scheduling_group(dbcfg.statement_scheduling_group, [&cfg] {
+                return redis::redis_keyspace_helper::create_if_not_exists(cfg).then([] () {
+                    return service::get_local_storage_service().start_redis_transport();
+                });
             }).get();
             if (cfg->defragment_memory_on_idle()) {
                 smp::invoke_on_all([] () {

@@ -11,6 +11,7 @@
 #include "service/storage_proxy.hh"
 #include "keys.hh"
 #include "timestamp.hh"
+#include "redis/redis_keyspace.hh"
 using namespace seastar;
 
 class timeout_config;
@@ -30,11 +31,11 @@ class trace_state_ptr;
 
 namespace redis {
 
-static inline decltype(auto) keyspace() {/* return db::system_keyspace::redis::NAME;*/ return sstring("redis"); }
-static inline decltype(auto) simple_objects() { /*return db::system_keyspace::redis::SIMPLE_OBJECTS;*/ return sstring("simple_objects"); }
-static inline decltype(auto) lists() { /*return db::system_keyspace::redis::LISTS;*/ return sstring("lists"); }
-static inline decltype(auto) sets() { /*return db::system_keyspace::redis::SETS;*/ return sstring("sets"); }
-static inline decltype(auto) maps() { /*return db::system_keyspace::redis::MAPS;*/ return sstring("maps"); }
+static inline decltype(auto) keyspace() { return redis::NAME; }
+static inline decltype(auto) simple_objects() { return redis::SIMPLE_OBJECTS; }
+static inline decltype(auto) lists() { return redis::LISTS; }
+static inline decltype(auto) sets() { return redis::SETS; }
+static inline decltype(auto) maps() { return redis::MAPS; }
 static inline const schema_ptr simple_objects_schema(service::storage_proxy& proxy) {
     auto& db = proxy.get_db().local();
     auto schema = db.find_schema(keyspace(), simple_objects());

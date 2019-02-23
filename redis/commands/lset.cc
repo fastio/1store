@@ -14,6 +14,7 @@
 namespace redis {
 namespace commands {
 
+static logging::logger log("lset");
 shared_ptr<abstract_command> lset::prepare(service::storage_proxy& proxy, request&& req)
 {
     if (req._args_count < 3) {
@@ -33,10 +34,11 @@ future<reply> lset::execute(service::storage_proxy& proxy, db::consistency_level
             return write_list_mutation(proxy, _schema, _key, std::move(new_cells), cl, timeout, cs).then_wrapped([this] (auto f) {
                 try {
                     f.get();
-                } catch(...) {
+                } catch(std::exception& e) {
+                    log.info("set exception: {}", e.what());
                     return reply_builder::build<null_message_tag>();
                 }
-                return reply_builder::build<ok_tag>();
+                return reply_builder::build<OK_tag>();
             });
         }
         std::vector<bytes> datas { std::move(_value) };
@@ -46,7 +48,7 @@ future<reply> lset::execute(service::storage_proxy& proxy, db::consistency_level
             } catch(...) {
                 return reply_builder::build<null_message_tag>();
             }
-            return reply_builder::build<ok_tag>();
+            return reply_builder::build<OK_tag>();
         });
     });
 }

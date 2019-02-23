@@ -67,8 +67,6 @@ static const bytes msg_type_zset {"+zset\r\n"};
 static const bytes msg_type_hash {"+hash\r\n"};
 
 class ok_tag {};
-class one_tag {};
-class zero_tag {};
 class error_tag {};
 class error_message_tag {};
 class null_message_tag{};
@@ -76,6 +74,8 @@ class message_tag{};
 class number_tag {};
 class counter_tag {};
 
+class OK_tag {};
+class ERR_tag {};
 class reply_builder final {
 public:
 static sstring to_sstring(bytes b) {
@@ -86,13 +86,13 @@ template<typename tag>
 static future<reply> build()
 {
     auto m = make_lw_shared<scattered_message<char>>();
-    if (std::is_same<one_tag, tag>::value) {
-        m->append(to_sstring(msg_one));
-    }
     if (std::is_same<ok_tag, tag>::value) {
+        m->append(to_sstring(msg_one));
+    } else if (std::is_same<OK_tag, tag>::value) {
         m->append(to_sstring(msg_ok));
-    }
-    else if (std::is_same<null_message_tag, tag>::value) {
+    } else if (std::is_same<ERR_tag, tag>::value) {
+        m->append(to_sstring(msg_err));
+    } else if (std::is_same<null_message_tag, tag>::value) {
         m->append(to_sstring(msg_null_blik));
     } else {
         m->append(to_sstring(msg_zero));

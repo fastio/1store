@@ -15,7 +15,7 @@ namespace redis {
 
 namespace commands {
 
-static logging::logger log("command_set");
+static logging::logger log("set");
 
 shared_ptr<abstract_command> set::prepare(service::storage_proxy& proxy, request&& req)
 {
@@ -34,11 +34,12 @@ future<reply> set::execute(service::storage_proxy& proxy, db::consistency_level 
     return write_mutation(proxy, _schema, _key, std::move(_data), cl, timeout, cs).then_wrapped([this] (auto f) {
         try {
             f.get();
-        } catch (...) {
+        } catch (std::exception& e) {
             // FIXME: what kind of exceptions.
+            log.info("set exception: {}", e.what());
             return reply_builder::build<error_tag>();
         }
-        return reply_builder::build<one_tag>();
+        return reply_builder::build<ok_tag>();
     });
 }
 }

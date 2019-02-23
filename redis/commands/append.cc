@@ -40,7 +40,7 @@ future<reply> append::execute(service::storage_proxy& proxy, db::consistency_lev
             } catch(...) {
                 return reply_builder::build<error_tag>();
             }
-            return reply_builder::build<one_tag>();
+            return reply_builder::build<ok_tag>();
         });
     });
 }
