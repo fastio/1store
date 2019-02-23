@@ -67,6 +67,8 @@ static const bytes msg_type_zset {"+zset\r\n"};
 static const bytes msg_type_hash {"+hash\r\n"};
 
 class ok_tag {};
+class one_tag {};
+class zero_tag {};
 class error_tag {};
 class error_message_tag {};
 class null_message_tag{};
@@ -84,8 +86,11 @@ template<typename tag>
 static future<reply> build()
 {
     auto m = make_lw_shared<scattered_message<char>>();
-    if (std::is_same<ok_tag, tag>::value) {
+    if (std::is_same<one_tag, tag>::value) {
         m->append(to_sstring(msg_one));
+    }
+    if (std::is_same<ok_tag, tag>::value) {
+        m->append(to_sstring(msg_ok));
     }
     else if (std::is_same<null_message_tag, tag>::value) {
         m->append(to_sstring(msg_null_blik));

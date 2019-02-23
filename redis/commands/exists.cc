@@ -31,7 +31,7 @@ future<reply> exists::execute(service::storage_proxy& proxy, db::consistency_lev
     auto mapper = make_lw_shared<decltype(check_exists)>(std::move(check_exists));
     return map_reduce(_schemas.begin(), _schemas.end(), *mapper, false, std::bit_or<bool> ()).then([mapper = std::move(mapper)] (auto result) {
         if (result) {
-            return reply_builder::build<ok_tag>();
+            return reply_builder::build<one_tag>();
         }
         return reply_builder::build<error_tag>();
     });

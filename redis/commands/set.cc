@@ -38,7 +38,7 @@ future<reply> set::execute(service::storage_proxy& proxy, db::consistency_level 
             // FIXME: what kind of exceptions.
             return reply_builder::build<error_tag>();
         }
-        return reply_builder::build<ok_tag>();
+        return reply_builder::build<one_tag>();
     });
 }
 }

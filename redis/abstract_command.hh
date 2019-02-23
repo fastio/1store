@@ -151,6 +151,7 @@ public:
     future<> write_mutation(service::storage_proxy&, const schema_ptr schema, const bytes& key, bytes&& data, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& client_state);
     future<> write_mutation(service::storage_proxy&, const schema_ptr schema, const bytes& key, partition_dead_tag, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& client_state);
     future<> write_list_mutation(service::storage_proxy& proxy, const schema_ptr schema, const bytes& key, std::vector<bytes>&& data, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs, bool left);
+    future<> write_list_mutation(service::storage_proxy& proxy, const schema_ptr schema, const bytes& key, std::vector<std::pair<bytes, bytes>>&& data, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs);
     future<> write_list_dead_cell_mutation(service::storage_proxy& proxy, const schema_ptr schema, const bytes& key, std::vector<bytes>&& cell_keys, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs);
 };
 
@@ -158,7 +159,6 @@ public:
 struct prefetched_list {
     const schema_ptr _schema;
     bool _inited = false;
-    bool _has_more = false;
     size_t _origin_size = 0;
     struct cell {
         bytes _key;
@@ -170,8 +170,8 @@ struct prefetched_list {
     prefetched_list(const schema_ptr schema) : _schema(schema) {}
     row& cells() { return _row; }
     bool fetched() const { return _inited; }
-    bool has_more() const { return _has_more; }
-    size_t only_size() const { return _size; }
+    bool has_more() const { return (_origin_size - _row.size()) > 1; }
+    size_t only_size() const { return _origin_size; }
 };
 
 struct prefetched_partition_simple {

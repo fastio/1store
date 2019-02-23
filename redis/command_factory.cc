@@ -14,6 +14,7 @@
 #include "redis/commands/llen.hh"
 #include "redis/commands/lindex.hh"
 #include "redis/commands/lrem.hh"
+#include "redis/commands/lset.hh"
 namespace redis {
 shared_ptr<abstract_command> command_factory::create(service::storage_proxy& proxy, request&& req)
 {
@@ -39,6 +40,7 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "llen",  [] (service::storage_proxy& proxy, request&& req) { return commands::llen::prepare(proxy, std::move(req)); } }, 
     { "lindex",  [] (service::storage_proxy& proxy, request&& req) { return commands::lindex::prepare(proxy, std::move(req)); } }, 
     { "lrem",  [] (service::storage_proxy& proxy, request&& req) { return commands::lrem::prepare(proxy, std::move(req)); } }, 
+    { "lset",  [] (service::storage_proxy& proxy, request&& req) { return commands::lset::prepare(proxy, std::move(req)); } }, 
     };
     std::transform(req._command.begin(), req._command.end(), req._command.begin(), ::tolower);
     auto&& command = _commands.find(req._command);

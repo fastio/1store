@@ -13,6 +13,7 @@
 #include "log.hh"
 namespace redis {
 namespace commands {
+static logging::logger log("lrange");
 
 shared_ptr<abstract_command> lrange::prepare(service::storage_proxy& proxy, request&& req)
 {
