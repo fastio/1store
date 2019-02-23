@@ -159,7 +159,7 @@ struct prefetched_list {
     const schema_ptr _schema;
     bool _inited = false;
     bool _has_more = false;
-    size_t _size = 0;
+    size_t _origin_size = 0;
     struct cell {
         bytes _key;
         bytes _value;
