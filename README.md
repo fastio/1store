@@ -9,6 +9,8 @@ Seastar is an advanced, open-source C++ framework for high-performance server ap
 For more infomation, see here: http://www.seastar-project.org/
 
 
+![](https://github.com/fastio/pedis/blob/master/docs/new_page.gif)
+
 Now, the redis commands were supported by Pedis as follow:
   * **KEY**: DEL, EXISTS, TTL, PTTL, EXPIRE, PEXPIRE
   * **STRING**: GET, SET, DECR, INCR, DECRBY, INCRBY, APPEND, STRLEN, MGET, MSET
