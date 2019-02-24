@@ -21,6 +21,8 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     static thread_local std::unordered_map<bytes, std::function<shared_ptr<abstract_command> (service::storage_proxy& proxy, request&& req)>> _commands = {
     { "set",  [] (service::storage_proxy& proxy, request&& req) { return commands::set::prepare(proxy, std::move(req)); } }, 
     { "get",  [] (service::storage_proxy& proxy, request&& req) { return commands::get::prepare(proxy, std::move(req)); } }, 
+    { "mset",  [] (service::storage_proxy& proxy, request&& req) { return commands::mset::prepare(proxy, std::move(req)); } }, 
+    { "mget",  [] (service::storage_proxy& proxy, request&& req) { return commands::mget::prepare(proxy, std::move(req)); } }, 
     { "getset",  [] (service::storage_proxy& proxy, request&& req) { return commands::getset::prepare(proxy, std::move(req)); } }, 
     { "del",  [] (service::storage_proxy& proxy, request&& req) { return commands::del::prepare(proxy, std::move(req)); } }, 
     { "exists",  [] (service::storage_proxy& proxy, request&& req) { return commands::exists::prepare(proxy, std::move(req)); } }, 

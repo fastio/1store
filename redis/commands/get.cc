@@ -11,6 +11,10 @@
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
 #include "log.hh"
+#include <boost/range/adaptor/transformed.hpp>
+#include <boost/range/algorithm_ext/push_back.hpp>
+#include <boost/range/adaptor/filtered.hpp>
+#include <boost/range/adaptor/indirected.hpp>
 namespace redis {
 namespace commands {
 
@@ -60,5 +64,28 @@ future<reply> getset::execute(service::storage_proxy& proxy, db::consistency_lev
         });
     });
 }
+
+shared_ptr<abstract_command> mget::prepare(service::storage_proxy& proxy, request&& req)
+{
+    if (req._args_count < 1) {
+        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+    }
+    return seastar::make_shared<mget>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args));
+}
+
+future<reply> mget::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+{
+    auto timeout = now + tc.read_timeout;
+    auto fetched = prefetch_partition_helper::prefetch_simple(proxy, _schema, _keys, cl, timeout, cs);
+    return fetched.then([this, &proxy, cl, timeout, &cs] (auto pd) {
+        if (pd && pd->fetched()) {
+            //FIXME: if key was not exists, we should return nil message to client.
+            auto&& values = boost::copy_range<std::vector<bytes>>(pd->partitions() | boost::adaptors::transformed([] (auto& p) { return std::move(p.second); }));
+            return reply_builder::build(std::move(values));
+        }
+        return reply_builder::build<null_message_tag>();
+    });
+}
+
 }
 }

@@ -282,6 +282,78 @@ future<std::shared_ptr<prefetched_partition_simple>> prefetch_partition_helper::
     });
 }
 
+class prefetch_partitions_builder {
+    prefetched_partitions_simple& _data; 
+    const query::partition_slice& _partition_slice;
+    const schema_ptr _schema;
+    bytes _current;
+public:
+    prefetch_partitions_builder(std::shared_ptr<prefetched_partitions_simple> data, const schema_ptr schema, const query::partition_slice& ps)
+        : _data(*data)
+        , _partition_slice(ps)
+        , _schema(schema)
+    {
+    }
+    void accept_new_partition(const partition_key& key, uint32_t row_count)
+    {
+        // only one partition key columns & only 1 regulair column.
+        auto i = key.begin(*_schema);
+        for (auto&& col : _schema->partition_key_columns()) {
+            auto&& d = col.type->deserialize_value(*i);
+            //_current = utf8_type->decompose(d);
+            _current = d.serialize();
+            ++i;
+        }
+    }
+
+    void accept_new_partition(uint32_t row_count) {}
+
+    void accept_new_row(const clustering_key& key, const query::result_row_view& static_row, const query::result_row_view& row)
+    {
+        auto i = row.iterator(); 
+        const column_definition& column = *_schema->get_column_definition("data");
+        if (column.is_atomic() == false) {
+            throw std::logic_error(sprint("The column: %s should be atomic", column.name_as_text()));
+        }
+        auto cell = i.next_atomic_cell();
+        if (cell) {
+            cell->value().with_linearized([&] (bytes_view bv) {
+                auto&& d = column.type->deserialize_value(bv);
+                auto&& v = d.serialize();
+                _data._datas.emplace_back(std::move(std::pair<bytes, bytes>(std::move(_current), std::move(v))));
+            });
+            _data._inited = true;
+        }
+    }
+
+    void accept_new_row(const query::result_row_view& static_row, const query::result_row_view& row) {}
+    void accept_partition_end(const query::result_row_view& static_row) {}
+};
+
+future<std::shared_ptr<prefetched_partitions_simple>> prefetch_partition_helper::prefetch_simple(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const std::vector<bytes>& keys,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs)
+{
+    auto full_slice = partition_slice_builder(*schema).build();
+    auto command = ::make_lw_shared<query::read_command>(schema->id(), schema->version(),
+        full_slice, std::numeric_limits<int32_t>::max(), gc_clock::now(), tracing::make_trace_info(cs.get_trace_state()), query::max_partitions, utils::UUID(), cs.get_timestamp());
+    auto partition_ranges = boost::copy_range<dht::partition_range_vector>(keys | boost::adaptors::transformed([schema] (auto& key) {
+            auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(key)));
+            return dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
+    }));
+    // consume the result, and convert it to redis format.
+    return proxy.query(schema, command, std::move(partition_ranges), cl, {timeout, /*cs.get_trace_state()*/ nullptr}).then([schema, full_slice] (auto qr) {
+        return query::result_view::do_with(*qr.query_result, [&] (query::result_view v) {
+            auto pd = std::make_shared<prefetched_partitions_simple>(schema);
+            v.consume(full_slice, prefetch_partitions_builder(pd, schema, full_slice));
+            return pd;
+        });
+    });
+}
+
 future<bool> prefetch_partition_helper::exists(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& raw_key,
@@ -315,6 +387,19 @@ future<> abstract_command::write_mutation(service::storage_proxy& proxy, const s
     m.set_clustered_cell(clustering_key::make_empty(), column, std::move(cell));
     // call service::storage_proxy::mutate_automicly to apply the mutation.
     return proxy.mutate_atomically(std::vector<mutation> { std::move(m) }, cl, timeout, nullptr/*cs.get_trace_state()*/);
+}
+
+future<> abstract_command::write_mutation(service::storage_proxy& proxy, const schema_ptr schema, std::vector<std::pair<bytes, bytes>>&& datas, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs)
+{
+    return do_with(std::move(datas), [this, &proxy, schema, cl, timeout, &cs] (auto& datas) {
+        return parallel_for_each(datas.begin(), datas.end(), [this, &proxy, schema, timeout, cl, &cs] (auto& kv) {
+            auto m = make_mutation(schema, kv.first);
+            const column_definition& column = *schema->get_column_definition("data");
+            auto cell = make_cell(schema, *(column.type.get()), kv.second); 
+            m.set_clustered_cell(clustering_key::make_empty(), column, std::move(cell));
+            return proxy.mutate_atomically(std::vector<mutation> { std::move(m) }, cl, timeout, nullptr /*cs.get_trace_state() */);
+        });
+    });
 }
 
 future<> abstract_command::write_mutation(service::storage_proxy& proxy, const schema_ptr schema, const bytes& key, partition_dead_tag, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs) 

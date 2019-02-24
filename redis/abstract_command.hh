@@ -151,6 +151,7 @@ public:
     }
     future<> write_mutation(service::storage_proxy&, const schema_ptr schema, const bytes& key, bytes&& data, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& client_state);
     future<> write_mutation(service::storage_proxy&, const schema_ptr schema, const bytes& key, partition_dead_tag, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& client_state);
+    future<> write_mutation(service::storage_proxy&, const schema_ptr schema, std::vector<std::pair<bytes, bytes>>&& datas, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& client_state);
     future<> write_list_mutation(service::storage_proxy& proxy, const schema_ptr schema, const bytes& key, std::vector<bytes>&& data, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs, bool left);
     future<> write_list_mutation(service::storage_proxy& proxy, const schema_ptr schema, const bytes& key, std::vector<std::pair<bytes, bytes>>&& data, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs);
     future<> write_list_dead_cell_mutation(service::storage_proxy& proxy, const schema_ptr schema, const bytes& key, std::vector<bytes>&& cell_keys, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs);
@@ -184,12 +185,27 @@ struct prefetched_partition_simple {
     const bool& fetched() const { return _inited; }
 };
 
+struct prefetched_partitions_simple {
+    const schema_ptr _schema;
+    std::vector<std::pair<bytes, bytes>> _datas;
+    bool _inited = false;
+    prefetched_partitions_simple(const schema_ptr schema) : _schema(schema) {}
+    const bool& fetched() const { return _inited; }
+    std::vector<std::pair<bytes, bytes>>& partitions() { return _datas; }
+};
+
 struct only_size_tag {};
 class prefetch_partition_helper final {
 public:
     static future<std::shared_ptr<prefetched_partition_simple>> prefetch_simple(service::storage_proxy& proxy,
         const schema_ptr schema,
         const bytes& raw_key,
+        db::consistency_level cl,
+        db::timeout_clock::time_point timeout,
+        service::client_state& cs);
+    static future<std::shared_ptr<prefetched_partitions_simple>> prefetch_simple(service::storage_proxy& proxy,
+        const schema_ptr schema,
+        const std::vector<bytes>& keys,
         db::consistency_level cl,
         db::timeout_clock::time_point timeout,
         service::client_state& cs);
