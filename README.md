@@ -25,8 +25,8 @@ Now, the redis commands were supported by Pedis as follow:
 ## Getting started
 
 * ```git clone git@github.com:fastio/pedis.git```
-* ```sudo ./install-dependencies.sh```
 * ``` git submodule update --init --recursive```
+* ```sudo ./install-dependencies.sh```
 * ```./configure.py --mode=release --with=pedis```
 * ```ninja-build -j16``` # Assuming 16 system threads.
 * ```build/release/pedis --max-io-requests 1024 --smp 2```
