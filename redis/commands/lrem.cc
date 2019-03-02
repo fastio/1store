@@ -11,6 +11,7 @@
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
 #include "redis/prefetcher.hh"
+#include "redis/redis_mutation.hh"
 namespace redis {
 namespace commands {
 
@@ -30,10 +31,10 @@ future<reply> lrem::execute(service::storage_proxy& proxy, db::consistency_level
             return [this, &proxy, &cs, timeout, cl, pd] () {
                 // The last cell, delete this partition.
                 if (!pd->has_more()) {
-                    return write_mutation(proxy, _schema, _key, partition_dead_tag {}, cl, timeout, cs);
+                    return redis::write_mutation(proxy, redis::make_dead(_schema, _key), cl, timeout, cs);
                 }
                 auto dead_cell_keys = boost::copy_range<std::vector<bytes>>(pd->data() | boost::adaptors::transformed([] (auto& c) { return std::move(c.first); }));
-                return write_list_dead_cell_mutation(proxy, _schema, _key, std::move(dead_cell_keys), cl, timeout, cs);
+                return redis::write_mutation(proxy, redis::make_list_dead_cells(_schema, _key, std::move(dead_cell_keys)), cl, timeout, cs);
             } ().then_wrapped([this, pd] (auto f) {
                 try {
                     f.get();

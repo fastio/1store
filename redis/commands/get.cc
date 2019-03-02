@@ -3,6 +3,7 @@
 #include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
+#include "redis/redis_mutation.hh"
 #include "redis/prefetcher.hh"
 #include "timeout_config.hh"
 #include "service/client_state.hh"
@@ -51,7 +52,7 @@ future<reply> getset::execute(service::storage_proxy& proxy, db::consistency_lev
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_simple(proxy, _schema, _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
-        return write_mutation(proxy, _schema, _key, std::move(_data), cl, timeout, cs).then_wrapped([this, pd = std::move(pd)] (auto f) {
+        return redis::write_mutation(proxy, redis::make_simple(_schema, _key, std::move(_data)), cl, timeout, cs).then_wrapped([this, pd = std::move(pd)] (auto f) {
             try {
                 f.get();
             } catch(...) {

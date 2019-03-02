@@ -3,6 +3,7 @@
 #include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
+#include "redis/redis_mutation.hh"
 #include "timeout_config.hh"
 #include "service/client_state.hh"
 #include "service/storage_proxy.hh"
@@ -57,7 +58,7 @@ future<reply> counter::execute(service::storage_proxy& proxy, db::consistency_le
         if (_incr) result += bytes2long(_data);
         else result -= bytes2long(_data);
         bytes new_data = long2bytes(result);
-        return write_mutation(proxy, _schema, _key, std::move(new_data), cl, timeout, cs).then_wrapped([this, result] (auto f) {
+        return redis::write_mutation(proxy, redis::make_simple(_schema, _key, std::move(new_data)), cl, timeout, cs).then_wrapped([this, result] (auto f) {
             try {
                 f.get();
             } catch(...) {

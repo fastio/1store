@@ -3,6 +3,7 @@
 #include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
+#include "redis/redis_mutation.hh"
 #include "redis/prefetcher.hh"
 #include "timeout_config.hh"
 #include "service/client_state.hh"
@@ -32,7 +33,7 @@ future<reply> append::execute(service::storage_proxy& proxy, db::consistency_lev
         } else {
             new_data = std::move(_data);
         }
-        return write_mutation(proxy, _schema, _key, std::move(new_data), cl, timeout, cs).then_wrapped([this] (auto f) {
+        return redis::write_mutation(proxy, redis::make_simple(_schema, _key, std::move(new_data)), cl, timeout, cs).then_wrapped([this] (auto f) {
             try {
                 f.get();
             } catch(...) {

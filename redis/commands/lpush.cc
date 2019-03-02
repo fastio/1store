@@ -3,6 +3,7 @@
 #include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
+#include "redis/redis_mutation.hh"
 #include "timeout_config.hh"
 #include "service/client_state.hh"
 #include "service/storage_proxy.hh"
@@ -59,7 +60,7 @@ future<reply> push::do_execute(service::storage_proxy& proxy,
             return reply_builder::build<error_tag>();
         }
         auto timeout = now + tc.read_timeout;
-        return write_list_mutation(proxy, _schema, _key, std::move(_datas), cl, timeout, cs, left).then_wrapped([this, total = _datas.size()] (auto f) {
+        return redis::write_mutation(proxy, redis::make_list_cells(_schema, _key, std::move(_datas), left), cl, timeout, cs).then_wrapped([this, total = _datas.size()] (auto f) {
             try {
                 f.get();
             } catch (...) {

@@ -11,6 +11,7 @@
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
 #include "redis/prefetcher.hh"
+#include "redis/redis_mutation.hh"
 namespace redis {
 namespace commands {
 
@@ -30,7 +31,7 @@ future<reply> lset::execute(service::storage_proxy& proxy, db::consistency_level
         if (pd && pd->has_data()) {
             auto& e = pd->data().front();
             std::vector<std::pair<bytes, bytes>> new_cells { { std::move(e.first), std::move(e.second) } };
-            return write_list_mutation(proxy, _schema, _key, std::move(new_cells), cl, timeout, cs).then_wrapped([this] (auto f) {
+            return redis::write_mutation(proxy, redis::make_list_indexed_cells(_schema, _key, std::move(new_cells)), cl, timeout, cs).then_wrapped([this] (auto f) {
                 try {
                     f.get();
                 } catch(std::exception& e) {
@@ -41,7 +42,7 @@ future<reply> lset::execute(service::storage_proxy& proxy, db::consistency_level
             });
         }
         std::vector<bytes> datas { std::move(_value) };
-        return write_list_mutation(proxy, _schema, _key, std::move(datas), cl, timeout, cs, true).then_wrapped([this] (auto f) {
+        return redis::write_mutation(proxy, redis::make_list_cells(_schema, _key, std::move(datas), true), cl, timeout, cs).then_wrapped([this] (auto f) {
             try {
                 f.get();
             } catch(...) {

@@ -3,6 +3,7 @@
 #include "seastar/core/shared_ptr.hh"
 #include "redis/reply_builder.hh"
 #include "redis/request.hh"
+#include "redis/redis_mutation.hh"
 #include "redis/reply.hh"
 #include "db/system_keyspace.hh"
 #include "types.hh"
@@ -33,7 +34,7 @@ future<reply> del::execute(service::storage_proxy& proxy, db::consistency_level 
     auto remove_if_exists = [this, timeout, cl, &proxy, &tc, &cs] (const schema_ptr schema) {
         return exists(proxy, schema, _key, cl, timeout, cs).then ([this, &proxy, timeout, cl, &cs, schema] (auto exists) {
             if (exists) {
-                return write_mutation(proxy, schema, _key, partition_dead_tag {}, cl, timeout, cs).then_wrapped([this] (auto f) {
+                return redis::write_mutation(proxy, redis::make_dead(schema, _key), cl, timeout, cs).then_wrapped([this] (auto f) {
                     try {
                         f.get();
                     } catch (...) {

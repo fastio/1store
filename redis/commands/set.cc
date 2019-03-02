@@ -10,12 +10,10 @@
 #include "service/client_state.hh"
 #include "mutation.hh"
 #include "timeout_config.hh"
-#include "log.hh"
+#include "redis/redis_mutation.hh"
 namespace redis {
 
 namespace commands {
-
-static logging::logger log("set");
 
 shared_ptr<abstract_command> set::prepare(service::storage_proxy& proxy, request&& req)
 {
@@ -31,11 +29,10 @@ shared_ptr<abstract_command> set::prepare(service::storage_proxy& proxy, request
 future<reply> set::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
-    return write_mutation(proxy, _schema, _key, std::move(_data), cl, timeout, cs).then_wrapped([this] (auto f) {
+    return redis::write_mutation(proxy, redis::make_simple(_schema, _key, std::move(_data)), cl, timeout, cs).then_wrapped([this] (auto f) {
         try {
             f.get();
         } catch (std::exception& e) {
-            log.info("set exception: {}", e.what());
             return reply_builder::build<error_tag>();
         }
         return reply_builder::build<ok_tag>();
@@ -57,11 +54,13 @@ shared_ptr<abstract_command> mset::prepare(service::storage_proxy& proxy, reques
 future<reply> mset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
-    return write_mutation(proxy, _schema, std::move(_datas), cl, timeout, cs).then_wrapped([this] (auto f) {
+    auto mutations = boost::copy_range<std::vector<seastar::lw_shared_ptr<redis_mutation<bytes>>>>(_datas | boost::adaptors::transformed([this] (auto& data) {
+        return redis::make_simple(_schema, data.first, std::move(data.second));
+    }));
+    return redis::write_mutations(proxy, mutations, cl, timeout, cs).then_wrapped([this] (auto f) {
         try {
             f.get();
         } catch (std::exception& e) {
-            log.info("mset exception: {}", e.what());
             return reply_builder::build<error_tag>();
         }
         return reply_builder::build<OK_tag>();
