@@ -60,7 +60,8 @@ future<reply> push::do_execute(service::storage_proxy& proxy,
             return reply_builder::build<error_tag>();
         }
         auto timeout = now + tc.read_timeout;
-        return redis::write_mutation(proxy, redis::make_list_cells(_schema, _key, std::move(_datas), left), cl, timeout, cs).then_wrapped([this, total = _datas.size()] (auto f) {
+        auto total = _data.size();
+        return redis::write_mutation(proxy, redis::make_list_cells(_schema, _key, std::move(_data), left), cl, timeout, cs).then_wrapped([this, total] (auto f) {
             try {
                 f.get();
             } catch (...) {
