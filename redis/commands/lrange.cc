@@ -10,7 +10,7 @@
 #include "partition_slice_builder.hh"
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
-#include "log.hh"
+#include "redis/prefetcher.hh"
 namespace redis {
 namespace commands {
 
@@ -25,13 +25,12 @@ shared_ptr<abstract_command> lrange::prepare(service::storage_proxy& proxy, requ
 future<reply> lrange::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    auto fetched = prefetch_partition_helper::prefetch_list(proxy, _schema, _key, cl, timeout, cs, _start, _end);
-    return fetched.then([this, &proxy, cl, timeout, &cs] (auto pd) {
-        if (pd && pd->fetched()) {
+    return prefetch_list(proxy, _schema, _key, cl, timeout, cs, _start, _end).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+        if (pd && pd->has_data()) {
             std::vector<bytes> values;
-            values.reserve(pd->cells().size());
-            for (auto& c : pd->cells()) {
-                values.emplace_back(std::move(c._value));
+            values.reserve(pd->data_size());
+            for (auto& c : pd->data()) {
+                values.emplace_back(std::move(c.second));
             }
             return reply_builder::build(std::move(values));
         }

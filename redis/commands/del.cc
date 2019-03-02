@@ -10,15 +10,13 @@
 #include "service/client_state.hh"
 #include "mutation.hh"
 #include "timeout_config.hh"
-#include "log.hh"
+#include "redis/prefetcher.hh"
 namespace service {
 class storage_proxy;
 }
 namespace redis {
 
 namespace commands {
-
-static logging::logger log("command_del");
 
 shared_ptr<abstract_command> del::prepare(service::storage_proxy& proxy, request&& req)
 {
@@ -33,7 +31,7 @@ future<reply> del::execute(service::storage_proxy& proxy, db::consistency_level 
 {
     auto timeout = now + tc.write_timeout;
     auto remove_if_exists = [this, timeout, cl, &proxy, &tc, &cs] (const schema_ptr schema) {
-        return prefetch_partition_helper::exists(proxy, schema, _key, cl, timeout, cs).then ([this, &proxy, timeout, cl, &cs, schema] (auto exists) {
+        return exists(proxy, schema, _key, cl, timeout, cs).then ([this, &proxy, timeout, cl, &cs, schema] (auto exists) {
             if (exists) {
                 return write_mutation(proxy, schema, _key, partition_dead_tag {}, cl, timeout, cs).then_wrapped([this] (auto f) {
                     try {

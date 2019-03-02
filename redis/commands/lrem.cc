@@ -10,7 +10,7 @@
 #include "partition_slice_builder.hh"
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
-#include "log.hh"
+#include "redis/prefetcher.hh"
 namespace redis {
 namespace commands {
 
@@ -25,15 +25,14 @@ shared_ptr<abstract_command> lrem::prepare(service::storage_proxy& proxy, reques
 future<reply> lrem::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    auto fetched = prefetch_partition_helper::prefetch_list(proxy, _schema, _key, cl, timeout, cs, std::move(_target), _count);
-    return fetched.then([this, &proxy, cl, timeout, &cs] (auto pd) {
-        if (pd && pd->fetched()) {
+    return prefetch_list(proxy, _schema, _key, cl, timeout, cs, std::move(_target), _count).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+        if (pd && pd->has_data()) {
             return [this, &proxy, &cs, timeout, cl, pd] () {
                 // The last cell, delete this partition.
                 if (!pd->has_more()) {
                     return write_mutation(proxy, _schema, _key, partition_dead_tag {}, cl, timeout, cs);
                 }
-                auto dead_cell_keys = boost::copy_range<std::vector<bytes>>(pd->cells() | boost::adaptors::transformed([] (auto& c) { return std::move(c._key); }));
+                auto dead_cell_keys = boost::copy_range<std::vector<bytes>>(pd->data() | boost::adaptors::transformed([] (auto& c) { return std::move(c.first); }));
                 return write_list_dead_cell_mutation(proxy, _schema, _key, std::move(dead_cell_keys), cl, timeout, cs);
             } ().then_wrapped([this, pd] (auto f) {
                 try {
@@ -41,7 +40,7 @@ future<reply> lrem::execute(service::storage_proxy& proxy, db::consistency_level
                 } catch(...) {
                     return reply_builder::build<error_tag>();
                 }
-                auto values = boost::copy_range<std::vector<bytes>>(pd->cells() | boost::adaptors::transformed([] (auto& c) { return std::move(c._value); }));
+                auto values = boost::copy_range<std::vector<bytes>>(pd->data() | boost::adaptors::transformed([] (auto& c) { return std::move(c.second); }));
                 return reply_builder::build(std::move(values));
             });
         }

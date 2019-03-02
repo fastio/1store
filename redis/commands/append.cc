@@ -3,6 +3,7 @@
 #include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
+#include "redis/prefetcher.hh"
 #include "timeout_config.hh"
 #include "service/client_state.hh"
 #include "service/storage_proxy.hh"
@@ -10,11 +11,9 @@
 #include "partition_slice_builder.hh"
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
-#include "log.hh"
 #include "cql3/query_options.hh"
 namespace redis {
 namespace commands {
-static logging::logger log("command_append");
 shared_ptr<abstract_command> append::prepare(service::storage_proxy& proxy, request&& req)
 {
     if (req._args_count < 2) {
@@ -26,10 +25,9 @@ shared_ptr<abstract_command> append::prepare(service::storage_proxy& proxy, requ
 future<reply> append::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    auto fetched = prefetch_partition_helper::prefetch_simple(proxy, _schema, _key, cl, timeout, cs);
-    return fetched.then([this, &proxy, cl, timeout, &cs] (auto pd) {
+    return prefetch_simple(proxy, _schema, _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         bytes new_data;
-        if (pd && pd->fetched()) {
+        if (pd && pd->has_data()) {
             new_data = std::move(pd->_data + _data);
         } else {
             new_data = std::move(_data);

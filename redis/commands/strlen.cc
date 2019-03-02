@@ -10,7 +10,7 @@
 #include "partition_slice_builder.hh"
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
-#include "log.hh"
+#include "redis/prefetcher.hh"
 namespace redis {
 namespace commands {
 shared_ptr<abstract_command> strlen::prepare(service::storage_proxy& proxy, request&& req)
@@ -24,10 +24,9 @@ shared_ptr<abstract_command> strlen::prepare(service::storage_proxy& proxy, requ
 future<reply> strlen::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    auto fetched = prefetch_partition_helper::prefetch_simple(proxy, _schema, _key, cl, timeout, cs);
-    return fetched.then([this, &proxy, cl, timeout, &cs] (auto pd) {
-        if (pd && pd->fetched()) {
-            return reply_builder::build<number_tag>(pd->_data.size());
+    return prefetch_simple(proxy, _schema, _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+        if (pd && pd->has_data()) {
+            return reply_builder::build<number_tag>(static_cast<size_t>(pd->data_size()));
         }
         return reply_builder::build<number_tag>(size_t { 0 } );
     });

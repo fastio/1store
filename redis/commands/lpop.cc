@@ -10,7 +10,7 @@
 #include "partition_slice_builder.hh"
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
-#include "log.hh"
+#include "redis/prefetcher.hh"
 namespace redis {
 namespace commands {
 
@@ -44,18 +44,17 @@ future<reply> rpop::execute(service::storage_proxy& proxy, db::consistency_level
 future<reply> pop::do_execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs, bool left)
 {
     auto timeout = now + tc.read_timeout;
-    auto fetched = prefetch_partition_helper::prefetch_list(proxy, _schema, _key, cl, timeout, cs, left);
-    return fetched.then([this, &proxy, cl, timeout, &cs, left] (auto pd) {
-        if (pd && pd->fetched()) {
-            auto removed = [left, &pd] () { return left ? pd->cells().front() : pd->cells().back(); } ();
-            return [this, removed_cell_key = removed._key, &proxy, &cs, timeout, cl, pd] () {
+    return prefetch_list(proxy, _schema, _key, cl, timeout, cs, left).then([this, &proxy, cl, timeout, &cs, left] (auto pd) {
+        if (pd && pd->has_data()) {
+            auto removed = [left, &pd] () { return left ? pd->data().front() : pd->data().back(); } ();
+            return [this, removed_cell_key = removed.first, &proxy, &cs, timeout, cl, pd] () {
                 // The last cell, delete this partition.
                 if (!pd->has_more()) {
                     return write_mutation(proxy, _schema, _key, partition_dead_tag {}, cl, timeout, cs);
                 }
                 std::vector<bytes> removed_cell_keys { std::move(removed_cell_key) };
                 return write_list_dead_cell_mutation(proxy, _schema, _key, std::move(removed_cell_keys), cl, timeout, cs);
-            } ().then_wrapped([this, value = removed._value, pd] (auto f) {
+            } ().then_wrapped([this, value = removed.second, pd] (auto f) {
                 try {
                     f.get();
                 } catch(...) {

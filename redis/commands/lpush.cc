@@ -10,7 +10,7 @@
 #include "partition_slice_builder.hh"
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
-#include "log.hh"
+#include "redis/prefetcher.hh"
 #include "cql3/query_options.hh"
 namespace redis {
 namespace commands {
@@ -86,7 +86,7 @@ future<reply> rpush::execute(service::storage_proxy& proxy, db::consistency_leve
 future<bool> lpushx::check_exists(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
-    return prefetch_partition_helper::exists(proxy, _schema, _key, cl, timeout, cs);
+    return exists(proxy, _schema, _key, cl, timeout, cs);
 }
 
 future<reply> lpushx::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)

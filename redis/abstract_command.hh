@@ -12,6 +12,7 @@
 #include "keys.hh"
 #include "timestamp.hh"
 #include "redis/redis_keyspace.hh"
+#include <unordered_map>
 using namespace seastar;
 
 class timeout_config;
@@ -157,103 +158,4 @@ public:
     future<> write_list_dead_cell_mutation(service::storage_proxy& proxy, const schema_ptr schema, const bytes& key, std::vector<bytes>&& cell_keys, db::consistency_level cl, db::timeout_clock::time_point timeout, service::client_state& cs);
 };
 
-// Read required partition for write-before-read operations.
-struct prefetched_list {
-    const schema_ptr _schema;
-    bool _inited = false;
-    size_t _origin_size = 0;
-    struct cell {
-        bytes _key;
-        bytes _value;
-    };
-    using cell_list = std::vector<cell>;
-    using row = cell_list; //std::unordered_map<bytes, cell_list>;
-    row _row;
-    prefetched_list(const schema_ptr schema) : _schema(schema) {}
-    row& cells() { return _row; }
-    bool fetched() const { return _inited; }
-    bool has_more() const { return (_origin_size - _row.size()) > 1; }
-    size_t only_size() const { return _origin_size; }
-};
-
-struct prefetched_partition_simple {
-    const schema_ptr _schema;
-    bytes _data;
-    bool _inited;
-    prefetched_partition_simple(const schema_ptr schema, bytes&& b) : _schema(schema), _data(std::move(b)), _inited(true) {}
-    prefetched_partition_simple(const schema_ptr schema) : _schema(schema), _inited(false) {}
-    const bool& fetched() const { return _inited; }
-};
-
-struct prefetched_partitions_simple {
-    const schema_ptr _schema;
-    std::vector<std::pair<bytes, bytes>> _datas;
-    bool _inited = false;
-    prefetched_partitions_simple(const schema_ptr schema) : _schema(schema) {}
-    const bool& fetched() const { return _inited; }
-    std::vector<std::pair<bytes, bytes>>& partitions() { return _datas; }
-};
-
-struct only_size_tag {};
-class prefetch_partition_helper final {
-public:
-    static future<std::shared_ptr<prefetched_partition_simple>> prefetch_simple(service::storage_proxy& proxy,
-        const schema_ptr schema,
-        const bytes& raw_key,
-        db::consistency_level cl,
-        db::timeout_clock::time_point timeout,
-        service::client_state& cs);
-    static future<std::shared_ptr<prefetched_partitions_simple>> prefetch_simple(service::storage_proxy& proxy,
-        const schema_ptr schema,
-        const std::vector<bytes>& keys,
-        db::consistency_level cl,
-        db::timeout_clock::time_point timeout,
-        service::client_state& cs);
-    static future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
-        const schema_ptr schema,
-        const bytes& raw_key,
-        db::consistency_level cl,
-        db::timeout_clock::time_point timeout,
-        service::client_state& cs,
-        bool left);
-    static future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
-        const schema_ptr schema,
-        const bytes& raw_key,
-        db::consistency_level cl,
-        db::timeout_clock::time_point timeout,
-        service::client_state& cs,
-        long start,
-        long end);
-    static future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
-        const schema_ptr schema,
-        const bytes& raw_key,
-        db::consistency_level cl,
-        db::timeout_clock::time_point timeout,
-        service::client_state& cs,
-        only_size_tag
-        );
-    static future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
-        const schema_ptr schema,
-        const bytes& raw_key,
-        db::consistency_level cl,
-        db::timeout_clock::time_point timeout,
-        service::client_state& cs,
-        long index 
-        );
-    static future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
-        const schema_ptr schema,
-        const bytes& raw_key,
-        db::consistency_level cl,
-        db::timeout_clock::time_point timeout,
-        service::client_state& cs,
-        bytes&& target,
-        long count 
-        );
-    static future<bool> exists(service::storage_proxy& proxy,
-        const schema_ptr schema,
-        const bytes& raw_key,
-        db::consistency_level cl,
-        db::timeout_clock::time_point timeout,
-        service::client_state& cs);
-};
 } // end of redis namespace

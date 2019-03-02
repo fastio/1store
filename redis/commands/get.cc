@@ -3,6 +3,7 @@
 #include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
+#include "redis/prefetcher.hh"
 #include "timeout_config.hh"
 #include "service/client_state.hh"
 #include "service/storage_proxy.hh"
@@ -29,9 +30,9 @@ shared_ptr<abstract_command> get::prepare(service::storage_proxy& proxy, request
 future<reply> get::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    auto fetched = prefetch_partition_helper::prefetch_simple(proxy, _schema, _key, cl, timeout, cs);
+    auto fetched = prefetch_simple(proxy, _schema, _key, cl, timeout, cs);
     return fetched.then([this, &proxy, cl, timeout, &cs] (auto pd) {
-        if (pd && pd->fetched()) {
+        if (pd && pd->has_data()) {
             return reply_builder::build<message_tag>(std::move(pd->_data));
         }
         return reply_builder::build<null_message_tag>();
@@ -49,16 +50,15 @@ shared_ptr<abstract_command> getset::prepare(service::storage_proxy& proxy, requ
 future<reply> getset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    auto fetched = prefetch_partition_helper::prefetch_simple(proxy, _schema, _key, cl, timeout, cs);
-    return fetched.then([this, &proxy, cl, timeout, &cs] (auto pd) {
+    return prefetch_simple(proxy, _schema, _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         return write_mutation(proxy, _schema, _key, std::move(_data), cl, timeout, cs).then_wrapped([this, pd = std::move(pd)] (auto f) {
             try {
                 f.get();
             } catch(...) {
                 return reply_builder::build<error_tag>();
             }
-            if (pd && pd->fetched()) {
-                return reply_builder::build<message_tag>(std::move(pd->_data));
+            if (pd && pd->has_data()) {
+                return reply_builder::build<message_tag>(std::move(pd->data()));
             }
             return reply_builder::build<null_message_tag>();
         });
@@ -76,11 +76,10 @@ shared_ptr<abstract_command> mget::prepare(service::storage_proxy& proxy, reques
 future<reply> mget::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    auto fetched = prefetch_partition_helper::prefetch_simple(proxy, _schema, _keys, cl, timeout, cs);
-    return fetched.then([this, &proxy, cl, timeout, &cs] (auto pd) {
-        if (pd && pd->fetched()) {
+    return prefetch_simple(proxy, _schema, _keys, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+        if (pd && pd->has_data()) {
             //FIXME: if key was not exists, we should return nil message to client.
-            auto&& values = boost::copy_range<std::vector<bytes>>(pd->partitions() | boost::adaptors::transformed([] (auto& p) { return std::move(p.second); }));
+            auto&& values = boost::copy_range<std::vector<bytes>>(pd->data() | boost::adaptors::transformed([] (auto& p) { return std::move(p.second); }));
             return reply_builder::build(std::move(values));
         }
         return reply_builder::build<null_message_tag>();
