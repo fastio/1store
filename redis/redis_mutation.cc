@@ -169,6 +169,22 @@ mutation make_mutation(seastar::lw_shared_ptr<map_mutation> r)
     return std::move(m);
 }
 
+mutation make_mutation(seastar::lw_shared_ptr<map_dead_cells_mutation> r)
+{
+    auto schema = r->schema();
+    const column_definition& column = *schema->get_column_definition("data");
+    auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(r->key())));
+    auto m = mutation(schema, std::move(pkey));
+    auto&& mtype = static_cast<const map_type_impl*>(column.type.get());
+    map_type_impl::mutation mm;
+    
+    for (auto&& e : r->data()._map_keys) {
+        mm.cells.emplace_back(e, make_dead_cell());
+    }    
+    m.set_cell(clustering_key::make_empty(), column, atomic_cell_or_collection::from_collection_mutation(mtype->serialize_mutation_form(std::move(mm))));
+    return std::move(m);
+}
+
 future<> write_mutation_impl(service::storage_proxy& proxy,
     std::vector<mutation>&& ms,
     db::consistency_level cl,

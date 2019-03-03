@@ -86,10 +86,17 @@ struct list_dead_cells {
     size_t size() const { return _cell_keys.size(); }
     list_dead_cells(std::vector<bytes>&& cell_keys) : _cell_keys(std::move(cell_keys)) {}
 };
+
+struct map_dead_cells {
+    std::vector<bytes> _map_keys;
+    size_t size() const { return _map_keys.size(); }
+    map_dead_cells(std::vector<bytes>&& map_keys) : _map_keys(std::move(map_keys)) {}
+};
 using list_dead_cells_mutation = redis_mutation<list_dead_cells>;
 
 using map_mutation = redis_mutation<std::unordered_map<bytes, bytes>>;
 
+using map_dead_cells_mutation = redis_mutation<map_dead_cells>;
 static inline seastar::lw_shared_ptr<redis_mutation<bytes>> make_simple(const schema_ptr schema, const bytes& key, bytes&& data) {
     return seastar::make_lw_shared<redis_mutation<bytes>>(schema, key, std::move(data));
 }
@@ -109,6 +116,9 @@ static inline seastar::lw_shared_ptr<list_dead_cells_mutation> make_list_dead_ce
 static inline seastar::lw_shared_ptr<map_mutation> make_map_cells(const schema_ptr schema, const bytes& key, std::unordered_map<bytes, bytes>&& cells) {
     return seastar::make_lw_shared<map_mutation> (schema, key, std::move(cells));
 }
+static inline seastar::lw_shared_ptr<map_dead_cells_mutation> make_map_dead_cells(const schema_ptr schema, const bytes& key, std::vector<bytes>&& map_keys) {
+    return seastar::make_lw_shared<map_dead_cells_mutation> (schema, key, std::move(map_dead_cells (std::move(map_keys))));
+}
 
 namespace internal {
 mutation make_mutation(seastar::lw_shared_ptr<redis_mutation<bytes>> r);
@@ -117,6 +127,7 @@ mutation make_mutation(seastar::lw_shared_ptr<list_mutation> r);
 mutation make_mutation(seastar::lw_shared_ptr<list_indexed_cells_mutation> r);
 mutation make_mutation(seastar::lw_shared_ptr<list_dead_cells_mutation> r);
 mutation make_mutation(seastar::lw_shared_ptr<map_mutation> r);
+mutation make_mutation(seastar::lw_shared_ptr<map_dead_cells_mutation> r);
 future<> write_mutation_impl(
     service::storage_proxy&,
     std::vector<mutation>&& ms,

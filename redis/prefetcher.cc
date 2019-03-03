@@ -281,6 +281,7 @@ future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& p
             data._data.emplace_back(std::move(std::make_pair(el.first.serialize(), el.second.serialize())));
         }
         data._origin_size = n.size();
+        data.set_has_more(n.size() - data._data.size() > 0);
         return true;
     });
 }
@@ -301,6 +302,7 @@ future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& p
         data._origin_size = n.size();
         auto& el = left ? n.front() : n.back();
         data._data.emplace_back(std::move(std::make_pair(el.first.serialize(), el.second.serialize())));
+        data.set_has_more(n.size() - data._data.size() > 0);
         return true;
     });
 }
@@ -318,6 +320,7 @@ future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& p
         auto v = map_type->deserialize(cell_view);
         auto&& n = value_cast<map_type_impl::native_type>(v);
         data._origin_size = n.size();
+        data.set_has_more(n.size() - data._data.size() > 0);
         return true;
     });
 }
@@ -342,6 +345,7 @@ future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& p
         l = l % static_cast<long>(n.size());
         auto& el = n[static_cast<size_t>(l)];
         data._data.emplace_back(std::move(std::make_pair(el.first.serialize(), el.second.serialize())));
+        data.set_has_more(n.size() - data._data.size() > 0);
         return true;
     });
 }
@@ -385,6 +389,7 @@ future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& p
                 }
             }
         }
+        data.set_has_more(n.size() - data._data.size() > 0);
         return true;
     });
 }
@@ -405,6 +410,7 @@ future<std::shared_ptr<prefetched_map>> prefetch_map(service::storage_proxy& pro
         for (auto&& el : n) {
             data._data.emplace(std::move(std::make_pair(el.first.serialize(), el.second.serialize())));
         }
+        data.set_has_more(n.size() - data._data.size() > 0);
         return true;
     });
 }
@@ -412,19 +418,19 @@ future<std::shared_ptr<prefetched_map>> prefetch_map(service::storage_proxy& pro
 future<std::shared_ptr<prefetched_map_only_values>> prefetch_map(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
-    std::vector<bytes>&& map_keys,
+    const std::vector<bytes>& map_keys,
     db::consistency_level cl,
     db::timeout_clock::time_point timeout,
     service::client_state& cs)
 {
-    return prefetch_struct_impl<std::vector<std::optional<bytes>>>(proxy, schema, key, cl, timeout, cs, [map_keys = std::move(map_keys)] (const column_definition& col, prefetched_map_only_values& data, bytes_view cell_view) { 
+    return prefetch_struct_impl<std::vector<std::optional<bytes>>>(proxy, schema, key, cl, timeout, cs, [&map_keys] (const column_definition& col, prefetched_map_only_values& data, bytes_view cell_view) { 
         auto ctype = static_pointer_cast<const collection_type_impl>(col.type);
         auto map_type = map_type_impl::get_instance(ctype->name_comparator(), ctype->value_comparator(), true);
         auto v = map_type->deserialize(cell_view);
         auto&& n = value_cast<map_type_impl::native_type>(v);
         data._origin_size = n.size();
-        auto&& kvs = boost::copy_range<std::unordered_map<bytes, std::optional<bytes>>>(map_keys | boost::adaptors::transformed([] (auto& mkey) {
-            return std::pair<bytes, std::optional<bytes>>(std::move(mkey), std::optional<bytes>());
+        auto&& kvs = boost::copy_range<std::unordered_map<bytes, std::optional<bytes>>>(map_keys | boost::adaptors::transformed([] (const auto& mkey) {
+            return std::pair<bytes, std::optional<bytes>>(mkey, std::optional<bytes>());
         }));
         size_t total = kvs.size();
         for (auto&& el : n) {
@@ -441,10 +447,37 @@ future<std::shared_ptr<prefetched_map_only_values>> prefetch_map(service::storag
             return std::move(kvs[mkey]); 
         }));
         data._data = std::move(values);
+        data.set_has_more(n.size() - data._data.size() > 0);
         return true;
     });
 }
 
+future<std::shared_ptr<prefetched_map_only_one_cell>> prefetch_map(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    const bytes& map_key,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs)
+{
+    return prefetch_struct_impl<std::optional<std::pair<bytes, bytes>>>(proxy, schema, key, cl, timeout, cs, [&map_key] (const column_definition& col, prefetched_map_only_one_cell& data, bytes_view cell_view) { 
+        auto ctype = static_pointer_cast<const collection_type_impl>(col.type);
+        auto map_type = map_type_impl::get_instance(ctype->name_comparator(), ctype->value_comparator(), true);
+        auto v = map_type->deserialize(cell_view);
+        auto&& n = value_cast<map_type_impl::native_type>(v);
+        data._origin_size = n.size();
+        data._data = std::optional<std::pair<bytes, bytes>>();
+        for (auto&& el : n) {
+            auto&& key = el.first.serialize();
+            if (key == map_key) {
+                data.set_has_more(n.size() - 1 > 0);
+                data._data = std::move(std::optional<std::pair<bytes, bytes>>(std::make_pair(std::move(key), std::move(el.second.serialize()))));
+                return true;
+            }
+        }
+        return false;
+    });
+}
 future<bool> exists(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,

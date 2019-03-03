@@ -37,11 +37,13 @@ template<typename ContainerType>
 struct prefetched_struct {
     const schema_ptr _schema;
     bool _inited = false;
+    bool _has_more = false;
     size_t _origin_size = 0;
     ContainerType _data;
     prefetched_struct(const schema_ptr schema) : _schema(schema) {}
     bool has_data() const { return _inited; }
-    bool has_more() const { return (_origin_size - _data.size()) > 1; }
+    bool has_more() const { return _has_more; }
+    void set_has_more(bool v) { _has_more = v; }
     size_t data_size() const { return _data.size(); }
     size_t origin_size() const { return _origin_size; }
     ContainerType& data() { return _data; }
@@ -49,7 +51,6 @@ struct prefetched_struct {
 };
 
 using prefetched_map = prefetched_struct<std::unordered_map<bytes, bytes>>;
-using prefetched_map_only_values = prefetched_struct<std::vector<std::optional<bytes>>>;
 future<std::shared_ptr<prefetched_map>> prefetch_map(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
@@ -57,10 +58,20 @@ future<std::shared_ptr<prefetched_map>> prefetch_map(service::storage_proxy& pro
     db::timeout_clock::time_point timeout,
     service::client_state& cs
     );
+using prefetched_map_only_values = prefetched_struct<std::vector<std::optional<bytes>>>;
 future<std::shared_ptr<prefetched_map_only_values>> prefetch_map(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
-    std::vector<bytes>&& map_keys,
+    const std::vector<bytes>& map_keys,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs
+    );
+using prefetched_map_only_one_cell = prefetched_struct<std::optional<std::pair<bytes, bytes>>>;
+future<std::shared_ptr<prefetched_map_only_one_cell>> prefetch_map(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    const bytes& map_key,
     db::consistency_level cl,
     db::timeout_clock::time_point timeout,
     service::client_state& cs

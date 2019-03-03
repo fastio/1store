@@ -17,6 +17,8 @@
 #include "redis/commands/lset.hh"
 #include "redis/commands/hset.hh"
 #include "redis/commands/hget.hh"
+#include "redis/commands/hdel.hh"
+#include "redis/commands/hexists.hh"
 namespace redis {
 shared_ptr<abstract_command> command_factory::create(service::storage_proxy& proxy, request&& req)
 {
@@ -49,6 +51,8 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "hmset",  [] (service::storage_proxy& proxy, request&& req) { return commands::hset::prepare(proxy, std::move(req), true); } }, 
     { "hget",  [] (service::storage_proxy& proxy, request&& req) { return commands::hget::prepare(proxy, std::move(req), false); } }, 
     { "hmget",  [] (service::storage_proxy& proxy, request&& req) { return commands::hget::prepare(proxy, std::move(req), true); } }, 
+    { "hdel",  [] (service::storage_proxy& proxy, request&& req) { return commands::hdel::prepare(proxy, std::move(req)); } }, 
+    { "hexists",  [] (service::storage_proxy& proxy, request&& req) { return commands::hexists::prepare(proxy, std::move(req)); } }, 
     };
     std::transform(req._command.begin(), req._command.end(), req._command.begin(), ::tolower);
     auto&& command = _commands.find(req._command);

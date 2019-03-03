@@ -35,7 +35,7 @@ shared_ptr<abstract_command> hget::prepare(service::storage_proxy& proxy, reques
 future<reply> hget::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    return prefetch_map(proxy, _schema, _key, std::move(_map_keys), cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+    return prefetch_map(proxy, _schema, _key, _map_keys, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
             return reply_builder::build(std::move(pd->data()));
         }
