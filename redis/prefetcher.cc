@@ -412,9 +412,12 @@ future<std::shared_ptr<prefetched_map>> prefetch_map(service::storage_proxy& pro
             for (auto&& el : n) {
                 data._data.emplace(std::move(std::make_pair(std::optional<bytes>(el.first.serialize()), std::optional<bytes>())));
             }
+        } else if (option == fetch_map_options::values) {
+            for (auto&& el : n) {
+                // only fetch the values.
+                data._data.emplace(std::move(std::make_pair(std::optional<bytes>(el.second.serialize()), std::optional<bytes>())));
+            }
         } else {
-            // FIXME: when options is fetch_map_options::values, do not fetch
-            // keys.
             for (auto&& el : n) {
                 data._data.emplace(std::move(std::make_pair(std::optional<bytes>(el.first.serialize()), std::optional<bytes>(el.second.serialize()))));
             }

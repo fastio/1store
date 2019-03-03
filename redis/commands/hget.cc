@@ -69,8 +69,9 @@ future<reply> hall::execute(service::storage_proxy& proxy, db::consistency_level
                 }));
                 result = std::move(keys);
             } else if (_option == redis::fetch_map_options::values) {
+                // values was saved in the first of the pair.
                 auto&& vals = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::transformed([this] (auto& data) {
-                    return std::move(data.second); 
+                    return std::move(data.first); 
                 }));
                 result = std::move(vals);
             } else {
