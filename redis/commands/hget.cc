@@ -22,7 +22,7 @@ namespace commands {
 
 shared_ptr<abstract_command> hget::prepare(service::storage_proxy& proxy, request&& req, bool multi)
 {
-    if (req._args_count < 2 || (!multi && req._args_count > 3) {
+    if (req._args_count < 2 || (!multi && req._args_count != 2)) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
     }
     std::vector<bytes> map_keys;

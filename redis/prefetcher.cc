@@ -426,11 +426,15 @@ future<std::shared_ptr<prefetched_map_only_values>> prefetch_map(service::storag
         auto&& kvs = boost::copy_range<std::unordered_map<bytes, std::optional<bytes>>>(map_keys | boost::adaptors::transformed([] (auto& mkey) {
             return std::pair<bytes, std::optional<bytes>>(std::move(mkey), std::optional<bytes>());
         }));
+        size_t total = kvs.size();
         for (auto&& el : n) {
             auto&& key = el.first.serialize();
             if (kvs.count(key) > 0) {
                 auto&& val = el.second.serialize();
                 kvs [key] = std::move(std::optional<bytes>(std::move(val)));
+                if (--total == 0) {
+                    break;
+                }
             }
         }
         auto&& values = boost::copy_range<std::vector<std::optional<bytes>>>(map_keys | boost::adaptors::transformed([&kvs] (auto& mkey) {
