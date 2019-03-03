@@ -397,18 +397,27 @@ future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& p
 future<std::shared_ptr<prefetched_map>> prefetch_map(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
+    const fetch_map_options option,
     db::consistency_level cl,
     db::timeout_clock::time_point timeout,
     service::client_state& cs)
 {
-    return prefetch_struct_impl<std::unordered_map<bytes, bytes>>(proxy, schema, key, cl, timeout, cs, [] (const column_definition& col, prefetched_map& data, bytes_view cell_view) { 
+    return prefetch_struct_impl<std::unordered_map<std::optional<bytes>, std::optional<bytes>>>(proxy, schema, key, cl, timeout, cs, [option] (const column_definition& col, prefetched_map& data, bytes_view cell_view) { 
         auto ctype = static_pointer_cast<const collection_type_impl>(col.type);
         auto map_type = map_type_impl::get_instance(ctype->name_comparator(), ctype->value_comparator(), true);
         auto v = map_type->deserialize(cell_view);
         auto&& n = value_cast<map_type_impl::native_type>(v);
         data._origin_size = n.size();
-        for (auto&& el : n) {
-            data._data.emplace(std::move(std::make_pair(el.first.serialize(), el.second.serialize())));
+        if (option == fetch_map_options::keys) {
+            for (auto&& el : n) {
+                data._data.emplace(std::move(std::make_pair(std::optional<bytes>(el.first.serialize()), std::optional<bytes>())));
+            }
+        } else {
+            // FIXME: when options is fetch_map_options::values, do not fetch
+            // keys.
+            for (auto&& el : n) {
+                data._data.emplace(std::move(std::make_pair(std::optional<bytes>(el.first.serialize()), std::optional<bytes>(el.second.serialize()))));
+            }
         }
         data.set_has_more(n.size() - data._data.size() > 0);
         return true;

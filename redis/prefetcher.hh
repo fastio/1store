@@ -50,10 +50,16 @@ struct prefetched_struct {
     const ContainerType& data() const { return _data; }
 };
 
-using prefetched_map = prefetched_struct<std::unordered_map<bytes, bytes>>;
+enum class fetch_map_options {
+    all,
+    keys,
+    values,
+};
+using prefetched_map = prefetched_struct<std::unordered_map<std::optional<bytes>, std::optional<bytes>>>;
 future<std::shared_ptr<prefetched_map>> prefetch_map(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
+    fetch_map_options option,
     db::consistency_level cl,
     db::timeout_clock::time_point timeout,
     service::client_state& cs
