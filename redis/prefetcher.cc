@@ -409,6 +409,38 @@ future<std::shared_ptr<prefetched_map>> prefetch_map(service::storage_proxy& pro
     });
 }
 
+future<std::shared_ptr<prefetched_map_only_values>> prefetch_map(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    std::vector<bytes>&& map_keys,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs)
+{
+    return prefetch_struct_impl<std::vector<std::optional<bytes>>>(proxy, schema, key, cl, timeout, cs, [map_keys = std::move(map_keys)] (const column_definition& col, prefetched_map_only_values& data, bytes_view cell_view) { 
+        auto ctype = static_pointer_cast<const collection_type_impl>(col.type);
+        auto map_type = map_type_impl::get_instance(ctype->name_comparator(), ctype->value_comparator(), true);
+        auto v = map_type->deserialize(cell_view);
+        auto&& n = value_cast<map_type_impl::native_type>(v);
+        data._origin_size = n.size();
+        auto&& kvs = boost::copy_range<std::unordered_map<bytes, std::optional<bytes>>>(map_keys | boost::adaptors::transformed([] (auto& mkey) {
+            return std::pair<bytes, std::optional<bytes>>(std::move(mkey), std::optional<bytes>());
+        }));
+        for (auto&& el : n) {
+            auto&& key = el.first.serialize();
+            if (kvs.count(key) > 0) {
+                auto&& val = el.second.serialize();
+                kvs [key] = std::move(std::optional<bytes>(std::move(val)));
+            }
+        }
+        auto&& values = boost::copy_range<std::vector<std::optional<bytes>>>(map_keys | boost::adaptors::transformed([&kvs] (auto& mkey) {
+            return std::move(kvs[mkey]); 
+        }));
+        data._data = std::move(values);
+        return true;
+    });
+}
+
 future<bool> exists(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,

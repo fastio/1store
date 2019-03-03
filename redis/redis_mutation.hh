@@ -46,7 +46,6 @@ class precision_time {
 };  
 
 using partition_dead_tag = char;  
-struct cell_dead_tag {};
 
 template<typename ContainerType>
 struct redis_mutation {
@@ -89,6 +88,8 @@ struct list_dead_cells {
 };
 using list_dead_cells_mutation = redis_mutation<list_dead_cells>;
 
+using map_mutation = redis_mutation<std::unordered_map<bytes, bytes>>;
+
 static inline seastar::lw_shared_ptr<redis_mutation<bytes>> make_simple(const schema_ptr schema, const bytes& key, bytes&& data) {
     return seastar::make_lw_shared<redis_mutation<bytes>>(schema, key, std::move(data));
 }
@@ -105,12 +106,17 @@ static inline seastar::lw_shared_ptr<list_dead_cells_mutation> make_list_dead_ce
     return seastar::make_lw_shared<list_dead_cells_mutation> (schema, key, std::move(list_dead_cells (std::move(cell_keys))));
 }
 
+static inline seastar::lw_shared_ptr<map_mutation> make_map_cells(const schema_ptr schema, const bytes& key, std::unordered_map<bytes, bytes>&& cells) {
+    return seastar::make_lw_shared<map_mutation> (schema, key, std::move(cells));
+}
+
 namespace internal {
 mutation make_mutation(seastar::lw_shared_ptr<redis_mutation<bytes>> r);
 mutation make_mutation(seastar::lw_shared_ptr<redis_mutation<partition_dead_tag>> r);
 mutation make_mutation(seastar::lw_shared_ptr<list_mutation> r);
 mutation make_mutation(seastar::lw_shared_ptr<list_indexed_cells_mutation> r);
 mutation make_mutation(seastar::lw_shared_ptr<list_dead_cells_mutation> r);
+mutation make_mutation(seastar::lw_shared_ptr<map_mutation> r);
 future<> write_mutation_impl(
     service::storage_proxy&,
     std::vector<mutation>&& ms,

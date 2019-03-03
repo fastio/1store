@@ -15,6 +15,8 @@
 #include "redis/commands/lindex.hh"
 #include "redis/commands/lrem.hh"
 #include "redis/commands/lset.hh"
+#include "redis/commands/hset.hh"
+#include "redis/commands/hget.hh"
 namespace redis {
 shared_ptr<abstract_command> command_factory::create(service::storage_proxy& proxy, request&& req)
 {
@@ -43,6 +45,10 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "lindex",  [] (service::storage_proxy& proxy, request&& req) { return commands::lindex::prepare(proxy, std::move(req)); } }, 
     { "lrem",  [] (service::storage_proxy& proxy, request&& req) { return commands::lrem::prepare(proxy, std::move(req)); } }, 
     { "lset",  [] (service::storage_proxy& proxy, request&& req) { return commands::lset::prepare(proxy, std::move(req)); } }, 
+    { "hset",  [] (service::storage_proxy& proxy, request&& req) { return commands::hset::prepare(proxy, std::move(req), false); } }, 
+    { "hmset",  [] (service::storage_proxy& proxy, request&& req) { return commands::hset::prepare(proxy, std::move(req), true); } }, 
+    { "hget",  [] (service::storage_proxy& proxy, request&& req) { return commands::hget::prepare(proxy, std::move(req), false); } }, 
+    { "hmget",  [] (service::storage_proxy& proxy, request&& req) { return commands::hget::prepare(proxy, std::move(req), true); } }, 
     };
     std::transform(req._command.begin(), req._command.end(), req._command.begin(), ::tolower);
     auto&& command = _commands.find(req._command);

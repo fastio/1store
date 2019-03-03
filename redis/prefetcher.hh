@@ -49,9 +49,18 @@ struct prefetched_struct {
 };
 
 using prefetched_map = prefetched_struct<std::unordered_map<bytes, bytes>>;
+using prefetched_map_only_values = prefetched_struct<std::vector<std::optional<bytes>>>;
 future<std::shared_ptr<prefetched_map>> prefetch_map(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs
+    );
+future<std::shared_ptr<prefetched_map_only_values>> prefetch_map(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    std::vector<bytes>&& map_keys,
     db::consistency_level cl,
     db::timeout_clock::time_point timeout,
     service::client_state& cs

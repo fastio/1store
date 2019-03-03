@@ -154,6 +154,22 @@ static future<reply> build(std::vector<bytes>&& data)
     }
     return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
 }
+
+static future<reply> build(std::vector<std::optional<bytes>>&& data)
+{
+    auto m = make_lw_shared<scattered_message<char>>();
+    m->append(sstring(sprint("*%zu\r\n", data.size())));
+    for (size_t i = 0; i < data.size(); ++i) {
+        if (data[i]) {
+            m->append(sstring(sprint("$%zu\r\n", (*data[i]).size())));
+            m->append(to_sstring(*(data[i])));
+            m->append(to_sstring("\r\n"));
+        } else {
+            m->append(to_sstring(msg_null_blik));
+        }
+    }
+    return make_ready_future<reply>(reply { foreign_ptr<lw_shared_ptr<scattered_message<char>>>(m) });
+}
 /*
 template<bool Key, bool Value>
 static future<reply> build(const std::vector<const dict_entry*>& entries)
