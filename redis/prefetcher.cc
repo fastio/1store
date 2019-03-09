@@ -26,22 +26,22 @@ class prefetched_map_builder {
     const fetch_options _option;
     std::function<bool(const column_definition& col, data_type&, const clustering_key&, bytes_view)> _filter = nullptr;
 private:
-    void add_cell(const clustering_key& ckey, const column_definition& col, const std::optional<query::result_atomic_cell_view>& cell)
+    void add_cell(const column_definition& ckey_col, const clustering_key& ckey, const column_definition& col, const std::optional<query::result_atomic_cell_view>& cell)
     {
         using dtype = std::optional<bytes>;
         if (cell) {
-            cell->value().with_linearized([this, &ckey, &col] (bytes_view cell_view) {
+            cell->value().with_linearized([this, &ckey_col, &ckey, &col] (bytes_view cell_view) {
                 if (_filter == nullptr || _filter(col, _data, ckey, cell_view)) {
                     if (_option == fetch_options::keys) {
                         auto i = ckey.begin(*_schema);
-                        auto&& ckey_data = utf8_type->deserialize_value(*i);
+                        auto&& ckey_data = ckey_col.type->deserialize_value(*i);
                         _data._data.emplace_back(std::make_pair<dtype, dtype>(dtype(std::move(ckey_data.serialize())), dtype()));
                     } else if (_option == fetch_options::values) {
                         auto&& data_data =  col.type->deserialize_value(cell_view);
                         _data._data.emplace_back(std::make_pair<dtype, dtype>(dtype(std::move(data_data.serialize())), dtype()));
                     } else {
                         auto i = ckey.begin(*_schema);
-                        auto&& ckey_data = utf8_type->deserialize_value(*i);
+                        auto&& ckey_data = ckey_col.type->deserialize_value(*i);
                         auto&& data_data =  col.type->deserialize_value(cell_view);
                         _data._data.emplace_back(std::make_pair<dtype, dtype>(dtype(std::move(ckey_data.serialize())), dtype(std::move(data_data.serialize()))));
                     }
@@ -68,7 +68,7 @@ public:
     {
         auto row_iterator = row.iterator();
         for (auto&& id : _partition_slice.regular_columns) {
-            add_cell(key, _schema->regular_column_at(id), row_iterator.next_atomic_cell());
+            add_cell(*(_schema->get_column_definition(redis::CKEY_COLUMN_NAME)), key, _schema->regular_column_at(id), row_iterator.next_atomic_cell());
         }
     }
 
@@ -97,8 +97,9 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     if (reversed) {
         ps.set_reversed();
     }
+    //auto pkey_col = schema->get_column_definition(redis::PKEY_COLUMN_NAME);
     query::read_command cmd(schema->id(), schema->version(), ps, std::numeric_limits<uint32_t>::max());
-    auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(key)));
+    auto pkey = partition_key::from_single_value(*schema, key);
     auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
     dht::partition_range_vector partition_ranges;
     partition_ranges.emplace_back(std::move(partition_range));
@@ -121,8 +122,9 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     service::client_state& cs)
 {
     std::vector<query::clustering_range> ranges;
-    boost::range::push_back(ranges, ckeys | boost::adaptors::transformed([schema] (const auto& ckey) {
-        return query::clustering_range::make_singular(clustering_key_prefix::from_single_value(*schema, utf8_type->decompose(make_sstring(ckey))));
+    auto ckey_col = schema->get_column_definition(redis::CKEY_COLUMN_NAME);
+    boost::range::push_back(ranges, ckeys | boost::adaptors::transformed([schema, ckey_col] (const auto& ckey) {
+        return query::clustering_range::make_singular(clustering_key_prefix::from_single_value(*schema, ckey));
     }));
     return prefetch_map_impl(proxy, schema, key, std::move(ranges), option, false, cl, timeout, cs);
 }
@@ -191,7 +193,7 @@ future<std::shared_ptr<prefetched_struct<bytes>>> prefetch_simple(service::stora
 {
     auto ps = partition_slice_builder(*schema).build();
     query::read_command cmd(schema->id(), schema->version(), ps, std::numeric_limits<uint32_t>::max());
-    auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(key)));
+    auto pkey = partition_key::from_single_value(*schema, key);
     auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
     dht::partition_range_vector partition_ranges;
     partition_ranges.emplace_back(std::move(partition_range));
@@ -263,7 +265,7 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<bytes, bytes>>>>>
     auto command = ::make_lw_shared<query::read_command>(schema->id(), schema->version(),
         full_slice, std::numeric_limits<int32_t>::max(), gc_clock::now(), tracing::make_trace_info(cs.get_trace_state()), query::max_partitions, utils::UUID(), cs.get_timestamp());
     auto partition_ranges = boost::copy_range<dht::partition_range_vector>(keys | boost::adaptors::transformed([schema] (auto& key) {
-            auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(key)));
+            auto pkey = partition_key::from_single_value(*schema, key);
             return dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
     }));
     // consume the result, and convert it to redis format.
@@ -308,7 +310,7 @@ future<bool> exists(service::storage_proxy& proxy,
     service::client_state& cs)
 {
     auto full_slice = partition_slice_builder(*schema).build();
-    auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(key)));
+    auto pkey = partition_key::from_single_value(*schema, key); 
     auto command = ::make_lw_shared<query::read_command>(schema->id(), schema->version(),
         full_slice, std::numeric_limits<int32_t>::max(), gc_clock::now(), tracing::make_trace_info(cs.get_trace_state()), query::max_partitions, utils::UUID(), cs.get_timestamp());
 
