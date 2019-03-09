@@ -122,21 +122,6 @@ mutation make_mutation(seastar::lw_shared_ptr<list_mutation> r)
         m.set_cell(clustering_key::from_single_value(*schema, bytes_type->decompose(data_value(std::move(cell_keys[i])))),
             column, make_cell(schema, *utf8_type, fragmented_temporary_buffer::view(r->data()._cells[i]), atomic_cell::collection_member::no));
     }
-    /*
-    for (auto&& value : r->data()._cells) {
-        auto uuid = ug();
-        cells.emplace_back(std::make_pair<clustering_key, atomic_cell>(std::move(clustering_key::from_single_value(*schema, bytes_type->decompose(make_sstring(bytes(uuid.data(), uuid.size()))))),
-            std::move(make_cell(schema, *utf8_type, fragmented_temporary_buffer::view(value), atomic_cell::collection_member::no))));
-        //m.set_cell(clustering_key::from_single_value(*schema, bytes_type->decompose(make_sstring(bytes(uuid.data(), uuid.size())))),
-        //      column, make_cell(schema, *utf8_type, fragmented_temporary_buffer::view(value), atomic_cell::collection_member::no));
-    }
-    if (r->data()._reversed) {
-        std::reverse(cells.begin(), cells.end());
-    }
-    for (auto&& cell : cells) {
-        m.set_cell(std::move(cell.first), column, std::move(cell.second));
-    }
-    */
     return std::move(m);
 }
 
@@ -160,7 +145,7 @@ mutation make_mutation(seastar::lw_shared_ptr<list_dead_cells_mutation> r)
     auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(r->key())));
     auto m = mutation(schema, std::move(pkey));
     for (auto&& ckey : r->data()._cell_keys) {
-        m.set_cell(clustering_key::from_single_value(*schema, utf8_type->decompose(data_value(*ckey))), column, make_dead_cell());
+        m.set_cell(clustering_key::from_single_value(*schema, bytes_type->decompose(data_value(*ckey))), column, make_dead_cell());
     }    
     return std::move(m);
 }
