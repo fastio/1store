@@ -27,7 +27,7 @@ shared_ptr<abstract_command> lset::prepare(service::storage_proxy& proxy, reques
 future<reply> lset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    return prefetch_list(proxy, _schema, _key, fetch_options::keys, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+    return prefetch_list(proxy, _schema, _key, fetch_options::keys, false, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
             auto& e = pd->data().front();
             std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>> new_cells { { std::move(e.first), std::move(e.second) } };

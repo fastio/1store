@@ -45,9 +45,9 @@ future<reply> rpop::execute(service::storage_proxy& proxy, db::consistency_level
 future<reply> pop::do_execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs, bool left)
 {
     auto timeout = now + tc.read_timeout;
-    return prefetch_list(proxy, _schema, _key, fetch_options::all, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs, left] (auto pd) {
+    return prefetch_list(proxy, _schema, _key, fetch_options::all, !left, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs, left] (auto pd) {
         if (pd && pd->has_data()) {
-            auto removed = [left, &pd] () { return left ? pd->data().front() : pd->data().back(); } ();
+            auto removed = pd->data().front();
             return [this, removed_cell_key = removed.first, &proxy, &cs, timeout, cl, pd] () {
                 // The last cell, delete this partition.
                 if (pd->data_size() == 1) {

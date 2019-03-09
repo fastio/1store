@@ -157,7 +157,9 @@ public:
     void set_partition_row_limit(uint32_t limit) {
         _partition_row_limit = limit;
     }
-
+    void set_reversed() {
+        options.set<query::partition_slice::option::reversed>();
+    }
     friend std::ostream& operator<<(std::ostream& out, const partition_slice& ps);
     friend std::ostream& operator<<(std::ostream& out, const specific_ranges& ps);
 };

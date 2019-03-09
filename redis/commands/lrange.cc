@@ -25,7 +25,7 @@ shared_ptr<abstract_command> lrange::prepare(service::storage_proxy& proxy, requ
 future<reply> lrange::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    return prefetch_list(proxy, _schema, _key, fetch_options::values, cl, timeout, cs).then([] (auto pd) {
+    return prefetch_list(proxy, _schema, _key, fetch_options::values, false, cl, timeout, cs).then([] (auto pd) {
         if (pd && pd->has_data()) {
             auto&& vals = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::transformed([] (auto& data) {
                 return std::move(data.first); 

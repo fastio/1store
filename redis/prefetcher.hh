@@ -68,6 +68,7 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     const schema_ptr schema,
     const bytes& key,
     const fetch_options option,
+    bool reversed,
     db::consistency_level cl,
     db::timeout_clock::time_point timeout,
     service::client_state& cs
