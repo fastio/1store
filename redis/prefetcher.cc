@@ -18,30 +18,44 @@
 
 namespace redis {
 
-template<typename ContainerType>
-class prefetched_struct_builder {
-    using data_type = prefetched_struct<ContainerType>;
+class prefetched_map_builder {
+    using data_type = prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>;
     data_type& _data;
     const query::partition_slice& _partition_slice;
     const schema_ptr _schema;
-    std::function<bool(const column_definition& col, data_type&, bytes_view)> _filter;
+    const fetch_options _option;
+    std::function<bool(const column_definition& col, data_type&, const clustering_key&, bytes_view)> _filter = nullptr;
 private:
-    void add_cell(data_type& data, const column_definition& col, const std::optional<query::result_bytes_view>& cell)
+    void add_cell(const clustering_key& ckey, const column_definition& col, const std::optional<query::result_atomic_cell_view>& cell)
     {
+        using dtype = std::optional<bytes>;
         if (cell) {
-            cell->with_linearized([this, &data, &col] (bytes_view cell_view) {
-                auto inited = _filter(col, data, cell_view);
-                data._inited = inited;
+            cell->value().with_linearized([this, &ckey, &col] (bytes_view cell_view) {
+                if (_filter == nullptr || _filter(col, _data, ckey, cell_view)) {
+                    if (_option == fetch_options::keys) {
+                        auto i = ckey.begin(*_schema);
+                        auto&& ckey_data = utf8_type->deserialize_value(*i);
+                        _data._data.emplace_back(std::make_pair<dtype, dtype>(dtype(std::move(ckey_data.serialize())), dtype()));
+                    } else if (_option == fetch_options::values) {
+                        auto&& data_data =  col.type->deserialize_value(cell_view);
+                        _data._data.emplace_back(std::make_pair<dtype, dtype>(dtype(std::move(data_data.serialize())), dtype()));
+                    } else {
+                        auto i = ckey.begin(*_schema);
+                        auto&& ckey_data = utf8_type->deserialize_value(*i);
+                        auto&& data_data =  col.type->deserialize_value(cell_view);
+                        _data._data.emplace_back(std::make_pair<dtype, dtype>(dtype(std::move(ckey_data.serialize())), dtype(std::move(data_data.serialize()))));
+                    }
+                    _data._inited = true;
+                } 
             });
         }
     }
 public:
-    prefetched_struct_builder(std::shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps,
-        std::function<bool (const column_definition&, data_type&, bytes_view)> filter)
+    prefetched_map_builder(std::shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps, const fetch_options& option)
         : _data(*data)
         , _partition_slice(ps)
         , _schema(schema)
-        , _filter(filter)
+        , _option(option)
     {
     }
     void accept_new_partition(const partition_key& key, uint32_t row_count)
@@ -54,32 +68,23 @@ public:
     {
         auto row_iterator = row.iterator();
         for (auto&& id : _partition_slice.regular_columns) {
-            add_cell(_data, _schema->regular_column_at(id), row_iterator.next_collection_cell());
+            add_cell(key, _schema->regular_column_at(id), row_iterator.next_atomic_cell());
         }
     }
 
     void accept_new_row(const query::result_row_view& static_row, const query::result_row_view& row) {}
     void accept_partition_end(const query::result_row_view& static_row) {}
 };
-
-template<typename ContainerType>
-future<std::shared_ptr<prefetched_struct<ContainerType>>> prefetch_struct_impl(service::storage_proxy& proxy,
+future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_map_impl(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
+    std::vector<query::clustering_range>&& ranges,
+    const fetch_options option,
     db::consistency_level cl,
     db::timeout_clock::time_point timeout,
-    service::client_state& cs,
-    std::function<bool(const column_definition&, prefetched_struct<ContainerType>&, bytes_view)> filter)
+    service::client_state& cs)
 {
-    static auto is_collection = [] (const column_definition& def) {
-        return def.type->is_collection();
-    };
-
-    std::vector<query::clustering_range> ranges;
-    ranges.emplace_back(query::clustering_range::make_open_ended_both_sides());
-    std::vector<column_id> regular_cols;
-    boost::range::push_back(regular_cols, schema->regular_columns()
-        | boost::adaptors::filtered(is_collection) | boost::adaptors::transformed([] (auto&& col) { return col.id; }));
+    std::vector<column_id> regular_cols { schema->get_column_definition(redis::DATA_COLUMN_NAME)->id };
     query::partition_slice ps(
             ranges,
             std::move(std::vector<column_id> {}),
@@ -93,39 +98,66 @@ future<std::shared_ptr<prefetched_struct<ContainerType>>> prefetch_struct_impl(s
     auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
     dht::partition_range_vector partition_ranges;
     partition_ranges.emplace_back(std::move(partition_range));
-    return proxy.query(schema, make_lw_shared(std::move(cmd)), std::move(partition_ranges), cl, {timeout, cs.get_trace_state()}).then([ps, schema, filter] (auto qr) {
-        return query::result_view::do_with(*qr.query_result, [&, filter] (query::result_view v) {
-            auto pd = std::make_shared<prefetched_struct<ContainerType>>(schema);
-            v.consume(ps, prefetched_struct_builder<ContainerType>(pd, schema, ps, filter));
+    return proxy.query(schema, make_lw_shared(std::move(cmd)), std::move(partition_ranges), cl, {timeout, cs.get_trace_state()}).then([ps, schema, option] (auto qr) {
+        return query::result_view::do_with(*qr.query_result, [&] (query::result_view v) {
+            auto pd = std::make_shared<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>(schema);
+            v.consume(ps, prefetched_map_builder(pd, schema, ps, option));
             return pd;
         });
     });
 }
 
-template<>
-class prefetched_struct_builder<bytes> {
+future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_map(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    const std::vector<bytes> ckeys,
+    fetch_options option,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs)
+{
+    std::vector<query::clustering_range> ranges;
+    boost::range::push_back(ranges, ckeys | boost::adaptors::transformed([schema] (const auto& ckey) {
+        return query::clustering_range::make_singular(clustering_key_prefix::from_single_value(*schema, utf8_type->decompose(make_sstring(ckey))));
+    }));
+    return prefetch_map_impl(proxy, schema, key, std::move(ranges), option, cl, timeout, cs);
+}
+
+future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_map(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    fetch_options option,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs)
+{
+    std::vector<query::clustering_range> ranges { query::full_clustering_range };
+    return prefetch_map_impl(proxy, schema, key, std::move(ranges), option, cl, timeout, cs);
+}
+
+class prefetched_bytes_builder {
     using data_type = prefetched_struct<bytes>;
     data_type& _data;
     const query::partition_slice& _partition_slice;
     const schema_ptr _schema;
-    std::function<bool(const column_definition&, data_type&, bytes_view)> _filter;
 private:
-    void add_cell(data_type& data, const column_definition& col, const std::optional<query::result_atomic_cell_view>& cell)
+    void add_cell(const column_definition& col, const std::optional<query::result_atomic_cell_view>& cell)
     {
         if (cell) {
-            cell->value().with_linearized([this, &data, &col] (bytes_view cell_view) {
-                auto inited = _filter(col, data, cell_view);
-                data._inited = inited;
+            cell->value().with_linearized([this, &col] (bytes_view cell_view) {
+                auto&& dv = col.type->deserialize_value(cell_view);
+                auto&& d = dv.serialize();
+                _data._data = std::move(d);
+                _data._origin_size = _data._data.size();
+                _data._inited = true;
             });
         }
     }
 public:
-    prefetched_struct_builder(std::shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps,
-        std::function<bool (const column_definition&, data_type&, bytes_view)> filter)
+    prefetched_bytes_builder(std::shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps)
         : _data(*data)
         , _partition_slice(ps)
         , _schema(schema)
-        , _filter(filter)
     {
     }
     void accept_new_partition(const partition_key& key, uint32_t row_count)
@@ -138,7 +170,7 @@ public:
     {
         auto row_iterator = row.iterator();
         for (auto&& id : _partition_slice.regular_columns) {
-            add_cell(_data, _schema->regular_column_at(id), row_iterator.next_atomic_cell());
+            add_cell(_schema->regular_column_at(id), row_iterator.next_atomic_cell());
         }
     }
 
@@ -146,14 +178,12 @@ public:
     void accept_partition_end(const query::result_row_view& static_row) {}
 };
 
-template<>
-future<std::shared_ptr<prefetched_struct<bytes>>> prefetch_struct_impl<bytes>(service::storage_proxy& proxy,
+future<std::shared_ptr<prefetched_struct<bytes>>> prefetch_simple(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
     db::consistency_level cl,
     db::timeout_clock::time_point timeout,
-    service::client_state& cs,
-    std::function<bool(const column_definition&, prefetched_struct<bytes>&, bytes_view)> filter)
+    service::client_state& cs)
 {
     auto ps = partition_slice_builder(*schema).build();
     query::read_command cmd(schema->id(), schema->version(), ps, std::numeric_limits<uint32_t>::max());
@@ -161,28 +191,12 @@ future<std::shared_ptr<prefetched_struct<bytes>>> prefetch_struct_impl<bytes>(se
     auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
     dht::partition_range_vector partition_ranges;
     partition_ranges.emplace_back(std::move(partition_range));
-    return proxy.query(schema, make_lw_shared(std::move(cmd)), std::move(partition_ranges), cl, {timeout, nullptr}).then([ps, schema, filter] (auto qr) {
-        return query::result_view::do_with(*qr.query_result, [&, filter] (query::result_view v) {
+    return proxy.query(schema, make_lw_shared(std::move(cmd)), std::move(partition_ranges), cl, {timeout, nullptr}).then([ps, schema] (auto qr) {
+        return query::result_view::do_with(*qr.query_result, [&] (query::result_view v) {
             auto pd = std::make_shared<prefetched_struct<bytes>>(schema);
-            v.consume(ps, prefetched_struct_builder<bytes>(pd, schema, ps, filter));
+            v.consume(ps, prefetched_bytes_builder(pd, schema, ps));
             return pd;
         });
-    });
-}
-
-future<std::shared_ptr<prefetched_struct<bytes>>> prefetch_simple(service::storage_proxy& proxy,
-   const schema_ptr schema,
-   const bytes& key,
-   db::consistency_level cl,
-   db::timeout_clock::time_point timeout,
-   service::client_state& cs)
-{
-    return prefetch_struct_impl<bytes>(proxy, schema, key, cl, timeout, cs, [] (const column_definition& col, prefetched_struct<bytes>& data, bytes_view cell_view) {
-        auto&& dv = col.type->deserialize_value(cell_view);
-        auto&& d = dv.serialize();
-        data._data = std::move(d);
-        data._origin_size = data._data.size();
-        return true;
     });
 }
 
@@ -233,6 +247,7 @@ public:
     void accept_new_row(const query::result_row_view& static_row, const query::result_row_view& row) {}
     void accept_partition_end(const query::result_row_view& static_row) {}
 };
+
 future<std::shared_ptr<prefetched_struct<std::vector<std::pair<bytes, bytes>>>>> prefetch_simple(service::storage_proxy& proxy,
     const schema_ptr schema,
     const std::vector<bytes>& keys,
@@ -256,36 +271,117 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<bytes, bytes>>>>>
         });
     });
 }
+/*
+class prefetched_list_builder {
+    using data_type = prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>;
+    data_type& _data;
+    const query::partition_slice& _partition_slice;
+    const schema_ptr _schema;
+    const fetch_list_options _option;
+    std::function<bool(const clustering_key&)> _filter = nullptr;
+private:
+    void add_cell(const clustering_key& ckey, const column_definition& col, const std::optional<query::result_atomic_cell_view>& cell)
+    {
+        using dtype = std::optional<bytes>;
+        if (cell) {
+            cell->value().with_linearized([this, &ckey, &col] (bytes_view cell_view) {
+                if (_filter == nullptr || _filter(ckey) == true) {
+                    if (_option == fetch_list_options::keys) {
+                        auto i = ckey.begin(*_schema);
+                        auto&& ckey_data = utf8_type->deserialize_value(*i);
+                        _data._data.emplace_back(std::make_pair<dtype, dtype>(dtype(std::move(ckey_data.serialize())), dtype()));
+                    } else if (_option == fetch_list_options::values) {
+                        auto&& data_data =  col.type->deserialize_value(cell_view);
+                        _data._data.emplace_back(std::make_pair<dtype, dtype>(dtype(std::move(data_data.serialize())), dtype()));
+                    } else {
+                        auto i = ckey.begin(*_schema);
+                        auto&& ckey_data = utf8_type->deserialize_value(*i);
+                        auto&& data_data =  col.type->deserialize_value(cell_view);
+                        _data._data.emplace_back(std::make_pair<dtype, dtype>(dtype(std::move(ckey_data.serialize())), dtype(std::move(data_data.serialize()))));
+                    }
+                    _data._inited = true;
+                } 
+            });
+        }
+    }
+public:
+    prefetched_list_builder(std::shared_ptr<data_type> data,
+        const schema_ptr schema,
+        const query::partition_slice& ps,
+        const fetch_options& option,
+        std::function<bool(const clustering_key&)> filter)
+        : _data(*data)
+        , _partition_slice(ps)
+        , _schema(schema)
+        , _option(option)
+        , _filter(filter)
+    {
+    }
+    void accept_new_partition(const partition_key& key, uint32_t row_count)
+    {
+    }
 
-future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
+    void accept_new_partition(uint32_t row_count) {}
+
+    void accept_new_row(const clustering_key& key, const query::result_row_view& static_row, const query::result_row_view& row)
+    {
+        auto row_iterator = row.iterator();
+        for (auto&& id : _partition_slice.regular_columns) {
+            add_cell(key, _schema->regular_column_at(id), row_iterator.next_atomic_cell());
+        }
+    }
+
+    void accept_new_row(const query::result_row_view& static_row, const query::result_row_view& row) {}
+    void accept_partition_end(const query::result_row_view& static_row) {}
+};
+
+future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_list_impl(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
+    std::vector<query::clustering_range>&& ranges,
+    const fetch_list_options option,
     db::consistency_level cl,
     db::timeout_clock::time_point timeout,
     service::client_state& cs,
-    long start,
-    long end)
+    std::function<bool(const clustering_key&)> filter)
 {
-    return prefetch_struct_impl<std::vector<std::pair<bytes, bytes>>>(proxy, schema, key, cl, timeout, cs, [start, iend = end] (const column_definition& col, prefetched_list& data, bytes_view cell_view) { 
-        auto ctype = static_pointer_cast<const collection_type_impl>(col.type);
-        auto map_type = map_type_impl::get_instance(ctype->name_comparator(), ctype->value_comparator(), true);
-        auto v = map_type->deserialize(cell_view);
-        auto&& n = value_cast<map_type_impl::native_type>(v);
-        auto end = iend + static_cast<long>(n.size()); // safe.
-        if (start < 0 || end < 0 || start > end ) {
-           throw std::logic_error(sprint("cannot prefetch list, start: %ld, end: %ld", start, iend));
-        }
-        end = end % static_cast<long>(n.size());
-        for (size_t i = static_cast<size_t>(start); i <= static_cast<size_t>(end); ++i) {
-            auto&& el = n[i];
-            data._data.emplace_back(std::move(std::make_pair(el.first.serialize(), el.second.serialize())));
-        }
-        data._origin_size = n.size();
-        data.set_has_more(n.size() - data._data.size() > 0);
-        return true;
+    std::vector<column_id> regular_cols { schema->get_column_definition(redis::DATA_COLUMN_NAME)->id };
+    query::partition_slice ps(
+            ranges,
+            std::move(std::vector<column_id> {}),
+            std::move(regular_cols),
+            query::partition_slice::option_set::of<
+                query::partition_slice::option::send_partition_key,
+                query::partition_slice::option::send_clustering_key,
+                query::partition_slice::option::collections_as_maps>());
+    query::read_command cmd(schema->id(), schema->version(), ps, std::numeric_limits<uint32_t>::max());
+    auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(key)));
+    auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
+    dht::partition_range_vector partition_ranges;
+    partition_ranges.emplace_back(std::move(partition_range));
+    return proxy.query(schema, make_lw_shared(std::move(cmd)), std::move(partition_ranges), cl, {timeout, cs.get_trace_state()}).then([ps, schema, option, filter] (auto qr) {
+        return query::result_view::do_with(*qr.query_result, [&] (query::result_view v) {
+            auto pd = std::make_shared<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>(schema);
+            v.consume(ps, prefetched_list_builder(pd, schema, ps, option, filter));
+            return pd;
+        });
     });
 }
+*/
 
+future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_list(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    const fetch_options option,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs)
+{
+    std::vector<query::clustering_range> ranges { query::full_clustering_range };
+    return prefetch_map_impl(proxy, schema, key, std::move(ranges), option, cl, timeout, cs);
+}
+
+/*
 future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
@@ -294,36 +390,34 @@ future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& p
     service::client_state& cs,
     bool left)
 {
-    return prefetch_struct_impl<std::vector<std::pair<bytes, bytes>>>(proxy, schema, key, cl, timeout, cs, [left] (const column_definition& col, prefetched_list& data, bytes_view cell_view) { 
-        auto ctype = static_pointer_cast<const collection_type_impl>(col.type);
-        auto map_type = map_type_impl::get_instance(ctype->name_comparator(), ctype->value_comparator(), true);
-        auto v = map_type->deserialize(cell_view);
-        auto&& n = value_cast<map_type_impl::native_type>(v);
-        data._origin_size = n.size();
-        auto& el = left ? n.front() : n.back();
-        data._data.emplace_back(std::move(std::make_pair(el.first.serialize(), el.second.serialize())));
-        data.set_has_more(n.size() - data._data.size() > 0);
-        return true;
+    using storage_type = std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>;
+    std::vector<query::clustering_range> ranges { query::full_clustering_range };
+    return prefetch_map_impl(proxy, schema, key, std::move(ranges), fetch_options::values, cl, timeout, cs).then([left] (auto pd) {
+        auto size = pd->data().size();
+        auto& data = pd->data();
+        if (left) {
+            data.erase(data.begin() + 1, data.end());
+        } else {
+            data.erase(data.begin(), data.end() - 1);
+        }
+        return make_ready_future<std::shared_ptr<refetched_struct<storage_type>>>(pd);
     });
 }
+*/
+
+/*
 future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
     db::consistency_level cl,
     db::timeout_clock::time_point timeout,
-    service::client_state& cs,
-    only_size_tag)
+    service::client_state& cs)
 {
-    return prefetch_struct_impl<std::vector<std::pair<bytes, bytes>>>(proxy, schema, key, cl, timeout, cs, [] (const column_definition& col, prefetched_list& data, bytes_view cell_view) { 
-        auto ctype = static_pointer_cast<const collection_type_impl>(col.type);
-        auto map_type = map_type_impl::get_instance(ctype->name_comparator(), ctype->value_comparator(), true);
-        auto v = map_type->deserialize(cell_view);
-        auto&& n = value_cast<map_type_impl::native_type>(v);
-        data._origin_size = n.size();
-        data.set_has_more(n.size() - data._data.size() > 0);
-        return true;
-    });
+    using storage_type = std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>;
+    std::vector<query::clustering_range> ranges { query::full_clustering_range };
+    return prefetch_map_impl(proxy, schema, key, std::move(ranges), fetch_options::keys, cl, timeout, cs);
 }
+
 future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
@@ -332,6 +426,9 @@ future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& p
     service::client_state& cs,
     long index)
 {
+    using storage_type = std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>;
+    std::vector<query::clustering_range> ranges { query::full_clustering_range };
+    return prefetch_map_impl(proxy, schema, key, std::move(ranges), fetch_options::keys, cl, timeout, cs);
     return prefetch_struct_impl<std::vector<std::pair<bytes, bytes>>>(proxy, schema, key, cl, timeout, cs, [index] (const column_definition& col, prefetched_list& data, bytes_view cell_view) { 
         auto ctype = static_pointer_cast<const collection_type_impl>(col.type);
         auto map_type = map_type_impl::get_instance(ctype->name_comparator(), ctype->value_comparator(), true);
@@ -397,7 +494,7 @@ future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& p
 future<std::shared_ptr<prefetched_map>> prefetch_map(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
-    const fetch_map_options option,
+    const fetch_options option,
     db::consistency_level cl,
     db::timeout_clock::time_point timeout,
     service::client_state& cs)
@@ -408,11 +505,11 @@ future<std::shared_ptr<prefetched_map>> prefetch_map(service::storage_proxy& pro
         auto v = map_type->deserialize(cell_view);
         auto&& n = value_cast<map_type_impl::native_type>(v);
         data._origin_size = n.size();
-        if (option == fetch_map_options::keys) {
+        if (option == fetch_options::keys) {
             for (auto&& el : n) {
                 data._data.emplace(std::move(std::make_pair(std::optional<bytes>(el.first.serialize()), std::optional<bytes>())));
             }
-        } else if (option == fetch_map_options::values) {
+        } else if (option == fetch_options::values) {
             for (auto&& el : n) {
                 // only fetch the values.
                 data._data.emplace(std::move(std::make_pair(std::optional<bytes>(el.second.serialize()), std::optional<bytes>())));
@@ -490,6 +587,7 @@ future<std::shared_ptr<prefetched_map_only_one_cell>> prefetch_map(service::stor
         return false;
     });
 }
+*/
 future<bool> exists(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,

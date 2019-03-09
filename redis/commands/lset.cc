@@ -27,10 +27,10 @@ shared_ptr<abstract_command> lset::prepare(service::storage_proxy& proxy, reques
 future<reply> lset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    return prefetch_list(proxy, _schema, _key, cl, timeout, cs, _index).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+    return prefetch_list(proxy, _schema, _key, fetch_options::keys, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
             auto& e = pd->data().front();
-            std::vector<std::pair<bytes, bytes>> new_cells { { std::move(e.first), std::move(e.second) } };
+            std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>> new_cells { { std::move(e.first), std::move(e.second) } };
             return redis::write_mutation(proxy, redis::make_list_indexed_cells(_schema, _key, std::move(new_cells)), cl, timeout, cs).then_wrapped([this] (auto f) {
                 try {
                     f.get();
@@ -41,8 +41,8 @@ future<reply> lset::execute(service::storage_proxy& proxy, db::consistency_level
                 return reply_builder::build<OK_tag>();
             });
         }
-        std::vector<bytes> datas { std::move(_value) };
-        return redis::write_mutation(proxy, redis::make_list_cells(_schema, _key, std::move(datas), true), cl, timeout, cs).then_wrapped([this] (auto f) {
+        std::vector<bytes> data { std::move(_value) };
+        return redis::write_mutation(proxy, redis::make_list_cells(_schema, _key, std::move(data), true), cl, timeout, cs).then_wrapped([this] (auto f) {
             try {
                 f.get();
             } catch(...) {

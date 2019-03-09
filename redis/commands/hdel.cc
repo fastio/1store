@@ -33,13 +33,14 @@ shared_ptr<abstract_command> hdel::prepare(service::storage_proxy& proxy, reques
 future<reply> hdel::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
-    return prefetch_map(proxy, _schema, _key, _map_keys, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+    return prefetch_map(proxy, _schema, _key, _map_keys, fetch_options::keys, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         return [this, &proxy, cl, timeout, &cs, pd] {
-            if (pd && pd->has_more() == false) {
+            if (pd && pd->has_data()) {
                 // remove the partition
-                return redis::write_mutation(proxy, redis::make_dead(_schema, _key), cl, timeout, cs);
+                //return redis::write_mutation(proxy, redis::make_dead(_schema, _key), cl, timeout, cs);
+                return redis::write_mutation(proxy, redis::make_map_dead_cells(_schema, _key, std::move(_map_keys)), cl, timeout, cs);
             }
-            return redis::write_mutation(proxy, redis::make_map_dead_cells(_schema, _key, std::move(_map_keys)), cl, timeout, cs);
+            return make_ready_future<>();
         } ().then_wrapped([this] (auto f) {
             try {
                 f.get();

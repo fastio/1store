@@ -16,9 +16,11 @@
 #include <boost/range/adaptor/reversed.hpp>
 #include <memory>
 #include "seastar/core/sstring.hh"
+#include "log.hh"
 using namespace seastar;
 namespace redis {
 
+static logging::logger rlog("rm");
 precision_time precision_time::get_next(db_clock::time_point millis) {
     auto next =  millis < _last._millis
         ? precision_time{millis, 9999}
@@ -106,17 +108,35 @@ mutation make_mutation(seastar::lw_shared_ptr<list_mutation> r)
     const column_definition& column = *schema->get_column_definition("data");
     auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(r->key())));
     auto m = mutation(schema, std::move(pkey));
-    auto&& ltype = static_cast<const list_type_impl*>(column.type.get());
-    list_type_impl::mutation lm;
-    lm.cells.reserve(r->data().size());
-    for (auto&& value : r->data()._cells) {
+    std::vector<bytes> cell_keys;
+    cell_keys.reserve(r->data()._cells.size());
+    for (size_t i = 0; i < r->data()._cells.size(); ++i) {
         auto uuid = ug();
-        lm.cells.emplace_back(bytes(uuid.data(), uuid.size()), make_cell(schema, *ltype->value_comparator(), std::move(value), atomic_cell::collection_member::yes));
+        cell_keys.emplace_back(bytes(uuid.data(), uuid.size()));
     }
     if (r->data()._reversed) {
-        std::reverse(lm.cells.begin(), lm.cells.end());
+        std::reverse(cell_keys.begin(), cell_keys.end());
+        std::reverse(r->data()._cells.begin(), r->data()._cells.end());
     }
-    m.set_cell(clustering_key::make_empty(), column, atomic_cell_or_collection::from_collection_mutation(ltype->serialize_mutation_form(std::move(lm))));
+    for (size_t i = 0; i < r->data()._cells.size(); ++i) {
+        m.set_cell(clustering_key::from_single_value(*schema, bytes_type->decompose(data_value(std::move(cell_keys[i])))),
+            column, make_cell(schema, *utf8_type, fragmented_temporary_buffer::view(r->data()._cells[i]), atomic_cell::collection_member::no));
+    }
+    /*
+    for (auto&& value : r->data()._cells) {
+        auto uuid = ug();
+        cells.emplace_back(std::make_pair<clustering_key, atomic_cell>(std::move(clustering_key::from_single_value(*schema, bytes_type->decompose(make_sstring(bytes(uuid.data(), uuid.size()))))),
+            std::move(make_cell(schema, *utf8_type, fragmented_temporary_buffer::view(value), atomic_cell::collection_member::no))));
+        //m.set_cell(clustering_key::from_single_value(*schema, bytes_type->decompose(make_sstring(bytes(uuid.data(), uuid.size())))),
+        //      column, make_cell(schema, *utf8_type, fragmented_temporary_buffer::view(value), atomic_cell::collection_member::no));
+    }
+    if (r->data()._reversed) {
+        std::reverse(cells.begin(), cells.end());
+    }
+    for (auto&& cell : cells) {
+        m.set_cell(std::move(cell.first), column, std::move(cell.second));
+    }
+    */
     return std::move(m);
 }
 
@@ -126,13 +146,10 @@ mutation make_mutation(seastar::lw_shared_ptr<list_indexed_cells_mutation> r)
     const column_definition& column = *schema->get_column_definition("data");
     auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(r->key())));
     auto m = mutation(schema, std::move(pkey));
-    auto&& ltype = static_cast<const list_type_impl*>(column.type.get());
-    list_type_impl::mutation lm;
-    lm.cells.reserve(r->data().size());
     for (auto&& data : r->data()._indexed_cells) {
-        lm.cells.emplace_back(data.first, make_cell(schema, *ltype->value_comparator(), std::move(data.second), atomic_cell::collection_member::yes));
+        m.set_cell(clustering_key::from_single_value(*schema, bytes_type->decompose(data_value(*(data.first)))),
+             column, make_cell(schema, *utf8_type, fragmented_temporary_buffer::view(*(data.second)), atomic_cell::collection_member::no));
     }
-    m.set_cell(clustering_key::make_empty(), column, atomic_cell_or_collection::from_collection_mutation(ltype->serialize_mutation_form(std::move(lm))));
     return std::move(m);
 }
 
@@ -142,14 +159,9 @@ mutation make_mutation(seastar::lw_shared_ptr<list_dead_cells_mutation> r)
     const column_definition& column = *schema->get_column_definition("data");
     auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(r->key())));
     auto m = mutation(schema, std::move(pkey));
-    auto&& ltype = static_cast<const list_type_impl*>(column.type.get());
-    list_type_impl::mutation lm;
-    
-    lm.cells.reserve(r->data().size());
     for (auto&& ckey : r->data()._cell_keys) {
-        lm.cells.emplace_back(ckey, make_dead_cell());
+        m.set_cell(clustering_key::from_single_value(*schema, utf8_type->decompose(data_value(*ckey))), column, make_dead_cell());
     }    
-    m.set_cell(clustering_key::make_empty(), column, atomic_cell_or_collection::from_collection_mutation(ltype->serialize_mutation_form(std::move(lm))));
     return std::move(m);
 }
 
@@ -159,13 +171,10 @@ mutation make_mutation(seastar::lw_shared_ptr<map_mutation> r)
     const column_definition& column = *schema->get_column_definition("data");
     auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(r->key())));
     auto m = mutation(schema, std::move(pkey));
-    auto&& mtype = static_cast<const map_type_impl*>(column.type.get());
-    map_type_impl::mutation mm;
-    
-    for (auto&& e : r->data()) {
-        mm.cells.emplace_back(e.first, make_cell(schema, *mtype->get_values_type(), fragmented_temporary_buffer::view(e.second), atomic_cell::collection_member::yes));
-    }    
-    m.set_cell(clustering_key::make_empty(), column, atomic_cell_or_collection::from_collection_mutation(mtype->serialize_mutation_form(std::move(mm))));
+    for (auto && e : r->data()) {
+        m.set_cell(clustering_key::from_single_value(*schema, utf8_type->decompose(make_sstring(e.first))),
+               column, make_cell(schema, *utf8_type, fragmented_temporary_buffer::view(e.second), atomic_cell::collection_member::no));
+    }
     return std::move(m);
 }
 
@@ -175,13 +184,10 @@ mutation make_mutation(seastar::lw_shared_ptr<map_dead_cells_mutation> r)
     const column_definition& column = *schema->get_column_definition("data");
     auto pkey = partition_key::from_single_value(*schema, utf8_type->decompose(make_sstring(r->key())));
     auto m = mutation(schema, std::move(pkey));
-    auto&& mtype = static_cast<const map_type_impl*>(column.type.get());
-    map_type_impl::mutation mm;
-    
     for (auto&& e : r->data()._map_keys) {
-        mm.cells.emplace_back(e, make_dead_cell());
+        m.set_cell(clustering_key::from_single_value(*schema, utf8_type->decompose(make_sstring(e))),
+               column, make_dead_cell());
     }    
-    m.set_cell(clustering_key::make_empty(), column, atomic_cell_or_collection::from_collection_mutation(mtype->serialize_mutation_form(std::move(mm))));
     return std::move(m);
 }
 

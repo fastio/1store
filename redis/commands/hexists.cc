@@ -30,7 +30,7 @@ shared_ptr<abstract_command> hexists::prepare(service::storage_proxy& proxy, req
 future<reply> hexists::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
-    return prefetch_map(proxy, _schema, _key, _map_key, cl, timeout, cs).then([this] (auto pd) {
+    return prefetch_map(proxy, _schema, _key, std::vector<bytes> { _map_key }, fetch_options::keys, cl, timeout, cs).then([this] (auto pd) {
         if (pd && pd->has_data()) {
             return reply_builder::build<ok_tag>();
         }

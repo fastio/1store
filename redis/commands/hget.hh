@@ -31,10 +31,10 @@ public:
 class hall : public command_with_single_schema {
 protected:
     bytes _key;
-    redis::fetch_map_options _option;
+    redis::fetch_options _option;
 public:
     static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
-    hall(bytes&& name, const schema_ptr schema, bytes&& key, redis::fetch_map_options option)
+    hall(bytes&& name, const schema_ptr schema, bytes&& key, redis::fetch_options option)
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))
         , _option(option)
@@ -47,19 +47,19 @@ public:
 class hkeys : public hall {
 public:
     static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
-    hkeys(bytes&& name, const schema_ptr schema, bytes&& key) : hall(std::move(name), schema, std::move(key), redis::fetch_map_options::keys) {}
+    hkeys(bytes&& name, const schema_ptr schema, bytes&& key) : hall(std::move(name), schema, std::move(key), redis::fetch_options::keys) {}
     ~hkeys() {}
 };
 class hvals : public hall {
 public:
     static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
-    hvals(bytes&& name, const schema_ptr schema, bytes&& key) : hall(std::move(name), schema, std::move(key), redis::fetch_map_options::values) {}
+    hvals(bytes&& name, const schema_ptr schema, bytes&& key) : hall(std::move(name), schema, std::move(key), redis::fetch_options::values) {}
     ~hvals() {}
 };
 class hgetall : public hall {
 public:
     static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
-    hgetall(bytes&& name, const schema_ptr schema, bytes&& key) : hall(std::move(name), schema, std::move(key), redis::fetch_map_options::all) {}
+    hgetall(bytes&& name, const schema_ptr schema, bytes&& key) : hall(std::move(name), schema, std::move(key), redis::fetch_options::all) {}
     ~hgetall() {}
 };
 }

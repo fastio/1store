@@ -25,10 +25,12 @@ shared_ptr<abstract_command> lindex::prepare(service::storage_proxy& proxy, requ
 future<reply> lindex::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    return prefetch_list(proxy, _schema, _key, cl, timeout, cs, _index).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+    return prefetch_list(proxy, _schema, _key, fetch_options::values, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            auto& e = pd->data().front();
-            return reply_builder::build<message_tag>(e.second);
+            auto& data = pd->data();
+            if (static_cast<size_t>(_index) < data.size()) {
+                return reply_builder::build<message_tag>(*(data[static_cast<size_t>(_index)].first));
+            }
         }
         return reply_builder::build<null_message_tag>();
     });

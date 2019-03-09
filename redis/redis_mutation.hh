@@ -75,16 +75,16 @@ struct list_cells {
 using list_mutation = redis_mutation<list_cells>;
 
 struct list_indexed_cells {
-    std::vector<std::pair<bytes, bytes>> _indexed_cells;
+    std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>> _indexed_cells;
     size_t size() const { return _indexed_cells.size(); }
-    list_indexed_cells(std::vector<std::pair<bytes, bytes>>&& indexed_cells) : _indexed_cells(std::move(indexed_cells)) {}
+    list_indexed_cells(std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>&& indexed_cells) : _indexed_cells(std::move(indexed_cells)) {}
 };
 using list_indexed_cells_mutation = redis_mutation<list_indexed_cells>;
 
 struct list_dead_cells {
-    std::vector<bytes> _cell_keys;
+    std::vector<std::optional<bytes>> _cell_keys;
     size_t size() const { return _cell_keys.size(); }
-    list_dead_cells(std::vector<bytes>&& cell_keys) : _cell_keys(std::move(cell_keys)) {}
+    list_dead_cells(std::vector<std::optional<bytes>>&& cell_keys) : _cell_keys(std::move(cell_keys)) {}
 };
 
 struct map_dead_cells {
@@ -106,10 +106,13 @@ static inline seastar::lw_shared_ptr<redis_mutation<partition_dead_tag>> make_de
 static inline seastar::lw_shared_ptr<list_mutation> make_list_cells(const schema_ptr schema, const bytes& key, std::vector<bytes>&& cells, bool reversed) {
     return seastar::make_lw_shared<list_mutation> (schema, key, std::move(list_cells (std::move(cells), reversed)));
 }
-static inline seastar::lw_shared_ptr<list_indexed_cells_mutation> make_list_indexed_cells(const schema_ptr schema, const bytes& key, std::vector<std::pair<bytes, bytes>>&& indexed_cells) {
+static inline seastar::lw_shared_ptr<list_indexed_cells_mutation> make_list_indexed_cells(const schema_ptr schema,
+    const bytes& key,
+    std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>&& indexed_cells)
+{
     return seastar::make_lw_shared<list_indexed_cells_mutation> (schema, key, std::move(list_indexed_cells (std::move(indexed_cells))));
 }
-static inline seastar::lw_shared_ptr<list_dead_cells_mutation> make_list_dead_cells(const schema_ptr schema, const bytes& key, std::vector<bytes>&& cell_keys) {
+static inline seastar::lw_shared_ptr<list_dead_cells_mutation> make_list_dead_cells(const schema_ptr schema, const bytes& key, std::vector<std::optional<bytes>>&& cell_keys) {
     return seastar::make_lw_shared<list_dead_cells_mutation> (schema, key, std::move(list_dead_cells (std::move(cell_keys))));
 }
 

@@ -50,9 +50,12 @@ shared_ptr<abstract_command> hgetall::prepare(service::storage_proxy& proxy, req
 future<reply> hget::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
-    return prefetch_map(proxy, _schema, _key, _map_keys, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+    return prefetch_map(proxy, _schema, _key, _map_keys, fetch_options::values, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            return reply_builder::build(std::move(pd->data()));
+            auto&& vals = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::transformed([this] (auto& data) {
+                return std::move(data.first); 
+            }));
+            return reply_builder::build(std::move(vals));
         }
         return reply_builder::build<null_message_tag>();
     });
@@ -63,12 +66,12 @@ future<reply> hall::execute(service::storage_proxy& proxy, db::consistency_level
     return prefetch_map(proxy, _schema, _key, _option, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
             std::vector<std::optional<bytes>> result;
-            if (_option == redis::fetch_map_options::keys) {
+            if (_option == redis::fetch_options::keys) {
                 auto&& keys = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::transformed([this] (auto& data) {
                     return std::move(data.first); 
                 }));
                 result = std::move(keys);
-            } else if (_option == redis::fetch_map_options::values) {
+            } else if (_option == redis::fetch_options::values) {
                 // values was saved in the first of the pair.
                 auto&& vals = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::transformed([this] (auto& data) {
                     return std::move(data.first); 

@@ -45,15 +45,15 @@ future<reply> rpop::execute(service::storage_proxy& proxy, db::consistency_level
 future<reply> pop::do_execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs, bool left)
 {
     auto timeout = now + tc.read_timeout;
-    return prefetch_list(proxy, _schema, _key, cl, timeout, cs, left).then([this, &proxy, cl, timeout, &cs, left] (auto pd) {
+    return prefetch_list(proxy, _schema, _key, fetch_options::all, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs, left] (auto pd) {
         if (pd && pd->has_data()) {
             auto removed = [left, &pd] () { return left ? pd->data().front() : pd->data().back(); } ();
             return [this, removed_cell_key = removed.first, &proxy, &cs, timeout, cl, pd] () {
                 // The last cell, delete this partition.
-                if (!pd->has_more()) {
+                if (pd->data_size() == 1) {
                     return redis::write_mutation(proxy, redis::make_dead(_schema, _key), cl, timeout, cs);
                 }
-                std::vector<bytes> removed_cell_keys { std::move(removed_cell_key) };
+                std::vector<std::optional<bytes>> removed_cell_keys { std::move(removed_cell_key) };
                 return redis::write_mutation(proxy, redis::make_list_dead_cells(_schema, _key, std::move(removed_cell_keys)), cl, timeout, cs);
             } ().then_wrapped([this, value = removed.second, pd] (auto f) {
                 try {
@@ -61,7 +61,7 @@ future<reply> pop::do_execute(service::storage_proxy& proxy, db::consistency_lev
                 } catch(...) {
                     return reply_builder::build<error_tag>();
                 }
-                return reply_builder::build<message_tag>(value);
+                return reply_builder::build<message_tag>(*value);
             });
         }
         return reply_builder::build<null_message_tag>();
