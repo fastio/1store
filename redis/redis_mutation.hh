@@ -112,6 +112,20 @@ struct set_dead_cells {
 };
 using set_dead_cells_mutation = redis_mutation<set_dead_cells>;
 
+struct zset_cells {
+    std::vector<std::pair<bytes, bytes>> _cells;
+    size_t size() const { return _cells.size(); }
+    zset_cells(std::vector<std::pair<bytes, bytes>>&& cells) : _cells(std::move(cells)) {}
+};
+struct zset_dead_cells {
+    std::vector<bytes> _map_keys;
+    size_t size() const { return _map_keys.size(); }
+    zset_dead_cells(std::vector<bytes>&& map_keys) : _map_keys(std::move(map_keys)) {}
+};
+
+using zset_mutation = redis_mutation<zset_cells>;
+using zset_dead_cells_mutation = redis_mutation<zset_dead_cells>;
+
 static inline seastar::lw_shared_ptr<redis_mutation<bytes>> make_simple(const schema_ptr schema, const bytes& key, bytes&& data) {
     return seastar::make_lw_shared<redis_mutation<bytes>>(schema, key, std::move(data));
 }
@@ -145,6 +159,13 @@ static inline seastar::lw_shared_ptr<set_dead_cells_mutation> make_set_dead_cell
     return seastar::make_lw_shared<set_dead_cells_mutation> (schema, key, std::move(set_dead_cells (std::move(set_keys))));
 }
 
+static inline seastar::lw_shared_ptr<zset_mutation> make_zset_cells(const schema_ptr schema, const bytes& key, std::vector<std::pair<bytes, bytes>>&& cells) {
+    return seastar::make_lw_shared<zset_mutation> (schema, key, std::move(cells));
+}
+static inline seastar::lw_shared_ptr<zset_dead_cells_mutation> make_zset_dead_cells(const schema_ptr schema, const bytes& key, std::vector<bytes>&& set_keys) {
+    return seastar::make_lw_shared<zset_dead_cells_mutation> (schema, key, std::move(zset_dead_cells (std::move(set_keys))));
+}
+
 namespace internal {
 mutation make_mutation(seastar::lw_shared_ptr<redis_mutation<bytes>> r);
 mutation make_mutation(seastar::lw_shared_ptr<redis_mutation<partition_dead_tag>> r);
@@ -155,6 +176,8 @@ mutation make_mutation(seastar::lw_shared_ptr<map_mutation> r);
 mutation make_mutation(seastar::lw_shared_ptr<map_dead_cells_mutation> r);
 mutation make_mutation(seastar::lw_shared_ptr<set_mutation> r);
 mutation make_mutation(seastar::lw_shared_ptr<set_dead_cells_mutation> r);
+mutation make_mutation(seastar::lw_shared_ptr<zset_mutation> r);
+mutation make_mutation(seastar::lw_shared_ptr<zset_dead_cells_mutation> r);
 future<> write_mutation_impl(
     service::storage_proxy&,
     std::vector<mutation>&& ms,
