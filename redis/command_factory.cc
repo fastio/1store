@@ -20,6 +20,8 @@
 #include "redis/commands/hget.hh"
 #include "redis/commands/hdel.hh"
 #include "redis/commands/hexists.hh"
+#include "redis/commands/sset.hh"
+#include "redis/commands/smembers.hh"
 namespace redis {
 shared_ptr<abstract_command> command_factory::create(service::storage_proxy& proxy, request&& req)
 {
@@ -58,6 +60,8 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "hkeys",  [] (service::storage_proxy& proxy, request&& req) { return commands::hkeys::prepare(proxy, std::move(req)); } }, 
     { "hvals",  [] (service::storage_proxy& proxy, request&& req) { return commands::hvals::prepare(proxy, std::move(req)); } }, 
     { "hgetall",  [] (service::storage_proxy& proxy, request&& req) { return commands::hgetall::prepare(proxy, std::move(req)); } }, 
+    { "sadd",  [] (service::storage_proxy& proxy, request&& req) { return commands::sset::prepare(proxy, std::move(req)); } }, 
+    { "smembers",  [] (service::storage_proxy& proxy, request&& req) { return commands::smembers::prepare(proxy, std::move(req)); } }, 
     };
     std::transform(req._command.begin(), req._command.end(), req._command.begin(), ::tolower);
     auto&& command = _commands.find(req._command);

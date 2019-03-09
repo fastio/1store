@@ -381,6 +381,17 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     return prefetch_map_impl(proxy, schema, key, std::move(ranges), option, cl, timeout, cs);
 }
 
+future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_set(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs)
+{
+    std::vector<query::clustering_range> ranges { query::full_clustering_range };
+    return prefetch_map_impl(proxy, schema, key, std::move(ranges), fetch_options::keys, cl, timeout, cs);
+}
+
 /*
 future<std::shared_ptr<prefetched_list>> prefetch_list(service::storage_proxy& proxy,
     const schema_ptr schema,

@@ -57,6 +57,13 @@ struct prefetched_struct {
     const ContainerType& data() const { return _data; }
 };
 
+future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_set(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs
+    );
 future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_list(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
@@ -65,7 +72,6 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     db::timeout_clock::time_point timeout,
     service::client_state& cs
     );
-
 future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_map(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
