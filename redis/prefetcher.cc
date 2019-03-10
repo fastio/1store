@@ -97,8 +97,7 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     if (reversed) {
         ps.set_reversed();
     }
-    //auto pkey_col = schema->get_column_definition(redis::PKEY_COLUMN_NAME);
-    query::read_command cmd(schema->id(), schema->version(), ps, std::numeric_limits<uint32_t>::max());
+    query::read_command cmd(schema->id(), schema->version(), ps, std::numeric_limits<uint32_t>::max(), gc_clock::now(), std::experimental::nullopt, 1);
     auto pkey = partition_key::from_single_value(*schema, key);
     auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
     dht::partition_range_vector partition_ranges;
@@ -192,7 +191,7 @@ future<std::shared_ptr<prefetched_struct<bytes>>> prefetch_simple(service::stora
     service::client_state& cs)
 {
     auto ps = partition_slice_builder(*schema).build();
-    query::read_command cmd(schema->id(), schema->version(), ps, std::numeric_limits<uint32_t>::max());
+    query::read_command cmd(schema->id(), schema->version(), ps, 1, gc_clock::now(), std::experimental::nullopt, 1);
     auto pkey = partition_key::from_single_value(*schema, key);
     auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
     dht::partition_range_vector partition_ranges;
@@ -263,7 +262,7 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<bytes, bytes>>>>>
 {
     auto full_slice = partition_slice_builder(*schema).build();
     auto command = ::make_lw_shared<query::read_command>(schema->id(), schema->version(),
-        full_slice, std::numeric_limits<int32_t>::max(), gc_clock::now(), tracing::make_trace_info(cs.get_trace_state()), query::max_partitions, utils::UUID(), cs.get_timestamp());
+        full_slice, std::numeric_limits<int32_t>::max(), gc_clock::now(), tracing::make_trace_info(cs.get_trace_state()), int32_t(keys.size()), utils::UUID(), cs.get_timestamp());
     auto partition_ranges = boost::copy_range<dht::partition_range_vector>(keys | boost::adaptors::transformed([schema] (auto& key) {
             auto pkey = partition_key::from_single_value(*schema, key);
             return dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
