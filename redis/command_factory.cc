@@ -28,6 +28,7 @@
 #include "redis/commands/zincrby.hh"
 #include "redis/commands/zcard.hh"
 #include "redis/commands/zcount.hh"
+#include "redis/commands/zrange.hh"
 namespace redis {
 shared_ptr<abstract_command> command_factory::create(service::storage_proxy& proxy, request&& req)
 {
@@ -74,6 +75,8 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "zincrby",  [] (service::storage_proxy& proxy, request&& req) { return commands::zincrby::prepare(proxy, std::move(req)); } }, 
     { "zcount",  [] (service::storage_proxy& proxy, request&& req) { return commands::zcount::prepare(proxy, std::move(req)); } }, 
     { "zcard",  [] (service::storage_proxy& proxy, request&& req) { return commands::zcard::prepare(proxy, std::move(req)); } }, 
+    { "zrange",  [] (service::storage_proxy& proxy, request&& req) { return commands::zrange::prepare(proxy, std::move(req)); } }, 
+    { "zrevrange",  [] (service::storage_proxy& proxy, request&& req) { return commands::zrevrange::prepare(proxy, std::move(req)); } }, 
     };
     std::transform(req._command.begin(), req._command.end(), req._command.begin(), ::tolower);
     auto&& command = _commands.find(req._command);
