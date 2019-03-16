@@ -90,6 +90,23 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     db::timeout_clock::time_point timeout,
     service::client_state& cs
     );
+future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_zset(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    const std::vector<bytes> ckeys,
+    fetch_options option,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs
+    );
+future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_zset(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    fetch_options option,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs
+    );
 future<std::shared_ptr<prefetched_struct<bytes>>> prefetch_simple(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,

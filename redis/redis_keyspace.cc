@@ -28,7 +28,7 @@ future<> redis_keyspace_helper::create_if_not_exists(lw_shared_ptr<db::config> c
             db::execute_cql(sprint("create table if not exists %s.%s (pkey text, ckey blob, data text, primary key(pkey, ckey))", redis::NAME, redis::LISTS)).discard_result(),
             db::execute_cql(sprint("create table if not exists %s.%s (pkey text, ckey text, data boolean, primary key(pkey, ckey))", redis::NAME, redis::SETS)).discard_result(),
             db::execute_cql(sprint("create table if not exists %s.%s (pkey text, ckey text, data text, primary key(pkey, ckey))", redis::NAME, redis::MAPS)).discard_result(),
-            db::execute_cql(sprint("create table if not exists %s.%s (pkey text, ckey text, data double, primary key(pkey, ckey))", redis::NAME, redis::ZSETS)).discard_result()
+            db::execute_cql(sprint("create table if not exists %s.%s (pkey text, ckey text, data text, primary key(pkey, ckey))", redis::NAME, redis::ZSETS)).discard_result()
         ).then_wrapped([] (auto f) {
             try {
                 f.get();

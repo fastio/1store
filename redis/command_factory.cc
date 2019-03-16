@@ -1,9 +1,9 @@
 #include "redis/command_factory.hh"
 #include "service/storage_proxy.hh"
+#include "redis/commands/unexpected.hh"
 #include "redis/commands/set.hh"
 #include "redis/commands/get.hh"
 #include "redis/commands/del.hh"
-#include "redis/commands/unexpected.hh"
 #include "redis/commands/exists.hh"
 #include "redis/commands/strlen.hh"
 #include "redis/commands/append.hh"
@@ -23,6 +23,9 @@
 #include "redis/commands/sset.hh"
 #include "redis/commands/smembers.hh"
 #include "redis/commands/srem.hh"
+#include "redis/commands/zadd.hh"
+#include "redis/commands/zscore.hh"
+#include "redis/commands/zincrby.hh"
 namespace redis {
 shared_ptr<abstract_command> command_factory::create(service::storage_proxy& proxy, request&& req)
 {
@@ -64,6 +67,9 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "sadd",  [] (service::storage_proxy& proxy, request&& req) { return commands::sset::prepare(proxy, std::move(req)); } }, 
     { "smembers",  [] (service::storage_proxy& proxy, request&& req) { return commands::smembers::prepare(proxy, std::move(req)); } }, 
     { "srem",  [] (service::storage_proxy& proxy, request&& req) { return commands::srem::prepare(proxy, std::move(req)); } }, 
+    { "zadd",  [] (service::storage_proxy& proxy, request&& req) { return commands::zadd::prepare(proxy, std::move(req)); } }, 
+    { "zscore",  [] (service::storage_proxy& proxy, request&& req) { return commands::zscore::prepare(proxy, std::move(req)); } }, 
+    { "zincrby",  [] (service::storage_proxy& proxy, request&& req) { return commands::zincrby::prepare(proxy, std::move(req)); } }, 
     };
     std::transform(req._command.begin(), req._command.end(), req._command.begin(), ::tolower);
     auto&& command = _commands.find(req._command);

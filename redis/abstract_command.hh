@@ -37,6 +37,7 @@ static inline decltype(auto) simple_objects() { return redis::SIMPLE_OBJECTS; }
 static inline decltype(auto) lists() { return redis::LISTS; }
 static inline decltype(auto) sets() { return redis::SETS; }
 static inline decltype(auto) maps() { return redis::MAPS; }
+static inline decltype(auto) zsets() { return redis::ZSETS; }
 static inline const schema_ptr simple_objects_schema(service::storage_proxy& proxy) {
     auto& db = proxy.get_db().local();
     auto schema = db.find_schema(keyspace(), simple_objects());
@@ -57,6 +58,11 @@ static inline const schema_ptr maps_schema(service::storage_proxy& proxy) {
     auto schema = db.find_schema(keyspace(), maps());
     return schema;
 }
+static inline const schema_ptr zsets_schema(service::storage_proxy& proxy) {
+    auto& db = proxy.get_db().local();
+    auto schema = db.find_schema(keyspace(), zsets());
+    return schema;
+}
 
 inline long bytes2long(const bytes& b) {
     try {
@@ -67,6 +73,17 @@ inline long bytes2long(const bytes& b) {
 }
 inline bytes long2bytes(long l) {
     auto s = sprint("%lld", l);
+    return to_bytes(s);
+}
+inline double bytes2double(const bytes& b) {
+    try {
+        return std::atof(make_sstring(b).data());
+    } catch (std::exception const & e) {
+        throw e;
+    }
+}
+inline bytes double2bytes(double d) {
+    auto s = sprint("%lf", d);
     return to_bytes(s);
 }
 inline bool is_number(const bytes& b)

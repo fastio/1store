@@ -322,4 +322,128 @@ future<bool> exists(service::storage_proxy& proxy,
     });
 }
 
+class prefetched_zset_builder {
+    using data_type = prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<double>>>>;
+    data_type& _data;
+    const query::partition_slice& _partition_slice;
+    const schema_ptr _schema;
+    const fetch_options _option;
+    std::function<bool(const column_definition& col, data_type&, const clustering_key&, bytes_view)> _filter = nullptr;
+private:
+    void add_cell(const column_definition& ckey_col, const clustering_key& ckey, const column_definition& col, const std::optional<query::result_atomic_cell_view>& cell)
+    {
+        using dtype = std::optional<bytes>;
+        using vtype = std::optional<double>;
+        if (cell) {
+            cell->value().with_linearized([this, &ckey_col, &ckey, &col] (bytes_view cell_view) {
+                if (_filter == nullptr || _filter(col, _data, ckey, cell_view)) {
+                    if (_option == fetch_options::keys) {
+                        auto i = ckey.begin(*_schema);
+                        auto&& ckey_data = ckey_col.type->deserialize_value(*i);
+                        _data._data.emplace_back(std::make_pair<dtype, vtype>(dtype(std::move(ckey_data.serialize())), vtype()));
+                    } else if (_option == fetch_options::values) {
+                        auto&& data_data =  col.type->deserialize_value(cell_view);
+                        _data._data.emplace_back(std::make_pair<dtype, vtype>(dtype(std::move(data_data.serialize())), vtype()));
+                    } else {
+                        auto i = ckey.begin(*_schema);
+                        auto&& ckey_data = ckey_col.type->deserialize_value(*i);
+                        auto&& data_data =  col.type->deserialize_value(cell_view);
+                        _data._data.emplace_back(std::make_pair<dtype, vtype>(dtype(std::move(ckey_data.serialize())), vtype(value_cast<double>(data_data))));
+                    }
+                    _data._inited = true;
+                } 
+            });
+        }
+    }
+public:
+    prefetched_zset_builder(std::shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps, const fetch_options& option)
+        : _data(*data)
+        , _partition_slice(ps)
+        , _schema(schema)
+        , _option(option)
+    {
+    }
+    void accept_new_partition(const partition_key& key, uint32_t row_count)
+    {
+    }
+
+    void accept_new_partition(uint32_t row_count) {}
+
+    void accept_new_row(const clustering_key& key, const query::result_row_view& static_row, const query::result_row_view& row)
+    {
+        auto row_iterator = row.iterator();
+        for (auto&& id : _partition_slice.regular_columns) {
+            add_cell(*(_schema->get_column_definition(redis::CKEY_COLUMN_NAME)), key, _schema->regular_column_at(id), row_iterator.next_atomic_cell());
+        }
+    }
+
+    void accept_new_row(const query::result_row_view& static_row, const query::result_row_view& row) {}
+    void accept_partition_end(const query::result_row_view& static_row) {}
+};
+
+future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<double>>>>>> prefetch_zset_impl(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    std::vector<query::clustering_range>&& ranges,
+    const fetch_options option,
+    bool reversed,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs)
+{
+    std::vector<column_id> regular_cols { schema->get_column_definition(redis::DATA_COLUMN_NAME)->id };
+    query::partition_slice ps(
+            ranges,
+            std::move(std::vector<column_id> {}),
+            std::move(regular_cols),
+            query::partition_slice::option_set::of<
+                query::partition_slice::option::send_partition_key,
+                query::partition_slice::option::send_clustering_key,
+                query::partition_slice::option::collections_as_maps>());
+    if (reversed) {
+        ps.set_reversed();
+    }
+    query::read_command cmd(schema->id(), schema->version(), ps, std::numeric_limits<uint32_t>::max(), gc_clock::now(), std::experimental::nullopt, 1);
+    auto pkey = partition_key::from_single_value(*schema, key);
+    auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
+    dht::partition_range_vector partition_ranges;
+    partition_ranges.emplace_back(std::move(partition_range));
+    return proxy.query(schema, make_lw_shared(std::move(cmd)), std::move(partition_ranges), cl, {timeout, cs.get_trace_state()}).then([ps, schema, option] (auto qr) {
+        return query::result_view::do_with(*qr.query_result, [&] (query::result_view v) {
+            auto pd = std::make_shared<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<double>>>>>(schema);
+            v.consume(ps, prefetched_zset_builder(pd, schema, ps, option));
+            return pd;
+        });
+    });
+}
+
+future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_zset(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    const std::vector<bytes> ckeys,
+    fetch_options option,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs)
+{
+    std::vector<query::clustering_range> ranges;
+    auto ckey_col = schema->get_column_definition(redis::CKEY_COLUMN_NAME);
+    boost::range::push_back(ranges, ckeys | boost::adaptors::transformed([schema, ckey_col] (const auto& ckey) {
+        return query::clustering_range::make_singular(clustering_key_prefix::from_single_value(*schema, ckey));
+    }));
+    return prefetch_map_impl(proxy, schema, key, std::move(ranges), option, false, cl, timeout, cs);
+}
+
+future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_zset(service::storage_proxy& proxy,
+    const schema_ptr schema,
+    const bytes& key,
+    fetch_options option,
+    db::consistency_level cl,
+    db::timeout_clock::time_point timeout,
+    service::client_state& cs)
+{
+    std::vector<query::clustering_range> ranges { query::full_clustering_range };
+    return prefetch_map_impl(proxy, schema, key, std::move(ranges), option, false, cl, timeout, cs);
+}
+
 } // end of redis namespace
