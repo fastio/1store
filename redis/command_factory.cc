@@ -31,6 +31,7 @@
 #include "redis/commands/zrange.hh"
 #include "redis/commands/zrangebyscore.hh"
 #include "redis/commands/zrank.hh"
+#include "redis/commands/zrem.hh"
 namespace redis {
 shared_ptr<abstract_command> command_factory::create(service::storage_proxy& proxy, request&& req)
 {
@@ -83,6 +84,9 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "zrevrangebyscore",  [] (service::storage_proxy& proxy, request&& req) { return commands::zrevrangebyscore::prepare(proxy, std::move(req)); } }, 
     { "zrank",  [] (service::storage_proxy& proxy, request&& req) { return commands::zrank::prepare(proxy, std::move(req)); } }, 
     { "zrevrank",  [] (service::storage_proxy& proxy, request&& req) { return commands::zrevrank::prepare(proxy, std::move(req)); } }, 
+    { "zrem",  [] (service::storage_proxy& proxy, request&& req) { return commands::zrem::prepare(proxy, std::move(req)); } }, 
+    { "zremrangebyrank",  [] (service::storage_proxy& proxy, request&& req) { return commands::zremrangebyrank::prepare(proxy, std::move(req)); } }, 
+    { "zremrangebyscore",  [] (service::storage_proxy& proxy, request&& req) { return commands::zremrangebyscore::prepare(proxy, std::move(req)); } }, 
     };
     std::transform(req._command.begin(), req._command.end(), req._command.begin(), ::tolower);
     auto&& command = _commands.find(req._command);

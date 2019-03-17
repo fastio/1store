@@ -20,7 +20,7 @@ public:
     zrank(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& member) 
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))
-        , _member(member)
+        , _member(std::move(member))
     {
     }
     ~zrank() {}

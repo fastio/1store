@@ -54,20 +54,19 @@ future<reply> zrange::execute_impl(service::storage_proxy& proxy, db::consistenc
         while (_end < 0 && pd->data().size() > 0) _end += static_cast<long>(pd->data().size());
         if (_end > 0 && pd->data().size()) _end = _end % static_cast<long>(pd->data().size());
         if (pd && pd->has_data() && _begin <= _end) {
-            size_t index = 0;
-            auto&& result_scores = boost::copy_range<std::vector<std::pair<std::optional<bytes>, double>>> (pd->data() | boost::adaptors::filtered([this, begin = _begin, end = _end, &index] (auto&) {
-                if (static_cast<size_t>(begin) <= index && index <= static_cast<size_t>(end)) {
-                    return true; 
-                }
-                ++index;
-                return false;
-            }) | boost::adaptors::transformed([] (auto& e) {
+            auto&& result_scores = boost::copy_range<std::vector<std::pair<std::optional<bytes>, double>>> (pd->data() | boost::adaptors::transformed([] (auto& e) {
                 return std::move(std::pair<std::optional<bytes>, double>(std::move(e.first), bytes2double(*(e.second))));
             }));
             if (reversed) {
                 std::sort(result_scores.begin(), result_scores.end(), [] (auto& e1, auto& e2) { return e1.second > e2.second; });
             } else {
                 std::sort(result_scores.begin(), result_scores.end(), [] (auto& e1, auto& e2) { return e1.second < e2.second; });
+            }
+            if (static_cast<size_t>(_end) < result_scores.size()) {
+                result_scores.erase(result_scores.begin() + static_cast<size_t>(_end), result_scores.end());
+            }
+            if (_begin > 0) {
+                result_scores.erase(result_scores.begin(), result_scores.begin() + static_cast<size_t>(_begin));
             }
             for (auto&& e : result_scores) {
                 results.emplace_back(std::move(e.first));
