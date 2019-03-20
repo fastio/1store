@@ -1,6 +1,5 @@
 #pragma once
 #include "redis/abstract_command.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "tracing/trace_state.hh"

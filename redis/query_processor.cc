@@ -21,7 +21,6 @@
 #include "redis/command_factory.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
-#include "redis/reply_builder.hh"
 #include "redis/abstract_command.hh"
 #include <seastar/core/metrics.hh>
 #include "timeout_config.hh"

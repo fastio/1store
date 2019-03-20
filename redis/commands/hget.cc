@@ -1,6 +1,5 @@
 #include "redis/commands/hget.hh"
 #include "redis/commands/unexpected.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "redis/redis_mutation.hh"

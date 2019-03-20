@@ -1,6 +1,5 @@
 #include "redis/commands/exists.hh"
 #include "redis/commands/unexpected.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "timeout_config.hh"

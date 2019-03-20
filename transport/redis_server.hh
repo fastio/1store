@@ -28,7 +28,6 @@
 #include "service/storage_proxy.hh"
 #include "redis/query_processor.hh"
 #include "redis/request.hh"
-#include "redis/reply.hh"
 #include "cql3/values.hh"
 #include "auth/authenticator.hh"
 #include "core/distributed.hh"
@@ -80,12 +79,23 @@ public:
     future<> do_accepts(int which, bool keepalive, ipv4_addr server_addr);
     future<> stop();
 public:
-    using response_type = redis::reply;
+    struct result {
+        result(redis::redis_message&& m) : _data(make_foreign(std::make_unique<redis::redis_message>(std::move(m)))) {}
+        foreign_ptr<std::unique_ptr<redis::redis_message>> _data;
+        lw_shared_ptr<scattered_message<char>> make_message() {
+            auto m = seastar::make_lw_shared<scattered_message<char>> ();
+            for (auto&& fragment : _data->ostream().fragments()) {
+                m->append_static(reinterpret_cast<const char*>(fragment.data()), fragment.size());
+            }
+            return m;
+        }
+    };
+    using response_type = result;
 private:
     class fmt_visitor;
     friend class connection;
     class connection : public boost::intrusive::list_base_hook<> {
-        using result = redis::reply;
+        using result = redis_server::result;
         redis_server& _server;
         ipv4_addr _server_addr;
         connected_socket _fd;

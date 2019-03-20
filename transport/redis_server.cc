@@ -55,7 +55,6 @@
 
 #include "response.hh"
 #include "request.hh"
-
 namespace redis_transport {
 
 static logging::logger logging("redis_server");
@@ -165,7 +164,9 @@ redis_server::do_accepts(int which, bool keepalive, ipv4_addr server_addr) {
 future<redis_server::connection::result> redis_server::connection::process_request_one(redis::request&& request,  service::client_state cs, tracing_request_type rt) {
     return futurize_apply([this, request = std::move(request), cs = std::move(cs)] () mutable {
         auto& config = _server._config.timeout_config;
-        return _server._query_processor.local().process(std::move(request), cs, config);
+        return _server._query_processor.local().process(std::move(request), cs, config).then([] (auto&& message) {
+            return make_ready_future<redis_server::connection::result> (std::move(message));
+        });
     });
 }
 
@@ -250,7 +251,9 @@ future<> redis_server::connection::process_request() {
             try {
                 auto result = result_future.get0();
                 --_server._requests_serving;
-                _write_buf.write(std::move(*(result._reply))).then([this] {
+                auto b = result._data->ostream().linearize();
+                auto message = result.make_message();
+                _write_buf.write(std::move(*message)).then([this] {
                     _write_buf.flush();
                 });
             } catch (...) {

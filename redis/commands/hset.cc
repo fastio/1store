@@ -1,7 +1,6 @@
 #include "redis/commands/hset.hh"
 #include "redis/commands/unexpected.hh"
 #include "seastar/core/shared_ptr.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "db/system_keyspace.hh"
