@@ -251,7 +251,6 @@ future<> redis_server::connection::process_request() {
             try {
                 auto result = result_future.get0();
                 --_server._requests_serving;
-                auto b = result._data->ostream().linearize();
                 auto message = result.make_message();
                 _write_buf.write(std::move(*message)).then([this] {
                     _write_buf.flush();
