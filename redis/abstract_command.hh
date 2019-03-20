@@ -31,6 +31,9 @@ class trace_state_ptr;
 }
 
 namespace redis {
+class redis_message;
+}
+namespace redis {
 
 static inline decltype(auto) keyspace() { return redis::NAME; }
 static inline decltype(auto) simple_objects() { return redis::SIMPLE_OBJECTS; }
@@ -90,7 +93,6 @@ inline bool is_number(const bytes& b)
 {
     return !b.empty() && std::find_if(b.begin(), b.end(), [] (auto c) { return !std::isdigit((char)c); }) == b.end();
 }
-
 class abstract_command : public enable_shared_from_this<abstract_command> {
 protected:
     bytes _name;
@@ -114,7 +116,7 @@ public:
     }
     virtual ~abstract_command() {};
     
-    virtual future<reply> execute(service::storage_proxy&, db::consistency_level cl, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& client_state) = 0;
+    virtual future<redis_message> execute(service::storage_proxy&, db::consistency_level cl, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& client_state) = 0;
     const bytes& name() const { return _name; }
     static inline sstring make_sstring(const bytes& b) {
         return sstring{reinterpret_cast<const char*>(b.data()), b.size()};

@@ -1,6 +1,5 @@
 #include "redis/commands/zincrby.hh"
 #include "redis/commands/unexpected.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "redis/redis_mutation.hh"
@@ -28,7 +27,7 @@ shared_ptr<abstract_command> zincrby::prepare(service::storage_proxy& proxy, req
     return seastar::make_shared<zincrby>(std::move(req._command), zsets_schema(proxy), std::move(req._args[0]), std::move(req._args[2]), bytes2double(req._args[1]));
 }
 
-future<reply> zincrby::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> zincrby::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, std::vector<bytes> { _member }, fetch_options::values, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
@@ -44,9 +43,9 @@ future<reply> zincrby::execute(service::storage_proxy& proxy, db::consistency_le
             try {
                 f.get();
             } catch (std::exception& e) {
-                return reply_builder::build<error_tag>();
+                return redis_message::err();
             }
-            return reply_builder::build<message_tag>(double2bytes(result));
+            return redis_message::make(double2bytes(result));
         });
     });
 }

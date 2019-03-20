@@ -34,7 +34,7 @@ public:
     {
     }
     ~set() {}
-    future<reply> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
+    future<redis_message> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
 };
 
 class mset : public command_with_single_schema {
@@ -48,7 +48,7 @@ public:
     }
     ~mset() {}
     static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
-    future<reply> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
+    future<redis_message> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
 };
 }
 }

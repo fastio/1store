@@ -1,7 +1,6 @@
 #include "redis/commands/sset.hh"
 #include "redis/commands/unexpected.hh"
 #include "seastar/core/shared_ptr.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "db/system_keyspace.hh"
@@ -28,7 +27,7 @@ shared_ptr<abstract_command> sset::prepare(service::storage_proxy& proxy, reques
     return seastar::make_shared<sset> (std::move(req._command), sets_schema(proxy), std::move(req._args[0]), std::move(data));
 }
 
-future<reply> sset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> sset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
     auto total = _data.size();
@@ -36,9 +35,9 @@ future<reply> sset::execute(service::storage_proxy& proxy, db::consistency_level
         try {
             f.get();
         } catch (std::exception& e) {
-            return reply_builder::build<error_tag>();
+            return redis_message::err();
         }
-        return reply_builder::build<number_tag>(total);
+        return redis_message::make(total);
     });
 }
 

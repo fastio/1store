@@ -23,7 +23,7 @@ public:
     }
     ~lset() {}
     static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
-    virtual future<reply> execute(service::storage_proxy&,
+    virtual future<redis_message> execute(service::storage_proxy&,
         db::consistency_level,
         db::timeout_clock::time_point,
         const timeout_config& tc,

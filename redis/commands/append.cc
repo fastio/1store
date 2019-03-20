@@ -1,6 +1,5 @@
 #include "redis/commands/append.hh"
 #include "redis/commands/unexpected.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "redis/redis_mutation.hh"
@@ -23,7 +22,7 @@ shared_ptr<abstract_command> append::prepare(service::storage_proxy& proxy, requ
     return make_shared<append>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
 }
 
-future<reply> append::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> append::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_simple(proxy, _schema, _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
@@ -37,9 +36,9 @@ future<reply> append::execute(service::storage_proxy& proxy, db::consistency_lev
             try {
                 f.get();
             } catch(...) {
-                return reply_builder::build<error_tag>();
+                return redis_message::err();
             }
-            return reply_builder::build<ok_tag>();
+            return redis_message::ok();
         });
     });
 }

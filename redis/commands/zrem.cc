@@ -1,6 +1,5 @@
 #include "redis/commands/zrem.hh"
 #include "redis/commands/unexpected.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "redis/redis_mutation.hh"
@@ -12,16 +11,13 @@
 #include "partition_slice_builder.hh"
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
-#include "log.hh"
 #include <boost/range/adaptor/transformed.hpp>
 #include <boost/range/algorithm_ext/push_back.hpp>
 #include <boost/range/adaptor/filtered.hpp>
 #include <boost/range/adaptor/indirected.hpp>
-#include "log.hh"
 namespace redis {
 namespace commands {
 
-static logging::logger zlog("zrem");
 shared_ptr<abstract_command> zrem::prepare(service::storage_proxy& proxy, request&& req) {
     if (req._args_count < 2) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
@@ -52,7 +48,7 @@ shared_ptr<abstract_command> zremrangebyscore::prepare(service::storage_proxy& p
     return seastar::make_shared<zremrangebyscore>(std::move(req._command), zsets_schema(proxy), std::move(req._args[0]), min, max);
 }
 
-future<reply> zrem::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> zrem::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, _members, fetch_options::keys, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
@@ -64,22 +60,22 @@ future<reply> zrem::execute(service::storage_proxy& proxy, db::consistency_level
             }));
             total_removed = removed_keys.size();
             if (total_removed == 0) {
-                return reply_builder::build<number_tag>(total_removed);
+                return redis_message::make(total_removed);
             }
             return redis::write_mutation(proxy, redis::make_zset_dead_cells(_schema, _key, std::move(removed_keys)), cl, timeout, cs).then_wrapped([this, total_removed] (auto f) {
                 try {
                     f.get();
                 } catch (std::exception& e) {
-                    return reply_builder::build<error_tag>();
+                    return redis_message::err();
                 }
-                return reply_builder::build<number_tag>(total_removed);
+                return redis_message::make(total_removed);
             });
         }
-        return reply_builder::build<number_tag>(total_removed);
+        return redis_message::make(total_removed);
     });
 }
 
-future<reply> zremrangebyrank::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> zremrangebyrank::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, fetch_options::all, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
@@ -103,22 +99,22 @@ future<reply> zremrangebyrank::execute(service::storage_proxy& proxy, db::consis
             }));
             total_removed = removed_keys.size();
             if (total_removed == 0) {
-                return reply_builder::build<number_tag>(total_removed);
+                return redis_message::make(total_removed);
             }
             return redis::write_mutation(proxy, redis::make_zset_dead_cells(_schema, _key, std::move(removed_keys)), cl, timeout, cs).then_wrapped([this, total_removed] (auto f) {
                 try {
                     f.get();
                 } catch (std::exception& e) {
-                    return reply_builder::build<error_tag>();
+                    return redis_message::err();
                 }
-                return reply_builder::build<number_tag>(total_removed);
+                return redis_message::make(total_removed);
             });
         }
-        return reply_builder::build<number_tag>(total_removed);
+        return redis_message::make(total_removed);
     });
 }
 
-future<reply> zremrangebyscore::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> zremrangebyscore::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, fetch_options::all, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
@@ -132,18 +128,18 @@ future<reply> zremrangebyscore::execute(service::storage_proxy& proxy, db::consi
             }));
             total_removed = removed_keys.size();
             if (total_removed == 0) {
-                return reply_builder::build<number_tag>(total_removed);
+                return redis_message::make(total_removed);
             }
             return redis::write_mutation(proxy, redis::make_zset_dead_cells(_schema, _key, std::move(removed_keys)), cl, timeout, cs).then_wrapped([this, total_removed] (auto f) {
                 try {
                     f.get();
                 } catch (std::exception& e) {
-                    return reply_builder::build<error_tag>();
+                    return redis_message::err();
                 }
-                return reply_builder::build<number_tag>(total_removed);
+                return redis_message::make(total_removed);
             });
         }
-        return reply_builder::build<number_tag>(total_removed);
+        return redis_message::make(total_removed);
     });
 }
 

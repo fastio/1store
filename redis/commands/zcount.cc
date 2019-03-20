@@ -1,6 +1,5 @@
 #include "redis/commands/zcount.hh"
 #include "redis/commands/unexpected.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "redis/redis_mutation.hh"
@@ -30,7 +29,7 @@ shared_ptr<abstract_command> zcount::prepare(service::storage_proxy& proxy, requ
     return seastar::make_shared<zcount>(std::move(req._command), zsets_schema(proxy), std::move(req._args[0]), min, max);
 }
 
-future<reply> zcount::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> zcount::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, fetch_options::values, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
@@ -40,9 +39,9 @@ future<reply> zcount::execute(service::storage_proxy& proxy, db::consistency_lev
                 auto v = bytes2double(*(e.first));
                 if (min <= v && v <= max) count++;
             });
-            return reply_builder::build<number_tag>(count);
+            return redis_message::make(count);
         }
-        return reply_builder::build<null_message_tag>();
+        return redis_message::null();
     });
 }
 

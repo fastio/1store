@@ -1,6 +1,5 @@
 #include "redis/commands/zrange.hh"
 #include "redis/commands/unexpected.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "redis/redis_mutation.hh"
@@ -45,37 +44,39 @@ shared_ptr<abstract_command> zrevrange::prepare(service::storage_proxy& proxy, r
     return prepare_impl<zrevrange>(proxy, std::move(req));
 }
 
-future<reply> zrange::execute_impl(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs, bool reversed)
+future<redis_message> zrange::execute_impl(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs, bool reversed)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, fetch_options::all, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs, reversed] (auto pd) {
         std::vector<std::optional<bytes>> results; 
         if (_begin < 0) _begin = 0;
-        while (_end < 0 && pd->data().size() > 0) _end += static_cast<long>(pd->data().size());
-        if (_end > 0 && pd->data().size()) _end = _end % static_cast<long>(pd->data().size());
-        if (pd && pd->has_data() && _begin <= _end) {
-            auto&& result_scores = boost::copy_range<std::vector<std::pair<std::optional<bytes>, double>>> (pd->data() | boost::adaptors::transformed([] (auto& e) {
-                return std::move(std::pair<std::optional<bytes>, double>(std::move(e.first), bytes2double(*(e.second))));
-            }));
-            if (reversed) {
-                std::sort(result_scores.begin(), result_scores.end(), [] (auto& e1, auto& e2) { return e1.second > e2.second; });
-            } else {
-                std::sort(result_scores.begin(), result_scores.end(), [] (auto& e1, auto& e2) { return e1.second < e2.second; });
-            }
-            if (static_cast<size_t>(_end) < result_scores.size()) {
-                result_scores.erase(result_scores.begin() + static_cast<size_t>(_end), result_scores.end());
-            }
-            if (_begin > 0) {
-                result_scores.erase(result_scores.begin(), result_scores.begin() + static_cast<size_t>(_begin));
-            }
-            for (auto&& e : result_scores) {
-                results.emplace_back(std::move(e.first));
-                if (_with_scores) {
-                    results.emplace_back(std::move(double2bytes(e.second)));
+        if (pd && pd->has_data()) {
+            while (_end < 0 && pd->data().size() > 0) _end += static_cast<long>(pd->data().size());
+            if (static_cast<size_t>(_end) >= pd->data().size()) _end = static_cast<long>(pd->data().size()) - 1;
+            if (_begin <= _end) {
+                auto&& result_scores = boost::copy_range<std::vector<std::pair<std::optional<bytes>, double>>> (pd->data() | boost::adaptors::transformed([] (auto& e) {
+                    return std::move(std::pair<std::optional<bytes>, double>(std::move(e.first), bytes2double(*(e.second))));
+                }));
+                if (reversed) {
+                    std::sort(result_scores.begin(), result_scores.end(), [] (auto& e1, auto& e2) { return e1.second > e2.second; });
+                } else {
+                    std::sort(result_scores.begin(), result_scores.end(), [] (auto& e1, auto& e2) { return e1.second < e2.second; });
+                }
+                if (static_cast<size_t>(_end) < result_scores.size()) {
+                    result_scores.erase(result_scores.begin() + static_cast<size_t>(_end), result_scores.end());
+                }
+                if (_begin > 0) {
+                    result_scores.erase(result_scores.begin(), result_scores.begin() + static_cast<size_t>(_begin));
+                }
+                for (auto&& e : result_scores) {
+                    results.emplace_back(std::move(e.first));
+                    if (_with_scores) {
+                        results.emplace_back(std::move(double2bytes(e.second)));
+                    }
                 }
             }
         }
-        return reply_builder::build(std::move(results));
+        return redis_message::make(std::move(results));
     });
 }
 

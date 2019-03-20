@@ -27,14 +27,14 @@ shared_ptr<abstract_command> hexists::prepare(service::storage_proxy& proxy, req
     return seastar::make_shared<hexists> (std::move(req._command), maps_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
 }
 
-future<reply> hexists::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> hexists::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
     return prefetch_map(proxy, _schema, _key, std::vector<bytes> { _map_key }, fetch_options::keys, cl, timeout, cs).then([this] (auto pd) {
         if (pd && pd->has_data()) {
-            return reply_builder::build<ok_tag>();
+            return redis_message::ok();
         }
-        return reply_builder::build<error_tag>();
+        return redis_message::err();
     });
 }
 }

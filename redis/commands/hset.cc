@@ -11,12 +11,10 @@
 #include "mutation.hh"
 #include "timeout_config.hh"
 #include "redis/redis_mutation.hh"
-//#include "log.hh"
 namespace redis {
 
 namespace commands {
 
-//logging::logger log("hset");
 shared_ptr<abstract_command> hset::prepare(service::storage_proxy& proxy, request&& req, bool multi)
 {
     if (req._args_count < 3 || req._args_count % 2 != 1 || (multi && req._args_count > 3)) {
@@ -29,7 +27,7 @@ shared_ptr<abstract_command> hset::prepare(service::storage_proxy& proxy, reques
     return seastar::make_shared<hset> (std::move(req._command), maps_schema(proxy), std::move(req._args[0]), std::move(data), multi);
 }
 
-future<reply> hset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> hset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
     auto total = _data.size();
@@ -37,9 +35,9 @@ future<reply> hset::execute(service::storage_proxy& proxy, db::consistency_level
         try {
             f.get();
         } catch (std::exception& e) {
-            return reply_builder::build<error_tag>();
+            return redis_message::err();
         }
-        return _multi == false ? reply_builder::build<number_tag>(total) : reply_builder::build<OK_tag>();
+        return _multi == false ? redis_message::make(total) : redis_message::ok();
     });
 }
 

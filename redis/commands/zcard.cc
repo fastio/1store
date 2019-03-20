@@ -28,14 +28,14 @@ shared_ptr<abstract_command> zcard::prepare(service::storage_proxy& proxy, reque
     return seastar::make_shared<zcard>(std::move(req._command), zsets_schema(proxy), std::move(req._args[0]));
 }
 
-future<reply> zcard::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> zcard::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, fetch_options::keys, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            return reply_builder::build<number_tag>(pd->data().size());
+            return redis_message::make(pd->data().size());
         }
-        return reply_builder::build<null_message_tag>();
+        return redis_message::null();
     });
 }
 

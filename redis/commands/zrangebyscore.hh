@@ -18,7 +18,7 @@ protected:
     bool _with_scores = false;
     long _offset = 0;
     long _count = -1;
-    future<reply> execute_impl(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs, bool reversed);
+    future<redis_message> execute_impl(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs, bool reversed);
 public:
     static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
     zrangebyscore(bytes&& name, const schema_ptr schema, bytes&& key, double min, double max, bool with_scores, long offset, long count) 
@@ -32,7 +32,7 @@ public:
     {
     }
     ~zrangebyscore() {}
-    future<reply> execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs) override {
+    future<redis_message> execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs) override {
         return execute_impl(proxy, cl, now, tc, cs, false); 
     }
 };
@@ -45,7 +45,7 @@ public:
     {
     }
     ~zrevrangebyscore() {}
-    future<reply> execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs) override {
+    future<redis_message> execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs) override {
         return execute_impl(proxy, cl, now, tc, cs, true);
     }
 };

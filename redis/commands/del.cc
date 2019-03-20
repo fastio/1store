@@ -28,7 +28,7 @@ shared_ptr<abstract_command> del::prepare(service::storage_proxy& proxy, request
     return seastar::make_shared<del> (std::move(req._command), std::move(schemas), std::move(req._args[0]));
 }
 
-future<reply> del::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> del::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
     auto remove_if_exists = [this, timeout, cl, &proxy, &tc, &cs] (const schema_ptr schema) {
@@ -49,9 +49,9 @@ future<reply> del::execute(service::storage_proxy& proxy, db::consistency_level 
     auto mapper = make_lw_shared<decltype(remove_if_exists)>(std::move(remove_if_exists));
     return map_reduce(_schemas.begin(), _schemas.end(), *mapper, false, std::bit_or<bool> ()).then([mapper = std::move(mapper)] (auto result) {
         if (result) {
-            return reply_builder::build<ok_tag>();
+            return redis_message::ok();
         }
-        return reply_builder::build<error_tag>();
+        return redis_message::err();
     });
 }
 }

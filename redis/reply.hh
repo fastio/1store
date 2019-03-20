@@ -25,11 +25,135 @@
 #include <unordered_map>
 #include <vector>
 #include "bytes.hh"
+#include "bytes_ostream.hh"
 #include  <experimental/vector>
 #include "seastar/core/sharded.hh"
 #include "seastar/core/shared_ptr.hh"
 #include "seastar/core/scattered_message.hh"
 namespace redis {
+static const bytes msg_crlf {"\r\n"};
+static const bytes msg_ok {"+OK\r\n"};
+static const bytes msg_pong {"+PONG\r\n"};
+static const bytes msg_err = {"-ERR\r\n"};
+static const bytes msg_zero = {":0\r\n"};
+static const bytes msg_one = {":1\r\n"};
+static const bytes msg_neg_one = {":-1\r\n"};
+static const bytes msg_neg_two = {":-2\r\n"};
+static const bytes msg_null_blik = {"$-1\r\n"};
+static const bytes msg_null_multi_bulk = {"*-1\r\n"};
+static const bytes msg_empty_multi_bulk = {"*0\r\n"};
+static const bytes msg_type_err = {"-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"};
+static const bytes msg_nokey_err = {"-ERR no such key\r\n"};
+static const bytes msg_nocmd_err = {"-ERR no such command\r\n"};
+static const bytes msg_syntax_err = {"-ERR syntax error\r\n"};
+static const bytes msg_same_object_err = {"-ERR source and destination objects are the same\r\n"};
+static const bytes msg_out_of_range_err = {"-ERR index out of range\r\n"};
+static const bytes msg_not_integer_err = {"-ERR ERR hash value is not an integer\r\n" };
+static const bytes msg_not_float_err = {"-ERR ERR hash value is not an float\r\n" };
+static const bytes msg_str_tag = {"+"};
+static const bytes msg_num_tag = {":"};
+static const bytes msg_sigle_tag = {"*"};
+static const bytes msg_batch_tag = {"$"};
+static const bytes msg_not_found = {"+(nil)\r\n"};
+static const bytes msg_nil = {"+(nil)\r\n"};
+static constexpr const int REDIS_OK = 0;
+static constexpr const int REDIS_ERR = 1;
+static constexpr const int REDIS_NONE = -1;
+static constexpr const int REDIS_WRONG_TYPE = -2;
+static const bytes msg_type_string {"+string\r\n"};
+static const bytes msg_type_none {"+none\r\n"};
+static const bytes msg_type_list {"+list\r\n"};
+static const bytes msg_type_hll {"+hyperloglog\r\n"};
+static const bytes msg_type_set {"+set\r\n"};
+static const bytes msg_type_zset {"+zset\r\n"};
+static const bytes msg_type_hash {"+hash\r\n"};
+class redis_message final {
+private:
+    std::unique_ptr<bytes_ostream> _message;
+    redis_message() noexcept : _message(std::make_unique<bytes_ostream>()) {}
+    redis_message(bytes_view b) noexcept : redis_message() {
+        _message->write(b);
+    }
+public:
+    bytes_ostream& ostream() { return *_message; }
+    static future<redis_message> make(const bytes& content) {
+        redis_message m;
+        m.write_sstring(sstring(sprint("$%d\r\n", content.size())));
+        m.write(bytes_view(content));
+        m.write(bytes_view(msg_crlf));
+        return make_ready_future<redis_message>(std::move(m));
+    }
+    static future<redis_message> make(bytes&& content) {
+        redis_message m;
+        m.write_sstring(sstring(sprint("$%d\r\n", content.size())));
+        m.write(bytes_view(content));
+        m.write(bytes_view(msg_crlf));
+        return make_ready_future<redis_message>(std::move(m));
+    }
+    static future<redis_message> make(const size_t content) {
+        redis_message m;
+        m.write_sstring(sstring(sprint(":%zu\r\n", content)));
+        return make_ready_future<redis_message>(std::move(m));
+    }
+    static future<redis_message> make(const long content) {
+        redis_message m;
+        m.write_sstring(sstring(sprint(":%lld\r\n", content)));
+        return make_ready_future<redis_message>(std::move(m));
+    }
+    static future<redis_message> make(std::vector<bytes>&& content) {
+        redis_message m;
+        m.write_sstring(sstring(sprint("*%zu\r\n", content.size())));
+        for (size_t i = 0; i < content.size(); ++i) {
+            m.write_sstring(sstring(sprint("$%zu\r\n", content[i].size())));
+            m.write(bytes_view(content[i]));
+            m.write(bytes_view(msg_crlf));
+        }
+        return make_ready_future<redis_message>(std::move(m));
+    }
+    static future<redis_message> make(std::vector<std::optional<bytes>>&& content) {
+        redis_message m;
+        m.write_sstring(sstring(sprint("*%zu\r\n", content.size())));
+        for (size_t i = 0; i < content.size(); ++i) {
+            auto& s = *(content[i]);
+            m.write_sstring(sstring(sprint("$%zu\r\n", s.size())));
+            m.write(bytes_view(s));
+            m.write(bytes_view(msg_crlf));
+        }
+        return make_ready_future<redis_message>(std::move(m));
+    }
+    static future<redis_message> one() {
+        redis_message m;
+        m.write(bytes_view(msg_one));
+        return make_ready_future<redis_message>(std::move(m));
+    }
+    static future<redis_message> zero() {
+        redis_message m;
+        m.write(bytes_view(msg_zero));
+        return make_ready_future<redis_message>(std::move(m));
+    }
+    static future<redis_message> ok() {
+        redis_message m;
+        m.write(bytes_view(msg_ok));
+        return make_ready_future<redis_message>(std::move(m));
+    }
+    static future<redis_message> err() {
+        redis_message m;
+        m.write(bytes_view(msg_err));
+        return make_ready_future<redis_message>(std::move(m));
+    }
+    static future<redis_message> null() {
+        redis_message m;
+        m.write(bytes_view(msg_null_blik));
+        return make_ready_future<redis_message>(std::move(m));
+    }
+private:
+    inline void write(const bytes_view content) {
+        _message->write(content);
+    }
+    inline void write_sstring(sstring&& content) {
+        _message->write(bytes_view(reinterpret_cast<const int8_t*>(content.data()), content.size()));
+    }
+};
 using namespace seastar;
 using message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
 struct reply {

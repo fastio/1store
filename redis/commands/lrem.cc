@@ -30,7 +30,7 @@ shared_ptr<abstract_command> lrem::prepare(service::storage_proxy& proxy, reques
     return make_shared<lrem>(std::move(req._command), lists_schema(proxy), std::move(req._args[0]), std::move(req._args[2]), bytes2long(req._args[1]));
 }
 
-future<reply> lrem::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> lrem::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_list(proxy, _schema, _key, fetch_options::all, false, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
@@ -71,12 +71,12 @@ future<reply> lrem::execute(service::storage_proxy& proxy, db::consistency_level
                 try {
                     f.get();
                 } catch(...) {
-                    return reply_builder::build<error_tag>();
+                    return redis_message::err();
                 }
-                return reply_builder::build<number_tag>(static_cast<size_t>(total));
+                return redis_message::make(static_cast<size_t>(total));
             });
         }
-        return reply_builder::build<null_message_tag>();
+        return redis_message::null(); 
     });
 }
 

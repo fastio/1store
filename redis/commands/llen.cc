@@ -22,14 +22,14 @@ shared_ptr<abstract_command> llen::prepare(service::storage_proxy& proxy, reques
     return make_shared<llen>(std::move(req._command), lists_schema(proxy), std::move(req._args[0]));
 }
 
-future<reply> llen::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> llen::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_list(proxy, _schema, _key, fetch_options::values, false, cl, timeout, cs).then([] (auto pd) {
         if (pd && pd->has_data()) {
-            return reply_builder::build<number_tag>(static_cast<size_t>(pd->data().size()));
+            return redis_message::make(static_cast<size_t>(pd->data().size()));
         }
-        return reply_builder::build<null_message_tag>();
+        return redis_message::null();
     });
 }
 }

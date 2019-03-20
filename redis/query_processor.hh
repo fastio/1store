@@ -40,7 +40,7 @@ namespace redis {
 
 struct request;
 struct reply;
-
+class redis_message;
 class query_processor {
     service::storage_proxy& _proxy;
     distributed<database>& _db;
@@ -58,7 +58,7 @@ public:
         return _proxy;
     }
 
-    future<reply> process(request&&, service::client_state&, const timeout_config& config);
+    future<redis_message> process(request&&, service::client_state&, const timeout_config& config);
 
     future<> stop();
 };

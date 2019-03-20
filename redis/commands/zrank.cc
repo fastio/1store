@@ -1,6 +1,5 @@
 #include "redis/commands/zrank.hh"
 #include "redis/commands/unexpected.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "redis/redis_mutation.hh"
@@ -35,7 +34,7 @@ shared_ptr<abstract_command> zrevrank::prepare(service::storage_proxy& proxy, re
     return prepare_impl<zrevrank>(proxy, std::move(req));
 }
 
-future<reply> zrank::execute_impl(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs, bool reversed)
+future<redis_message> zrank::execute_impl(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs, bool reversed)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, fetch_options::all, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs, reversed] (auto pd) {
@@ -54,10 +53,10 @@ future<reply> zrank::execute_impl(service::storage_proxy& proxy, db::consistency
                     }
                 });
                 --rank;
-                return reply_builder::build<number_tag>(rank);
+                return redis_message::make(rank);
             }
         }
-        return reply_builder::build<null_message_tag>();
+        return redis_message::null();
     });
 }
 

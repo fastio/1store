@@ -48,7 +48,7 @@ shared_ptr<abstract_command> rpushx::prepare(service::storage_proxy& proxy, requ
 }
 
 
-future<reply> push::do_execute(service::storage_proxy& proxy,
+future<redis_message> push::do_execute(service::storage_proxy& proxy,
     db::consistency_level cl,
     db::timeout_clock::time_point now,
     const timeout_config& tc,
@@ -57,7 +57,7 @@ future<reply> push::do_execute(service::storage_proxy& proxy,
 {
     return check_exists(proxy, cl, now, tc, cs).then([this, &proxy, cl, now, tc, &cs, left] (auto write) {
         if (write == false) {
-            return reply_builder::build<error_tag>();
+            return redis_message::err();
         }
         auto timeout = now + tc.read_timeout;
         auto total = _data.size();
@@ -66,20 +66,20 @@ future<reply> push::do_execute(service::storage_proxy& proxy,
                 f.get();
             } catch (...) {
                 // FIXME: what kind of exceptions.
-                return reply_builder::build<error_tag>();
+                return redis_message::err();
             }
-            return reply_builder::build<number_tag>(total);
+            return redis_message::ok();
         });
     });
 }
 
 
-future<reply> lpush::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> lpush::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     return do_execute(proxy, cl, now, tc, cs, true);
 }
 
-future<reply> rpush::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> rpush::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     return do_execute(proxy, cl, now, tc, cs, false);
 }
@@ -91,12 +91,12 @@ future<bool> lpushx::check_exists(service::storage_proxy& proxy, db::consistency
     return exists(proxy, _schema, _key, cl, timeout, cs);
 }
 
-future<reply> lpushx::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> lpushx::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     return do_execute(proxy, cl, now, tc, cs, true);
 }
 
-future<reply> rpushx::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> rpushx::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     return do_execute(proxy, cl, now, tc, cs, false);
 }

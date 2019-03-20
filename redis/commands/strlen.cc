@@ -1,6 +1,5 @@
 #include "redis/commands/strlen.hh"
 #include "redis/commands/unexpected.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "timeout_config.hh"
@@ -21,14 +20,14 @@ shared_ptr<abstract_command> strlen::prepare(service::storage_proxy& proxy, requ
     return make_shared<strlen>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]));
 }
 
-future<reply> strlen::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> strlen::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_simple(proxy, _schema, _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            return reply_builder::build<number_tag>(static_cast<size_t>(pd->data_size()));
+            return redis_message::make(static_cast<size_t>(pd->data_size()));
         }
-        return reply_builder::build<number_tag>(size_t { 0 } );
+        return redis_message::make(size_t { 0 } );
     });
 }
 }

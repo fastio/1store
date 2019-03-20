@@ -1,6 +1,5 @@
 #include "redis/commands/ltrim.hh"
 #include "redis/commands/unexpected.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "timeout_config.hh"
@@ -35,7 +34,7 @@ shared_ptr<abstract_command> ltrim::prepare(service::storage_proxy& proxy, reque
     return make_shared<ltrim>(std::move(req._command), lists_schema(proxy), std::move(req._args[0]), begin, end);
 }
 
-future<reply> ltrim::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> ltrim::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_list(proxy, _schema, _key, fetch_options::all, false, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
@@ -67,12 +66,12 @@ future<reply> ltrim::execute(service::storage_proxy& proxy, db::consistency_leve
                 try {
                     f.get();
                 } catch(...) {
-                    return reply_builder::build<error_tag>();
+                    return redis_message::err();
                 }
-                return reply_builder::build<OK_tag>();
+                return redis_message::ok();
             });
         }
-        return reply_builder::build<OK_tag>();
+        return redis_message::ok();
     });
 }
 

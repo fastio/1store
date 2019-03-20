@@ -23,7 +23,7 @@ public:
     {
     }
     ~zrem() {}
-    future<reply> execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs) override;
+    future<redis_message> execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs) override;
 };
 
 class zremrangebyrank : public command_with_single_schema {
@@ -41,7 +41,7 @@ public:
     {
     }
     ~zremrangebyrank() {}
-    future<reply> execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs) override; 
+    future<redis_message> execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs) override; 
 };
 
 class zremrangebyscore : public command_with_single_schema {
@@ -59,7 +59,7 @@ public:
     {
     }
     ~zremrangebyscore() {}
-    future<reply> execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs) override; 
+    future<redis_message> execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs) override; 
 };
 
 }

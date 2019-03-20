@@ -47,7 +47,7 @@ shared_ptr<abstract_command> hvals::prepare(service::storage_proxy& proxy, reque
 shared_ptr<abstract_command> hgetall::prepare(service::storage_proxy& proxy, request&& req) {
     return prepare_impl<hgetall>(proxy, std::move(req));
 }
-future<reply> hget::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> hget::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, _map_keys, fetch_options::values, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
@@ -55,12 +55,12 @@ future<reply> hget::execute(service::storage_proxy& proxy, db::consistency_level
             auto&& vals = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::transformed([this] (auto& data) {
                 return std::move(data.first); 
             }));
-            return reply_builder::build(std::move(vals));
+            return redis_message::make(std::move(vals));
         }
-        return reply_builder::build<null_message_tag>();
+        return redis_message::null();
     });
 }
-future<reply> hall::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> hall::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, _option, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
@@ -84,9 +84,9 @@ future<reply> hall::execute(service::storage_proxy& proxy, db::consistency_level
                     result.emplace_back(data.second);
                 }
             }
-            return reply_builder::build(std::move(result));
+            return redis_message::make(std::move(result));
         }
-        return reply_builder::build<null_message_tag>();
+        return redis_message::null();
     });
 }
 

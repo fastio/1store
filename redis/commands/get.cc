@@ -28,15 +28,15 @@ shared_ptr<abstract_command> get::prepare(service::storage_proxy& proxy, request
     return make_shared<get>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]));
 }
 
-future<reply> get::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> get::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     auto fetched = prefetch_simple(proxy, _schema, _key, cl, timeout, cs);
     return fetched.then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            return reply_builder::build<message_tag>(std::move(pd->_data));
+            return redis_message::make(std::move(pd->_data));
         }
-        return reply_builder::build<null_message_tag>();
+        return redis_message::null();
     });
 }
 
@@ -48,7 +48,7 @@ shared_ptr<abstract_command> getset::prepare(service::storage_proxy& proxy, requ
     return make_shared<getset>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
 }
 
-future<reply> getset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> getset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_simple(proxy, _schema, _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
@@ -56,12 +56,12 @@ future<reply> getset::execute(service::storage_proxy& proxy, db::consistency_lev
             try {
                 f.get();
             } catch(...) {
-                return reply_builder::build<error_tag>();
+                return redis_message::err();
             }
             if (pd && pd->has_data()) {
-                return reply_builder::build<message_tag>(std::move(pd->data()));
+                return redis_message::make(std::move(pd->_data));
             }
-            return reply_builder::build<null_message_tag>();
+            return redis_message::null();
         });
     });
 }
@@ -74,16 +74,16 @@ shared_ptr<abstract_command> mget::prepare(service::storage_proxy& proxy, reques
     return seastar::make_shared<mget>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args));
 }
 
-future<reply> mget::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> mget::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_simple(proxy, _schema, _keys, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
             //FIXME: if key was not exists, we should return nil message to client.
-            auto&& values = boost::copy_range<std::vector<bytes>>(pd->data() | boost::adaptors::transformed([] (auto& p) { return std::move(p.second); }));
-            return reply_builder::build(std::move(values));
+            auto&& values = boost::copy_range<std::vector<std::optional<bytes>>>(pd->data() | boost::adaptors::transformed([] (auto& p) { return std::optional<bytes>(std::move(p.second)); }));
+            return redis_message::make(std::move(values));
         }
-        return reply_builder::build<null_message_tag>();
+        return redis_message::null();
     });
 }
 

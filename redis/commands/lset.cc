@@ -1,6 +1,5 @@
 #include "redis/commands/lset.hh"
 #include "redis/commands/unexpected.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "timeout_config.hh"
@@ -15,7 +14,6 @@
 namespace redis {
 namespace commands {
 
-static logging::logger log("lset");
 shared_ptr<abstract_command> lset::prepare(service::storage_proxy& proxy, request&& req)
 {
     if (req._args_count < 3) {
@@ -24,7 +22,7 @@ shared_ptr<abstract_command> lset::prepare(service::storage_proxy& proxy, reques
     return make_shared<lset>(std::move(req._command), lists_schema(proxy), std::move(req._args[0]), bytes2long(req._args[1]), std::move(req._args[2]));
 }
 
-future<reply> lset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> lset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_list(proxy, _schema, _key, fetch_options::keys, false, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
@@ -35,10 +33,9 @@ future<reply> lset::execute(service::storage_proxy& proxy, db::consistency_level
                 try {
                     f.get();
                 } catch(std::exception& e) {
-                    log.info("set exception: {}", e.what());
-                    return reply_builder::build<null_message_tag>();
+                    return redis_message::null();
                 }
-                return reply_builder::build<OK_tag>();
+                return redis_message::ok();
             });
         }
         std::vector<bytes> data { std::move(_value) };
@@ -46,9 +43,9 @@ future<reply> lset::execute(service::storage_proxy& proxy, db::consistency_level
             try {
                 f.get();
             } catch(...) {
-                return reply_builder::build<null_message_tag>();
+                return redis_message::null();
             }
-            return reply_builder::build<OK_tag>();
+            return redis_message::ok();
         });
     });
 }

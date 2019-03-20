@@ -1,7 +1,6 @@
 #include "redis/commands/set.hh"
 #include "redis/commands/unexpected.hh"
 #include "seastar/core/shared_ptr.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "db/system_keyspace.hh"
@@ -26,16 +25,16 @@ shared_ptr<abstract_command> set::prepare(service::storage_proxy& proxy, request
     return seastar::make_shared<set> (std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
 }
 
-future<reply> set::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> set::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
     return redis::write_mutation(proxy, redis::make_simple(_schema, _key, std::move(_data)), cl, timeout, cs).then_wrapped([this] (auto f) {
         try {
             f.get();
         } catch (std::exception& e) {
-            return reply_builder::build<error_tag>();
+            return redis_message::err();
         }
-        return reply_builder::build<ok_tag>();
+        return redis_message::one();
     });
 }
 
@@ -51,7 +50,7 @@ shared_ptr<abstract_command> mset::prepare(service::storage_proxy& proxy, reques
     return seastar::make_shared<mset> (std::move(req._command), simple_objects_schema(proxy), std::move(data));
 }
 
-future<reply> mset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> mset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
     auto mutations = boost::copy_range<std::vector<seastar::lw_shared_ptr<redis_mutation<bytes>>>>(_datas | boost::adaptors::transformed([this] (auto& data) {
@@ -61,9 +60,9 @@ future<reply> mset::execute(service::storage_proxy& proxy, db::consistency_level
         try {
             f.get();
         } catch (std::exception& e) {
-            return reply_builder::build<error_tag>();
+            return redis_message::err();
         }
-        return reply_builder::build<OK_tag>();
+        return redis_message::ok();
     });
 }
 }

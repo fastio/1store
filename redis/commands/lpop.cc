@@ -33,16 +33,16 @@ shared_ptr<abstract_command> rpop::prepare(service::storage_proxy& proxy, reques
 {
     return prepare_impl<rpop>(proxy, std::move(req));
 }
-future<reply> lpop::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> lpop::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     return do_execute(proxy, cl, now, tc, cs, true);
 }
-future<reply> rpop::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> rpop::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     return do_execute(proxy, cl, now, tc, cs, false);
 }
 
-future<reply> pop::do_execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs, bool left)
+future<redis_message> pop::do_execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs, bool left)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_list(proxy, _schema, _key, fetch_options::all, !left, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs, left] (auto pd) {
@@ -59,12 +59,12 @@ future<reply> pop::do_execute(service::storage_proxy& proxy, db::consistency_lev
                 try {
                     f.get();
                 } catch(...) {
-                    return reply_builder::build<error_tag>();
+                    return redis_message::err();
                 }
-                return reply_builder::build<message_tag>(*value);
+                return redis_message::make(*value);
             });
         }
-        return reply_builder::build<null_message_tag>();
+        return redis_message::null();
     });
 }
 }

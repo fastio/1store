@@ -32,6 +32,7 @@
 #include "redis/commands/zrangebyscore.hh"
 #include "redis/commands/zrank.hh"
 #include "redis/commands/zrem.hh"
+
 namespace redis {
 shared_ptr<abstract_command> command_factory::create(service::storage_proxy& proxy, request&& req)
 {

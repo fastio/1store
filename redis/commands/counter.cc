@@ -1,6 +1,5 @@
 #include "redis/commands/counter.hh"
 #include "redis/commands/unexpected.hh"
-#include "redis/reply_builder.hh"
 #include "redis/request.hh"
 #include "redis/reply.hh"
 #include "redis/redis_mutation.hh"
@@ -44,14 +43,14 @@ shared_ptr<abstract_command> counter::prepare(service::storage_proxy& proxy, dec
     return counter_by_prepare_impl(proxy, std::move(req), false);
 }
 
-future<reply> counter::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+future<redis_message> counter::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_simple(proxy, _schema, _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         long result = 0;
         if (pd && pd->has_data()) {
             if (is_number(pd->_data) == false) {
-                return reply_builder::build<error_message_tag>("-ERR value is not an integer or out of range\r\n");
+                return redis_message::make(bytes("-ERR value is not an integer or out of range\r\n"));
             }
             result = bytes2long(pd->_data);
         }
@@ -62,9 +61,9 @@ future<reply> counter::execute(service::storage_proxy& proxy, db::consistency_le
             try {
                 f.get();
             } catch(...) {
-                return reply_builder::build<error_tag>();
+                return redis_message::err(); 
             }
-            return reply_builder::build<counter_tag>(result);
+            return redis_message::make(result);
         });
     });
 }
