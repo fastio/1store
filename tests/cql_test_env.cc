@@ -53,7 +53,8 @@
 #include "db/system_distributed_keyspace.hh"
 #include "redis/redis_keyspace.hh"
 #include "redis/query_processor.hh"
-
+#include "tests/redis_protocol_parser.hh"
+#include "transport/redis_server.hh"
 using namespace std::chrono_literals;
 
 namespace sstables {
@@ -138,6 +139,27 @@ public:
         return local_qp().process(text, *qs, cql3::query_options::DEFAULT).finally([qs, this] {
             _core_local.local().client_state.merge(qs->get_client_state());
         });
+    }
+    
+    virtual future<redis::redis_message> execute_redis_command(const sstring& text) override {
+        auto make_timeout_config = [] () auto {
+            timeout_config tc;
+            tc.read_timeout = 1000 * 1ms; 
+            tc.write_timeout = 1000 * 1ms; 
+            tc.range_read_timeout = 2000 * 1ms; 
+            tc.counter_write_timeout = 2000 * 1ms; 
+            tc.truncate_timeout = 1000 * 1ms; 
+            tc.cas_timeout = 1000 * 1ms; 
+            tc.other_timeout = 1000 * 1ms; 
+            return tc;
+        };
+        /*
+        redis_transport::redis_server_config rsc;
+        rsc.timeout_config = make_timeout_config();
+        rsc.max_request_size = _db->local().get_available_memory() / 10;
+        */ 
+        auto req = make_redis_parser()->parse_as_request(text);
+        return redis::get_local_query_processor().process(std::move(req), _core_local.local().client_state, make_timeout_config()).finally([this] {});
     }
 
     virtual future<::shared_ptr<cql_transport::messages::result_message>> execute_cql(
@@ -485,6 +507,26 @@ future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func, const d
 
 future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func) {
     return do_with_cql_env_thread(std::move(func), db::config{});
+}
+
+future<> do_with_redis_env(std::function<future<>(cql_test_env&)> func, const db::config& cfg_in) {
+    return single_node_cql_env::do_with(func, cfg_in, true);
+}
+
+future<> do_with_redis_env(std::function<future<>(cql_test_env&)> func) {
+    return do_with_redis_env(std::move(func), db::config{});
+}
+
+future<> do_with_redis_env_thread(std::function<void(cql_test_env&)> func, const db::config& cfg_in) {
+    return single_node_cql_env::do_with([func = std::move(func)] (auto& e) {
+        return seastar::async([func = std::move(func), &e] {
+            return func(e);
+        });
+    }, cfg_in, true);
+}
+
+future<> do_with_redis_env_thread(std::function<void(cql_test_env&)> func) {
+    return do_with_redis_env_thread(std::move(func), db::config{});
 }
 
 class storage_service_for_tests::impl {

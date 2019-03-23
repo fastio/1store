@@ -356,6 +356,7 @@ scylla_tests = [
     'tests/json_test',
     'tests/auth_passwords_test',
     'tests/multishard_mutation_query_test',
+    'tests/redis/kv_test',
 ]
 
 perf_tests = [
@@ -364,6 +365,7 @@ perf_tests = [
     'tests/perf/perf_mutation_fragment',
     'tests/perf/perf_idl',
 ]
+
 
 apps = [
     'pedis',
@@ -798,6 +800,7 @@ idls = ['idl/gossip_digest.idl.hh',
 
 scylla_tests_dependencies = scylla_core + idls + [
     'tests/cql_test_env.cc',
+    'tests/redis_protocol_parser.cc',
     'tests/cql_assertions.cc',
     'tests/result_set_assertions.cc',
     'tests/mutation_source_test.cc',
