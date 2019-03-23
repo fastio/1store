@@ -55,6 +55,7 @@
 #include "redis/query_processor.hh"
 #include "tests/redis_protocol_parser.hh"
 #include "transport/redis_server.hh"
+#include "log.hh"
 using namespace std::chrono_literals;
 
 namespace sstables {
@@ -64,7 +65,7 @@ future<> await_background_jobs_on_all_shards();
 }
 
 static const sstring testing_superuser = "tester";
-
+static logging::logger envlog("cql_test_env");
 static future<> tst_init_ms_fd_gossiper(db::seed_provider_type seed_provider, sstring cluster_name = "Test Cluster") {
     return gms::get_failure_detector().start().then([seed_provider, cluster_name] {
         // Init gossiper
@@ -122,6 +123,23 @@ private:
         }
         return ::make_shared<service::query_state>(_core_local.local().client_state);
     }
+    auto split(const sstring& v) {
+        if (v.empty()) {
+            return std::vector<bytes>();
+        }    
+        std::vector<bytes> result;
+        std::size_t prev = 0; 
+        for (std::size_t i = 0; i < v.size(); ++i) {
+            if (v[i] == ' ') {
+                auto token = v.substr(prev, i - prev);
+                result.emplace_back(bytes(reinterpret_cast<const int8_t*>(token.data()), token.size()));
+                prev = i + 1; 
+            }    
+        }    
+        auto token = v.substr(prev, v.size() - prev);
+        result.emplace_back(bytes(reinterpret_cast<const int8_t*>(token.data()), token.size()));
+        return std::move(result);
+    }
 public:
     single_node_cql_env(
             ::shared_ptr<distributed<database>> db,
@@ -153,13 +171,15 @@ public:
             tc.other_timeout = 1000 * 1ms; 
             return tc;
         };
-        /*
-        redis_transport::redis_server_config rsc;
-        rsc.timeout_config = make_timeout_config();
-        rsc.max_request_size = _db->local().get_available_memory() / 10;
-        */ 
-        auto req = make_redis_parser()->parse_as_request(text);
-        return redis::get_local_query_processor().process(std::move(req), _core_local.local().client_state, make_timeout_config()).finally([this] {});
+        auto tokens = split(text);
+        if (tokens.size() > 1) {
+            redis::request req;
+            req._command = std::move(tokens[0]);
+            tokens.erase(tokens.begin(), tokens.begin() + 1);
+            req._args = std::move(tokens);
+            return redis::get_local_query_processor().process(std::move(req), _core_local.local().client_state, make_timeout_config());
+        }
+        return redis::redis_message::make(bytes("unexpected"));
     }
 
     virtual future<::shared_ptr<cql_transport::messages::result_message>> execute_cql(
@@ -410,11 +430,9 @@ public:
             cql3::query_processor::memory_config qp_mcfg = {memory::stats().total_memory() / 256, memory::stats().total_memory() / 2560};
             qp.start(std::ref(proxy), std::ref(*db), qp_mcfg).get();
             auto stop_qp = defer([&qp] { qp.stop().get(); });
-            if (load_redis) { 
-                auto& rqp = redis::get_query_processor();
-                rqp.start(std::ref(proxy), std::ref(*db)).get();
-                auto stop_rqp = defer([&rqp] { rqp.stop().get(); });
-            }
+            auto& rqp = redis::get_query_processor();
+            rqp.start(std::ref(proxy), std::ref(*db)).get();
+            auto stop_rqp = defer([&rqp] { rqp.stop().get(); });
             bm.start(std::ref(qp)).get();
             auto stop_bm = defer([&bm] { bm.stop().get(); });
 

@@ -61,7 +61,9 @@ public:
 namespace db {
     class config;
 }
-
+namespace redis {
+    class request;
+}
 class cql_test_env {
 public:
     virtual ~cql_test_env() {};
