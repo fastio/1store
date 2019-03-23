@@ -51,6 +51,8 @@
 #include "auth/service.hh"
 #include "db/system_keyspace.hh"
 #include "db/system_distributed_keyspace.hh"
+#include "redis/redis_keyspace.hh"
+#include "redis/query_processor.hh"
 
 using namespace std::chrono_literals;
 
@@ -291,8 +293,8 @@ public:
         return execute_cql(query).discard_result();
     }
 
-    static future<> do_with(std::function<future<>(cql_test_env&)> func, const db::config& cfg_in) {
-        return seastar::async([cfg_in, func] {
+    static future<> do_with(std::function<future<>(cql_test_env&)> func, const db::config& cfg_in, bool load_redis) {
+        return seastar::async([cfg_in, func, load_redis] {
             logalloc::prime_segment_pool(memory::stats().total_memory(), memory::min_free_memory()).get();
             bool old_active = false;
             if (!active.compare_exchange_strong(old_active, true)) {
@@ -386,7 +388,11 @@ public:
             cql3::query_processor::memory_config qp_mcfg = {memory::stats().total_memory() / 256, memory::stats().total_memory() / 2560};
             qp.start(std::ref(proxy), std::ref(*db), qp_mcfg).get();
             auto stop_qp = defer([&qp] { qp.stop().get(); });
-
+            if (load_redis) { 
+                auto& rqp = redis::get_query_processor();
+                rqp.start(std::ref(proxy), std::ref(*db)).get();
+                auto stop_rqp = defer([&rqp] { rqp.stop().get(); });
+            }
             bm.start(std::ref(qp)).get();
             auto stop_bm = defer([&bm] { bm.stop().get(); });
 
@@ -441,6 +447,10 @@ public:
             auto stop_view_update_generator = defer([view_update_generator] {
                 view_update_generator->stop().get();
             });
+            if (load_redis) {
+                redis::redis_keyspace_helper::create_if_not_exists(cfg).get();
+            }
+
             single_node_cql_env env(db, auth_service, view_builder, view_update_generator);
             env.start().get();
             auto stop_env = defer([&env] { env.stop().get(); });
@@ -458,7 +468,7 @@ const char* single_node_cql_env::ks_name = "ks";
 std::atomic<bool> single_node_cql_env::active = { false };
 
 future<> do_with_cql_env(std::function<future<>(cql_test_env&)> func, const db::config& cfg_in) {
-    return single_node_cql_env::do_with(func, cfg_in);
+    return single_node_cql_env::do_with(func, cfg_in, false);
 }
 
 future<> do_with_cql_env(std::function<future<>(cql_test_env&)> func) {
@@ -470,7 +480,7 @@ future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func, const d
         return seastar::async([func = std::move(func), &e] {
             return func(e);
         });
-    }, cfg_in);
+    }, cfg_in, false);
 }
 
 future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func) {
