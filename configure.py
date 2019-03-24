@@ -356,7 +356,6 @@ scylla_tests = [
     'tests/json_test',
     'tests/auth_passwords_test',
     'tests/multishard_mutation_query_test',
-    'tests/redis/kv_test',
 ]
 
 perf_tests = [
@@ -367,11 +366,14 @@ perf_tests = [
 ]
 
 
+redis_tests = [
+    'tests/redis/kv_test',
+]
 apps = [
     'pedis',
 ]
 
-tests = scylla_tests + perf_tests
+tests = scylla_tests + perf_tests + redis_tests
 
 other = [
     'iotune',
@@ -885,6 +887,14 @@ perf_tests_seastar_deps = [
 
 for t in perf_tests:
     deps[t] = [t + '.cc'] + scylla_tests_dependencies + perf_tests_seastar_deps
+
+for t in redis_tests:
+    deps[t] = [t + '.cc']
+    if t not in tests_not_using_seastar_test_framework:
+        deps[t] += scylla_tests_dependencies
+        deps[t] += scylla_tests_seastar_deps
+    else:
+        deps[t] += scylla_core + idls + ['tests/cql_test_env.cc']
 
 deps['tests/sstable_test'] += ['tests/sstable_datafile_test.cc', 'tests/sstable_utils.cc', 'tests/normalizing_reader.cc']
 deps['tests/mutation_reader_test'] += ['tests/sstable_utils.cc']
