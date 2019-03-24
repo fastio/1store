@@ -53,7 +53,6 @@
 #include "db/system_distributed_keyspace.hh"
 #include "redis/redis_keyspace.hh"
 #include "redis/query_processor.hh"
-#include "tests/redis_protocol_parser.hh"
 #include "transport/redis_server.hh"
 #include "log.hh"
 using namespace std::chrono_literals;
@@ -159,7 +158,7 @@ public:
         });
     }
     
-    virtual future<redis::redis_message> execute_redis_command(const sstring& text) override {
+    virtual future<redis::redis_message> execute_redis(const sstring& text) override {
         auto make_timeout_config = [] () auto {
             timeout_config tc;
             tc.read_timeout = 1000 * 1ms; 

@@ -26,7 +26,7 @@
 #include "bytes.hh"
 #include "core/shared_ptr.hh"
 #include "core/future.hh"
-
+#include "transport/redis_server.hh"
 class rows_assertions {
     shared_ptr<cql_transport::messages::result_message::rows> _rows;
 public:
@@ -51,6 +51,79 @@ public:
 };
 
 result_msg_assertions assert_that(shared_ptr<cql_transport::messages::result_message> msg);
+
+struct status_tag {};
+struct error_tag {};
+struct bulk_tag {};
+class redis_reply_assertions {
+    std::optional<bytes> _status;
+    std::optional<bytes> _error;
+    std::optional<bytes> _bulk;
+    std::optional<long> _integer;
+    using bulks_type = std::optional<std::vector<std::optional<bytes>>>;
+    bulks_type _bulks;
+public:
+    redis_reply_assertions()
+        : _status(std::optional<bytes>())
+        , _error(std::optional<bytes>())
+        , _bulk(std::optional<bytes>())
+        , _integer(std::optional<long>())
+        , _bulks(bulks_type())
+    {
+    }
+    redis_reply_assertions(status_tag, std::optional<bytes> status)
+        : _status(status)
+        , _error(std::optional<bytes>())
+        , _bulk(std::optional<bytes>())
+        , _integer(std::optional<long>())
+        , _bulks(bulks_type())
+    {
+    }
+    redis_reply_assertions(error_tag, std::optional<bytes> error)
+        : _status(std::optional<bytes>())
+        , _error(error)
+        , _bulk(std::optional<bytes>())
+        , _integer(std::optional<long>())
+        , _bulks(bulks_type())
+    {
+    }
+    redis_reply_assertions(bulk_tag, std::optional<bytes> bulk)
+        : _status(std::optional<bytes>())
+        , _error(std::optional<bytes>())
+        , _bulk(bulk)
+        , _integer(std::optional<long>())
+        , _bulks(bulks_type())
+    {
+    }
+    redis_reply_assertions(std::optional<long> integer)
+        : _status(std::optional<bytes>())
+        , _error(std::optional<bytes>())
+        , _bulk(std::optional<bytes>())
+        , _integer(integer)
+        , _bulks(bulks_type())
+    {
+    }
+    redis_reply_assertions(bulks_type bulks) 
+        : _status(std::optional<bytes>())
+        , _error(std::optional<bytes>())
+        , _bulk(std::optional<bytes>())
+        , _integer(std::optional<long>())
+        , _bulks(bulks)
+    {
+    }
+    redis_reply_assertions with_status(bytes status);
+    redis_reply_assertions with_error(bytes error);
+    redis_reply_assertions with_integer(int i);
+    redis_reply_assertions with_bulk(std::initializer_list<bytes_opt> item);
+    redis_reply_assertions with_bulks(std::initializer_list<std::initializer_list<bytes_opt>> items);
+};
+class redis_result_assertions {
+    redis_transport::redis_server::result _result;
+public:
+    redis_result_assertions(redis_transport::redis_server::result&& result) : _result(std::move(result)) {};
+    redis_reply_assertions is_redis_reply();
+};
+redis_result_assertions assert_that(redis_transport::redis_server::result&& result);
 
 template<typename... T>
 void assert_that_failed(future<T...>& f)

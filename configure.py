@@ -800,7 +800,6 @@ idls = ['idl/gossip_digest.idl.hh',
 
 scylla_tests_dependencies = scylla_core + idls + [
     'tests/cql_test_env.cc',
-    'tests/redis_protocol_parser.cc',
     'tests/cql_assertions.cc',
     'tests/result_set_assertions.cc',
     'tests/mutation_source_test.cc',

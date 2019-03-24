@@ -26,11 +26,9 @@
 #include "transport/messages/result_message.hh"
 #include "to_string.hh"
 #include "bytes.hh"
-
 static inline void fail(sstring msg) {
     throw std::runtime_error(msg);
 }
-
 rows_assertions::rows_assertions(shared_ptr<cql_transport::messages::result_message::rows> rows)
     : _rows(rows)
 { }
@@ -150,4 +148,100 @@ rows_assertions rows_assertions::with_serialized_columns_count(size_t columns_co
         fail(sprint("Expected %d serialized columns(s) but got %d", columns_count, serialized_column_count));
     }
     return {*this};
+}
+
+redis_reply_assertions parse_2_status(bytes_view v) {
+    size_t prev = 1;
+    for (size_t i = 1; i < v.size(); ++i) {
+        auto c = static_cast<const char>(v[i]);
+        if (c == '\r' && ((i + 1 < v.size()) && static_cast<const char>(v[i + 1]) == '\n')) {
+            return redis_reply_assertions(status_tag {}, std::optional<bytes>(bytes(v.begin() + prev, i - prev)));
+        }
+    }
+    fail("got unexpected status");
+    // Make compiler happy.
+    return redis_reply_assertions();
+}
+redis_reply_assertions parse_2_error(bytes_view v) {
+    size_t prev = 1;
+    for (size_t i = 1; i < v.size(); ++i) {
+        auto c = static_cast<const char>(v[i]);
+        if (c == '\r' && ((i + 1 < v.size()) && static_cast<const char>(v[i + 1]) == '\n')) {
+            return redis_reply_assertions(error_tag {}, std::optional<bytes>(bytes(v.begin() + prev, i - prev)));
+        }
+    }
+    fail("got unexpected status");
+    // Make compiler happy.
+    return redis_reply_assertions();
+}
+redis_reply_assertions parse_2_bulk(bytes_view v) {
+    return redis_reply_assertions();
+}
+redis_reply_assertions parse_2_bulks(bytes_view v) {
+    return redis_reply_assertions();
+}
+
+redis_reply_assertions parse_2_integer(bytes_view v) {
+    auto bytes2long = [] (const bytes& b) {
+        try {
+            return std::atol(make_sstring(b).data());
+        } catch (std::exception const & e) {
+            throw e;
+        }   
+    };
+
+    size_t prev = 1;
+    for (size_t i = 1; i < v.size(); ++i) {
+        auto c = static_cast<const char>(v[i]);
+        if (c == '\r' && ((i + 1 < v.size()) && static_cast<const char>(v[i + 1]) == '\n')) {
+            auto s = bytes(v.begin() + prev, i - prev);
+            return redis_reply_assertions(std::optional<long>(bytes2long(s)));
+        }
+    }
+    fail("unexpected integer");
+    // Make compiler happy.
+    return redis_reply_assertions();
+}
+
+
+redis_result_assertions assert_that(redis_transport::redis_server::result&& r) {
+    if (!r._data) {
+        fail("redis reply is null");
+    }
+    return redis_result_assertions(std::move(r)); 
+}
+
+redis_reply_assertions redis_result_assertions::is_redis_reply() {
+    auto v = _result._data->ostream().linearize();
+    if (v.size() == 0) {
+        fail("reply is null");
+    }
+    auto first = static_cast<const char>(v[0]);
+    switch (first) {
+        case '+':
+            return parse_2_status(v);
+        case '-':
+            return parse_2_error(v);
+        case ':':
+            return parse_2_integer(v);
+        case '$':
+            return parse_2_bulk(v);
+        case '*':
+            return parse_2_bulks(v);
+    };
+    fail("unexpected redis reply");
+    // Make compiler happy.
+    return redis_reply_assertions();
+}
+
+redis_reply_assertions redis_reply_assertions::with_status(bytes status) {
+    if (!_status) {
+        fail("Expected status");
+    }
+    if (*_status != status) {
+        auto es = sstring(reinterpret_cast<const char*>((*_status).data()), (*_status).size());
+        auto s = sstring(reinterpret_cast<const char*>(status.data()), status.size());
+        fail(sprint("Expected status %s, but got %s", es, s));
+    }
+    return *this;
 }

@@ -75,6 +75,16 @@ private:
         _message->write(b);
     }
 public:
+    redis_message(const redis_message&) = delete;
+    redis_message& operator=(const redis_message&) = delete;
+    redis_message(redis_message&& o) noexcept : _message(std::move(o._message)) {}
+    redis_message& operator=(redis_message&& o) noexcept {
+        if (this != &o) {
+            _message = std::move(o._message);
+        }
+        return *this;
+    }
+    
     bytes_ostream& ostream() { return *_message; }
     static future<redis_message> make(const bytes& content) {
         redis_message m;
