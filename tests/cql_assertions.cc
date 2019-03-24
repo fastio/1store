@@ -26,6 +26,8 @@
 #include "transport/messages/result_message.hh"
 #include "to_string.hh"
 #include "bytes.hh"
+#include "log.hh"
+static logging::logger tlog("redis_log");
 static inline void fail(sstring msg) {
     throw std::runtime_error(msg);
 }
@@ -175,19 +177,48 @@ redis_reply_assertions parse_2_error(bytes_view v) {
     return redis_reply_assertions();
 }
 redis_reply_assertions parse_2_bulk(bytes_view v) {
+    auto bytes2long = [] (const bytes& b) -> long {
+        try {
+            return std::atol(make_sstring(b).data());
+        } catch (std::exception const & e) {
+            fail(e.what());
+        }
+        return 0;
+    };
+    size_t prev = 1;
+    for (size_t i = 1; i < v.size(); ++i) {
+        auto c = static_cast<const char>(v[i]);
+        if (c == '\r' && ((i + 1 < v.size()) && static_cast<const char>(v[i + 1]) == '\n')) {
+            auto s = bytes(v.begin() + prev, i - prev);
+            auto bulk_size = bytes2long(s);
+            if (bulk_size == -1) {
+                return redis_reply_assertions(bulk_tag {}, std::optional<bytes>(""));
+            }
+            if (bulk_size < 0) {
+                fail(sprint("unexpected bulk size %ld", bulk_size));
+            }
+            if (static_cast<size_t>(bulk_size) + i + 2 >= v.size()) {
+                fail(sprint("unexpected bulk size %ld, v size %ld", bulk_size, v.size()));
+            }
+            return redis_reply_assertions(bulk_tag {}, std::optional<bytes>(bytes(v.begin() + prev + i + 1, static_cast<size_t>(bulk_size))));
+        }
+    }
+    fail("got unexpected bulk");
     return redis_reply_assertions();
 }
+
 redis_reply_assertions parse_2_bulks(bytes_view v) {
     return redis_reply_assertions();
 }
 
 redis_reply_assertions parse_2_integer(bytes_view v) {
-    auto bytes2long = [] (const bytes& b) {
+    auto bytes2long = [] (const bytes& b) -> long {
         try {
             return std::atol(make_sstring(b).data());
         } catch (std::exception const & e) {
-            throw e;
-        }   
+            fail(e.what());
+        }
+        return 0;
     };
 
     size_t prev = 1;
@@ -213,6 +244,7 @@ redis_result_assertions assert_that(redis_transport::redis_server::result&& r) {
 
 redis_reply_assertions redis_result_assertions::is_redis_reply() {
     auto v = _result._data->ostream().linearize();
+    tlog.info("redis reply = {}", sstring(reinterpret_cast<const char*>(v.data()), v.size()));
     if (v.size() == 0) {
         fail("reply is null");
     }
@@ -236,12 +268,47 @@ redis_reply_assertions redis_result_assertions::is_redis_reply() {
 
 redis_reply_assertions redis_reply_assertions::with_status(bytes status) {
     if (!_status) {
-        fail("Expected status");
+        fail("Status is null");
     }
     if (*_status != status) {
         auto es = sstring(reinterpret_cast<const char*>((*_status).data()), (*_status).size());
         auto s = sstring(reinterpret_cast<const char*>(status.data()), status.size());
-        fail(sprint("Expected status %s, but got %s", es, s));
+        fail(sprint("Expected status %s, but got %s", s, es));
+    }
+    return *this;
+}
+
+redis_reply_assertions redis_reply_assertions::with_error(bytes error) {
+    if (!_error) {
+        fail("Error is null");
+    }
+    if (*_error != error) {
+        auto ee = sstring(reinterpret_cast<const char*>((*_error).data()), (*_error).size());
+        auto e = sstring(reinterpret_cast<const char*>(error.data()), error.size());
+        fail(sprint("Expected error %s, but got %s", e, ee));
+    }
+    return *this;
+}
+
+redis_reply_assertions redis_reply_assertions::with_bulk(bytes bulk) {
+    if (!_bulk) {
+        fail("Bulk is null");
+    }
+    if (*_bulk != bulk) {
+        auto eb = sstring(reinterpret_cast<const char*>(bulk.data()), bulk.size());
+        auto b = sstring(reinterpret_cast<const char*>((*_bulk).data()), (*_bulk).size());
+        fail(sprint("Expected bulk %s, but got %s", eb, b));
+    }
+    return *this;
+}
+
+redis_reply_assertions redis_reply_assertions::is_empty() {
+    if (!_bulk) {
+        fail("Bulk is null");
+    }
+    if ((*_bulk).size() > 0) {
+        auto b = sstring(reinterpret_cast<const char*>((*_bulk).data()), (*_bulk).size());
+        fail(sprint("Expected empty bulk, but got %s", b));
     }
     return *this;
 }

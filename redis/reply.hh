@@ -93,6 +93,11 @@ public:
         m.write(bytes_view(msg_crlf));
         return make_ready_future<redis_message>(std::move(m));
     }
+    static future<redis_message> make_exception(bytes&& content) {
+        redis_message m;
+        m.write(bytes_view(content));
+        return make_ready_future<redis_message>(std::move(m));
+    }
     static future<redis_message> make(bytes&& content) {
         redis_message m;
         m.write_sstring(sstring(sprint("$%d\r\n", content.size())));
@@ -163,12 +168,5 @@ private:
     inline void write_sstring(sstring&& content) {
         _message->write(bytes_view(reinterpret_cast<const int8_t*>(content.data()), content.size()));
     }
-};
-using namespace seastar;
-using message_ptr = foreign_ptr<lw_shared_ptr<scattered_message<char>>>;
-struct reply {
-    reply() : _reply(nullptr) {}
-    reply(message_ptr reply) : _reply(std::move(reply)) {}
-    message_ptr _reply;
 };
 }

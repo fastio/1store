@@ -111,10 +111,11 @@ public:
         , _bulks(bulks)
     {
     }
+    redis_reply_assertions is_empty();
     redis_reply_assertions with_status(bytes status);
     redis_reply_assertions with_error(bytes error);
     redis_reply_assertions with_integer(int i);
-    redis_reply_assertions with_bulk(std::initializer_list<bytes_opt> item);
+    redis_reply_assertions with_bulk(bytes);
     redis_reply_assertions with_bulks(std::initializer_list<std::initializer_list<bytes_opt>> items);
 };
 class redis_result_assertions {

@@ -21,8 +21,8 @@ namespace commands {
 
 shared_ptr<abstract_command> get::prepare(service::storage_proxy& proxy, request&& req)
 {
-    if (req._args_count < 1) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+    if (req._args_count != 1) {
+        return unexpected::prepare(std::move(req._command), std::move(to_bytes(sprint("-wrong number of arguments (given %ld, expected 1)\r\n", req._args_count))));
     }
     return make_shared<get>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]));
 }

@@ -9,10 +9,7 @@ namespace commands {
 class unexpected : public abstract_command {
     bytes _exception_message;
     bytes default_exception_message() { 
-        bytes m {"-ERR Unknown or disabled command '"};
-        m.append(_name.data(), _name.size());
-        static bytes tail {"'\r\n"};
-        m.append(tail.data(), tail.size());
+        bytes m {"ERR Unknown or disabled command'"};
         return m;
     }
 public:
@@ -26,7 +23,7 @@ public:
         return make_shared<unexpected>(std::move(name), std::move(message));
     }
     virtual future<redis_message> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config&, service::client_state&) override {
-        return redis_message::make(std::move(_exception_message)); 
+        return redis_message::make_exception(std::move(_exception_message)); 
     }
 };
 }

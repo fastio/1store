@@ -171,11 +171,12 @@ public:
             return tc;
         };
         auto tokens = split(text);
-        if (tokens.size() > 1) {
+        if (tokens.size() > 0) {
             redis::request req;
             req._command = std::move(tokens[0]);
             tokens.erase(tokens.begin(), tokens.begin() + 1);
             req._args = std::move(tokens);
+            req._args_count = req._args.size();
             return redis::get_local_query_processor().process(std::move(req), _core_local.local().client_state, make_timeout_config());
         }
         return redis::redis_message::make(bytes("unexpected"));
