@@ -16,7 +16,7 @@ namespace commands {
 
 shared_ptr<abstract_command> set::prepare(service::storage_proxy& proxy, request&& req)
 {
-    if (req._args_count < 2) {
+    if (req._args_count != 2) {
         return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
     }
     else if (req._args_count > 2) {
@@ -34,7 +34,7 @@ future<redis_message> set::execute(service::storage_proxy& proxy, db::consistenc
         } catch (std::exception& e) {
             return redis_message::err();
         }
-        return redis_message::one();
+        return redis_message::ok();
     });
 }
 
