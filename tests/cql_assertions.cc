@@ -26,8 +26,8 @@
 #include "transport/messages/result_message.hh"
 #include "to_string.hh"
 #include "bytes.hh"
-#include "log.hh"
-static logging::logger tlog("redis_log");
+//#include "log.hh"
+//static logging::logger tlog("redis_log");
 static inline void fail(sstring msg) {
     throw std::runtime_error(msg);
 }
@@ -244,7 +244,7 @@ redis_result_assertions assert_that(redis_transport::redis_server::result&& r) {
 
 redis_reply_assertions redis_result_assertions::is_redis_reply() {
     auto v = _result._data->ostream().linearize();
-    tlog.info("redis reply = {}", sstring(reinterpret_cast<const char*>(v.data()), v.size()));
+    //tlog.info("redis reply = {}", sstring(reinterpret_cast<const char*>(v.data()), v.size()));
     if (v.size() == 0) {
         fail("reply is null");
     }
