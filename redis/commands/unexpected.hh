@@ -19,6 +19,12 @@ public:
     static shared_ptr<abstract_command> prepare(bytes&& name) {
         return make_shared<unexpected>(std::move(name));
     }
+    static shared_ptr<abstract_command> make_wrong_arguments_exception(bytes&& name, size_t except, size_t given) {
+        return make_shared<unexpected>(std::move(name), std::move(to_bytes(sprint("-wrong number of arguments (given %ld, expected %ld)\r\n", given, except))));
+    }
+    static shared_ptr<abstract_command> make_wrong_arguments_exception(bytes&& name, bytes&& message) {
+        return make_shared<unexpected>(std::move(name), std::move(message));
+    }
     static shared_ptr<abstract_command> prepare(bytes&& name, bytes&& message) {
         return make_shared<unexpected>(std::move(name), std::move(message));
     }

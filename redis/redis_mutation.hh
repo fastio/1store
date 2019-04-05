@@ -46,16 +46,18 @@ class precision_time {
 };  
 
 using partition_dead_tag = char;  
-
+struct partition_ttl_tag {};
 template<typename ContainerType>
 struct redis_mutation {
     const schema_ptr _schema;
     bytes _partition_key;
     ContainerType _data;
-    redis_mutation(const schema_ptr schema, const bytes& key, ContainerType&& data)
+    long _ttl = 0;
+    redis_mutation(const schema_ptr schema, const bytes& key, ContainerType&& data, long ttl = 0)
         : _schema(schema)
         , _partition_key(key)
         , _data(std::move(data))
+        , _ttl(ttl)
     {
     }
     ~redis_mutation()
@@ -64,6 +66,7 @@ struct redis_mutation {
     const schema_ptr schema() const { return _schema; }
     ContainerType& data() { return _data; }
     bytes& key() { return _partition_key; }
+    long ttl() { return _ttl; }
 };
 
 struct list_cells {
@@ -126,12 +129,17 @@ struct zset_dead_cells {
 using zset_mutation = redis_mutation<zset_cells>;
 using zset_dead_cells_mutation = redis_mutation<zset_dead_cells>;
 
-static inline seastar::lw_shared_ptr<redis_mutation<bytes>> make_simple(const schema_ptr schema, const bytes& key, bytes&& data) {
-    return seastar::make_lw_shared<redis_mutation<bytes>>(schema, key, std::move(data));
+static inline seastar::lw_shared_ptr<redis_mutation<bytes>> make_simple(const schema_ptr schema, const bytes& key, bytes&& data, long ttl = 0) {
+    return seastar::make_lw_shared<redis_mutation<bytes>>(schema, key, std::move(data), ttl);
 }
 static inline seastar::lw_shared_ptr<redis_mutation<partition_dead_tag>> make_dead(const schema_ptr schema, const bytes& key) {
     return seastar::make_lw_shared<redis_mutation<partition_dead_tag>>(schema, key, std::move(partition_dead_tag { 0 }));
 }
+/*
+static inline seastar::lw_shared_ptr<redis_mutation<partition_ttl_tag>> make_dead(const schema_ptr schema, const bytes& key, long ttl) {
+    return seastar::make_lw_shared<redis_mutation<partition_ttl_tag>>(schema, key, std::move(partition_dead_tag { 0 }));
+}
+*/
 static inline seastar::lw_shared_ptr<list_mutation> make_list_cells(const schema_ptr schema, const bytes& key, std::vector<bytes>&& cells, bool reversed) {
     return seastar::make_lw_shared<list_mutation> (schema, key, std::move(list_cells (std::move(cells), reversed)));
 }

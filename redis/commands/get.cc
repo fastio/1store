@@ -42,7 +42,7 @@ future<redis_message> get::execute(service::storage_proxy& proxy, db::consistenc
 shared_ptr<abstract_command> getset::prepare(service::storage_proxy& proxy, request&& req)
 {
     if (req._args_count < 2) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::prepare(std::move(req._command), std::move(to_bytes(sprint("-wrong number of arguments (given %ld, expected 1)\r\n", req._args_count))));
     }
     return make_shared<getset>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
 }

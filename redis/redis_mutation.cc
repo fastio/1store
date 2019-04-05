@@ -39,14 +39,19 @@ atomic_cell make_dead_cell() {
 
 atomic_cell make_cell(const schema_ptr schema,
    const abstract_type& type,
-   bytes_view value)
+   bytes_view value,
+   long cttl = 0)
 {
-   auto ttl = schema->default_time_to_live();
-   if (ttl.count() > 0) {
-       return atomic_cell::make_live(type, api::new_timestamp(), value, gc_clock::now() + ttl, ttl, atomic_cell::collection_member::no);
-   } else {
-       return atomic_cell::make_live(type, api::new_timestamp(), value, atomic_cell::collection_member::no);
-   }   
+
+    if (cttl > 0) {
+        auto ttl = std::chrono::seconds(cttl);
+        return atomic_cell::make_live(type, api::new_timestamp(), value, gc_clock::now() + ttl, ttl, atomic_cell::collection_member::no);
+    }
+    auto ttl = schema->default_time_to_live();
+    if (ttl.count() > 0) {
+        return atomic_cell::make_live(type, api::new_timestamp(), value, gc_clock::now() + ttl, ttl, atomic_cell::collection_member::no);
+    }   
+    return atomic_cell::make_live(type, api::new_timestamp(), value, atomic_cell::collection_member::no);
 }  
 
 atomic_cell make_cell(const schema_ptr schema,
@@ -63,7 +68,7 @@ mutation make_mutation(seastar::lw_shared_ptr<redis_mutation<bytes>> r)
     const column_definition& column = *schema->get_column_definition(redis::DATA_COLUMN_NAME);
     auto pkey = partition_key::from_single_value(*schema, r->key());
     auto m = mutation(schema, std::move(pkey));
-    auto cell = make_cell(schema, *(column.type.get()), r->data()); 
+    auto cell = make_cell(schema, *(column.type.get()), r->data(), r->ttl()); 
     m.set_clustered_cell(clustering_key::make_empty(), column, std::move(cell));
     return std::move(m);
 }

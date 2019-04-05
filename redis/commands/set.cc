@@ -10,6 +10,7 @@
 #include "mutation.hh"
 #include "timeout_config.hh"
 #include "redis/redis_mutation.hh"
+#include "redis/prefetcher.hh"
 namespace redis {
 
 namespace commands {
@@ -17,24 +18,62 @@ namespace commands {
 shared_ptr<abstract_command> set::prepare(service::storage_proxy& proxy, request&& req)
 {
     if (req._args_count != 2) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
-    }
-    else if (req._args_count > 2) {
-        // FIXME: more other options
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
     }
     return seastar::make_shared<set> (std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
+}
+
+shared_ptr<abstract_command> setnx::prepare(service::storage_proxy& proxy, request&& req)
+{
+    if (req._args_count != 2) {
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
+    }
+    return seastar::make_shared<setnx> (std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
+}
+
+shared_ptr<abstract_command> setex::prepare(service::storage_proxy& proxy, request&& req)
+{
+    if (req._args_count != 3) {
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
+    }
+    long ttl = 0;
+    try {
+        ttl = bytes2long(req._args[1]);
+    } catch(std::exception&) {
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), to_bytes("-ERR value is not an integer or out of range"));
+    }
+    //std::chrono::seconds(ttl));
+    return seastar::make_shared<setex> (std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[2]), ttl);
 }
 
 future<redis_message> set::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
-    return redis::write_mutation(proxy, redis::make_simple(_schema, _key, std::move(_data)), cl, timeout, cs).then_wrapped([this] (auto f) {
+    return redis::write_mutation(proxy, redis::make_simple(_schema, _key, std::move(_data), _ttl), cl, timeout, cs).then_wrapped([this] (auto f) {
         try {
             f.get();
         } catch (std::exception& e) {
             return redis_message::err();
         }
         return redis_message::ok();
+    });
+}
+
+future<redis_message> setnx::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+{
+    auto timeout = now + tc.write_timeout;
+    return redis::exists(proxy, _schema, _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto exists) {
+        if (!exists) {
+            return redis::write_mutation(proxy, redis::make_simple(_schema, _key, std::move(_data)), cl, timeout, cs).then_wrapped([this] (auto f) {
+                try {
+                    f.get();
+                } catch (std::exception& e) {
+                    return redis_message::err();
+                }
+                return redis_message::ok();
+            });
+        }
+        return redis_message::err();
     });
 }
 

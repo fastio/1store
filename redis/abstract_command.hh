@@ -96,22 +96,9 @@ inline bool is_number(const bytes& b)
 class abstract_command : public enable_shared_from_this<abstract_command> {
 protected:
     bytes _name;
-    // ttl in millis seconds
-    gc_clock::duration _ttl;
-    const api::timestamp_type _timestamp;
-    const gc_clock::time_point _local_deletion_time;
 public:
-    abstract_command(bytes&& name, const gc_clock::duration ttl)
-        : _name(std::move(name))
-        , _ttl(ttl)
-        , _timestamp(api::new_timestamp())
-        , _local_deletion_time(gc_clock::now())
-    {
-    }
     abstract_command(bytes&& name)
         : _name(std::move(name))
-        , _timestamp(api::new_timestamp())
-        , _local_deletion_time(gc_clock::now())
     {
     }
     virtual ~abstract_command() {};

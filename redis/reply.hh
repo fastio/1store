@@ -153,7 +153,7 @@ public:
     }
     static future<redis_message> err() {
         redis_message m;
-        m.write(bytes_view(msg_err));
+        m.write(bytes_view(msg_zero));
         return make_ready_future<redis_message>(std::move(m));
     }
     static future<redis_message> null() {
