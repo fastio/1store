@@ -17,7 +17,7 @@ shared_ptr<abstract_command> exists::prepare(service::storage_proxy& proxy, requ
     if (req._args_count < 1) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
     }
-    std::vector<schema_ptr> schemas { simple_objects_schema(proxy), lists_schema(proxy), sets_schema(proxy), maps_schema(proxy) };
+    std::vector<schema_ptr> schemas { simple_objects_schema(proxy), lists_schema(proxy), sets_schema(proxy), maps_schema(proxy), zsets_schema(proxy) };
     return seastar::make_shared<exists> (std::move(req._command), std::move(schemas), std::move(req._args[0]));
 }
 

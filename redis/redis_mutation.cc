@@ -113,7 +113,7 @@ mutation make_mutation(seastar::lw_shared_ptr<list_mutation> r)
         std::reverse(r->data()._cells.begin(), r->data()._cells.end());
     }
     for (size_t i = 0; i < r->data()._cells.size(); ++i) {
-        m.set_cell(clustering_key::from_single_value(*schema, cell_keys[i]), column, make_cell(schema, *column.type, r->data()._cells[i]));
+        m.set_cell(clustering_key::from_single_value(*schema, cell_keys[i]), column, make_cell(schema, *column.type, r->data()._cells[i], r->ttl()));
     }
     return std::move(m);
 }
@@ -125,7 +125,19 @@ mutation make_mutation(seastar::lw_shared_ptr<list_indexed_cells_mutation> r)
     auto pkey = partition_key::from_single_value(*schema, r->key());
     auto m = mutation(schema, std::move(pkey));
     for (auto&& data : r->data()._indexed_cells) {
-        m.set_cell(clustering_key::from_single_value(*schema, *(data.first)), column, make_cell(schema, *column.type, *(data.second)));
+        m.set_cell(clustering_key::from_single_value(*schema, *(data.first)), column, make_cell(schema, *column.type, *(data.second), r->ttl()));
+    }
+    return std::move(m);
+}
+
+mutation make_mutation(seastar::lw_shared_ptr<map_indexed_cells_mutation> r)
+{
+    auto schema = r->schema();
+    const column_definition& column = *schema->get_column_definition(redis::DATA_COLUMN_NAME);
+    auto pkey = partition_key::from_single_value(*schema, r->key());
+    auto m = mutation(schema, std::move(pkey));
+    for (auto&& data : r->data()._indexed_cells) {
+        m.set_cell(clustering_key::from_single_value(*schema, *(data.first)), column, make_cell(schema, *column.type, *(data.second), r->ttl()));
     }
     return std::move(m);
 }
@@ -149,7 +161,7 @@ mutation make_mutation(seastar::lw_shared_ptr<map_mutation> r)
     auto pkey = partition_key::from_single_value(*schema, r->key());
     auto m = mutation(schema, std::move(pkey));
     for (auto && e : r->data()) {
-        m.set_cell(clustering_key::from_single_value(*schema, e.first), column, make_cell(schema, *column.type, e.second));
+        m.set_cell(clustering_key::from_single_value(*schema, e.first), column, make_cell(schema, *column.type, e.second, r->ttl()));
     }
     return std::move(m);
 }
@@ -174,7 +186,20 @@ mutation make_mutation(seastar::lw_shared_ptr<set_mutation> r)
     auto pkey = partition_key::from_single_value(*schema, r->key());
     auto m = mutation(schema, std::move(pkey));
     for (auto&& e : r->data()._cells) {
-        m.set_cell(clustering_key::from_single_value(*schema, e), column, make_cell(schema, *column.type, fixed_value));
+        m.set_cell(clustering_key::from_single_value(*schema, e), column, make_cell(schema, *column.type, fixed_value, r->ttl()));
+    }
+    return std::move(m);
+}
+
+mutation make_mutation(seastar::lw_shared_ptr<set_indexed_cells_mutation> r)
+{
+    static bytes fixed_value("true");
+    auto schema = r->schema();
+    const column_definition& column = *schema->get_column_definition(redis::DATA_COLUMN_NAME);
+    auto pkey = partition_key::from_single_value(*schema, r->key());
+    auto m = mutation(schema, std::move(pkey));
+    for (auto&& data : r->data()._indexed_cells) {
+        m.set_cell(clustering_key::from_single_value(*schema, *(data.first)), column, make_cell(schema, *column.type, fixed_value, r->ttl()));
     }
     return std::move(m);
 }
@@ -198,7 +223,19 @@ mutation make_mutation(seastar::lw_shared_ptr<zset_mutation> r)
     auto pkey = partition_key::from_single_value(*schema, r->key());
     auto m = mutation(schema, std::move(pkey));
     for (auto && e : r->data()._cells) {
-        m.set_cell(clustering_key::from_single_value(*schema, e.first), column, make_cell(schema, *column.type, e.second));
+        m.set_cell(clustering_key::from_single_value(*schema, e.first), column, make_cell(schema, *column.type, e.second, r->ttl()));
+    }
+    return std::move(m);
+}
+
+mutation make_mutation(seastar::lw_shared_ptr<zset_indexed_cells_mutation> r)
+{
+    auto schema = r->schema();
+    const column_definition& column = *schema->get_column_definition(redis::DATA_COLUMN_NAME);
+    auto pkey = partition_key::from_single_value(*schema, r->key());
+    auto m = mutation(schema, std::move(pkey));
+    for (auto&& data : r->data()._indexed_cells) {
+        m.set_cell(clustering_key::from_single_value(*schema, *(data.first)), column, make_cell(schema, *column.type, *(data.second), r->ttl()));
     }
     return std::move(m);
 }
