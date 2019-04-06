@@ -20,5 +20,13 @@ public:
     ~expire() {}
     future<redis_message> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
 };
+
+class persist : public expire {
+public:
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    persist(bytes&& name, std::vector<schema_ptr> schemas, bytes&& key ) : expire(std::move(name), schemas, std::move(key), 0) {}
+    ~persist() {}
+
+};
 }
 }

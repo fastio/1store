@@ -20,7 +20,7 @@ namespace commands {
 
 shared_ptr<abstract_command> expire::prepare(service::storage_proxy& proxy, request&& req)
 {
-    if (req._args_count < 2) {
+    if (req._args_count != 2) {
         return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
     }
     long ttl = 0;
@@ -29,8 +29,17 @@ shared_ptr<abstract_command> expire::prepare(service::storage_proxy& proxy, requ
     } catch(std::exception&) {
         return unexpected::make_wrong_arguments_exception(std::move(req._command), to_bytes("-ERR value is not an integer or out of range"));
     }
-    std::vector<schema_ptr> schemas { simple_objects_schema(proxy), lists_schema(proxy), sets_schema(proxy), maps_schema(proxy) };
+    std::vector<schema_ptr> schemas { simple_objects_schema(proxy), lists_schema(proxy), sets_schema(proxy), maps_schema(proxy), zsets_schema(proxy) };
     return seastar::make_shared<expire> (std::move(req._command), std::move(schemas), std::move(req._args[0]), ttl);
+}
+
+shared_ptr<abstract_command> persist::prepare(service::storage_proxy& proxy, request&& req)
+{
+    if (req._args_count != 1) {
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 1, req._args_count);
+    }
+    std::vector<schema_ptr> schemas { simple_objects_schema(proxy), lists_schema(proxy), sets_schema(proxy), maps_schema(proxy), zsets_schema(proxy) };
+    return seastar::make_shared<persist> (std::move(req._command), std::move(schemas), std::move(req._args[0]));
 }
 
 future<redis_message> expire::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
@@ -97,9 +106,9 @@ future<redis_message> expire::execute(service::storage_proxy& proxy, db::consist
             return executor().then([&result] (auto r) { result |= r; });
         }).then([&result] {
             if (result) {
-                return redis_message::ok();
+                return redis_message::one();
             }
-            return redis_message::err();
+            return redis_message::zero();
         });
     });
 }

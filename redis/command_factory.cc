@@ -48,6 +48,7 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "del",  [] (service::storage_proxy& proxy, request&& req) { return commands::del::prepare(proxy, std::move(req)); } }, 
     { "exists",  [] (service::storage_proxy& proxy, request&& req) { return commands::exists::prepare(proxy, std::move(req)); } }, 
     { "expire",  [] (service::storage_proxy& proxy, request&& req) { return commands::expire::prepare(proxy, std::move(req)); } }, 
+    { "persist",  [] (service::storage_proxy& proxy, request&& req) { return commands::persist::prepare(proxy, std::move(req)); } }, 
     { "strlen",  [] (service::storage_proxy& proxy, request&& req) { return commands::strlen::prepare(proxy, std::move(req)); } }, 
     { "append",  [] (service::storage_proxy& proxy, request&& req) { return commands::append::prepare(proxy, std::move(req)); } }, 
     { "incr",  [] (service::storage_proxy& proxy, request&& req) { return commands::counter::prepare(proxy, commands::counter::incr_tag {}, std::move(req)); } }, 
