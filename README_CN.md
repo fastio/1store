@@ -26,6 +26,12 @@ Pedis 将依赖开源社区，打磨**简单易用**、**高性能**、**易运�
 
 目前，Pedis项目已经实现了Redis 4.0协议中大部分命令，具体如下。
 
+
+以下表格中，“是否支持” 这一栏中，Yes 表示Pedis 已经支持该命令; No
+表示目前还没支持，后续会支持; 如果Pedis 不支持该命令，会明确注明
+"不支持"。
+
+
 * 支持string相关的命令，详情如下：
 
 | 命令名称 | 是否支持 | 备注 |
@@ -39,8 +45,6 @@ Pedis 将依赖开源社区，打磨**简单易用**、**高性能**、**易运�
 |getset | Yes |  |
 |del | Yes |  |
 |exists | Yes |  |
-|expire | Yes | |
-|persist |Yes | |
 |strlen | Yes| |
 |append | Yes | |
 |incr | Yes | |
@@ -49,11 +53,6 @@ Pedis 将依赖开源社区，打磨**简单易用**、**高性能**、**易运�
 |decrby | Yes |
 |setrange | No |
 |getrange | No |
-|ttl | No |
-|pttl | No |
-|pexpire | No |
-|expireat | No |
-|pexpireat | No |
 
 
 * 支持list 数据结构相关的命令，详情如下：
@@ -140,3 +139,91 @@ Pedis 将依赖开源社区，打磨**简单易用**、**高性能**、**易运�
 |zscan | No | |
 |zunionstore | No | |
 |zintestore | No | |
+
+* 支持 HyperLogLog 数据结构相关命令，详情如下:
+
+| 命令名称 | 支持情况 | 备注 |
+|--|--|--|
+|PFADD | No | |
+|PFCOUNT | No | |
+|PFMERGE | No | |
+
+* 支持GEO 数据结构相关命令，详情如下：
+
+| 命令名称 | 支持情况 | 备注 |
+|--|--|--|
+|GEOADD | No |
+|GEOPOS | No |
+|GEODIST | No |
+|GEORADIUS | No |
+|GEORADIUSBYMEMBER | No |
+|GEOHASH | No |
+
+
+* 支持 Bitmap 数据结构相关的命令，详情如下：
+
+
+| 命令名称 | 支持情况 | 备注 |
+|--|--|--|
+|SETBIT | No |
+|GETBIT | No |
+|BITCOUNT | No |
+|BITPOS | No |
+|BITOP | No |
+|BITFIELD | No |
+
+* 支持 事物 相关命令，详情如下：
+
+| 命令名称 | 支持情况 | 备注 |
+|--|--|--|
+|MULTI | No|
+|EXEC | No |
+|DISCARD | No |
+|WATCH | No |
+|UNWATCH | No |
+
+
+* 自动过期相关命令，详情如下：
+
+| 命令名称 | 支持情况 | 备注 |
+|--|--|--|
+|EXPIRE  | Yes | |
+|EXPIREAT | No | |
+|TTL | No |
+|PERSIST |Yes | |
+|PEXPIRE |No| |
+|PEXPIREAT | No | |
+|PTTL | |
+
+* 支持LUA脚本相关命令，详情如下：
+
+
+| 命令名称 | 支持情况 | 备注 |
+|--|--|--|
+|EVAL | No |
+|EVALSHA | No |
+|SCRIPT_LOAD | No |
+|SCRIPT_EXISTS | No |
+|SCRIPT_FLUSH | No |
+|SCRIPT_KILL | No |
+
+
+* 持久化相关命令，详情如下：
+
+| 命令名称 | 支持情况 | 备注 |
+|--|--|--|
+|SAVE | 不支持 | Pedis 有完善的数据持久化能力|
+|BGSAVE | 不支持| 理由同上|
+|BGREWRITEAOF | 不支持 | 理由同上 |
+|LASTSAVE | 不支持 | 理由同上 |
+
+* 订阅与发布
+
+| 命令名称 | 支持情况 | 备注 |
+|--|--|--|
+|PUBLISH | No |
+|SUBSCRIBE | No |
+|PSUBSCRIBE | No |
+|UNSUBSCRIBE | No |
+|PUNSUBSCRIBE | No |
+|PUBSUB | No |
