@@ -77,7 +77,8 @@ future<redis_message> setnx::execute(service::storage_proxy& proxy, db::consiste
     });
 }
 
-shared_ptr<abstract_command> mset::prepare(service::storage_proxy& proxy, request&& req)
+template<typename Type>
+shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, request&& req)
 {
     if (req._args_count < 2 || (req._args_count % 2 != 0)) {
         return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
@@ -86,13 +87,23 @@ shared_ptr<abstract_command> mset::prepare(service::storage_proxy& proxy, reques
     for (size_t i = 0; i < req._args_count; i += 2) {
         data.emplace_back(std::move(std::pair<bytes, bytes>(std::move(req._args[i]), std::move(req._args[i + 1]))));
     }
-    return seastar::make_shared<mset> (std::move(req._command), simple_objects_schema(proxy), std::move(data));
+    return seastar::make_shared<Type> (std::move(req._command), simple_objects_schema(proxy), std::move(data));
+}
+
+shared_ptr<abstract_command> mset::prepare(service::storage_proxy& proxy, request&& req)
+{
+    return prepare_impl<mset>(proxy, std::move(req));
+}
+
+shared_ptr<abstract_command> msetnx::prepare(service::storage_proxy& proxy, request&& req)
+{
+    return prepare_impl<msetnx>(proxy, std::move(req));
 }
 
 future<redis_message> mset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {
     auto timeout = now + tc.write_timeout;
-    auto mutations = boost::copy_range<std::vector<seastar::lw_shared_ptr<redis_mutation<bytes>>>>(_datas | boost::adaptors::transformed([this] (auto& data) {
+    auto mutations = boost::copy_range<std::vector<seastar::lw_shared_ptr<redis_mutation<bytes>>>>(_data | boost::adaptors::transformed([this] (auto& data) {
         return redis::make_simple(_schema, data.first, std::move(data.second));
     }));
     return redis::write_mutations(proxy, mutations, cl, timeout, cs).then_wrapped([this] (auto f) {
@@ -102,6 +113,33 @@ future<redis_message> mset::execute(service::storage_proxy& proxy, db::consisten
             return redis_message::err();
         }
         return redis_message::ok();
+    });
+}
+
+future<redis_message> msetnx::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
+{
+    auto timeout = now + tc.write_timeout;
+    return do_with(bool { false }, [this, &proxy, cl, timeout, &cs] (auto& exists_at_least_one) {
+        return parallel_for_each(_data.begin(), _data.end(), [this, &proxy, timeout, cl, &cs, &exists_at_least_one] (auto& data) {
+            return redis::exists(proxy, _schema, std::get<0>(data), cl, timeout, cs).then([this, &proxy, cl, timeout, &cs, &data, &exists_at_least_one] (auto exists) {
+                exists_at_least_one |= exists;
+            });
+        }).then([this, &proxy, timeout, cl, &cs, &exists_at_least_one] {
+            if (!exists_at_least_one) {
+                auto mutations = boost::copy_range<std::vector<seastar::lw_shared_ptr<redis_mutation<bytes>>>>(_data | boost::adaptors::transformed([this] (auto& data) {
+                    return redis::make_simple(_schema, data.first, std::move(data.second));
+                }));
+                return redis::write_mutations(proxy, mutations, cl, timeout, cs).then_wrapped([this] (auto f) {
+                    try {
+                        f.get();
+                    } catch (std::exception& e) {
+                        return redis_message::err();
+                    }
+                    return redis_message::one();
+                });
+            }
+            return redis_message::zero();
+        });
     });
 }
 }

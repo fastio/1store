@@ -42,6 +42,7 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "setnx",  [] (service::storage_proxy& proxy, request&& req) { return commands::setnx::prepare(proxy, std::move(req)); } }, 
     { "setex",  [] (service::storage_proxy& proxy, request&& req) { return commands::setex::prepare(proxy, std::move(req)); } }, 
     { "mset",  [] (service::storage_proxy& proxy, request&& req) { return commands::mset::prepare(proxy, std::move(req)); } }, 
+    { "msetnx",  [] (service::storage_proxy& proxy, request&& req) { return commands::msetnx::prepare(proxy, std::move(req)); } }, 
     { "get",  [] (service::storage_proxy& proxy, request&& req) { return commands::get::prepare(proxy, std::move(req)); } }, 
     { "getset",  [] (service::storage_proxy& proxy, request&& req) { return commands::getset::prepare(proxy, std::move(req)); } }, 
     { "mget",  [] (service::storage_proxy& proxy, request&& req) { return commands::mget::prepare(proxy, std::move(req)); } }, 
