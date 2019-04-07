@@ -2,8 +2,8 @@
 
 Pedis 是Parallel Redis的简称。简单的说，Pedis 提供了一个分布式，持久化存储的Redis集群方案。
 
-Pedis 构建在Scylla基础之上。Scylla是兼容Apache Cassandra 协议的暂时不支持，将实现SQL数据库。
-由Avi Kivity 带领的团队，采用C++语言实现的高性能暂时不支持，将实现SQL数据库。
+Pedis 构建在Scylla基础之上。Scylla是兼容Apache Cassandra 协议的暂时不支持SQL数据库。
+由Avi Kivity 带领的团队，采用C++语言实现的高性能暂时不支持SQL数据库。
 目前，该项目已开源，开源协议为 Free Software Foundation’s GNU AGPL v3.0。
 
 在Scylla的基础之上，增加支持Redis协议的功能，构建Redis集群方案。
@@ -27,137 +27,132 @@ Pedis 将依赖开源社区，打磨**简单易用**、**高性能**、**易运�
 目前，Pedis项目已经实现了Redis 4.0协议中大部分命令，具体如下。
 
 
-以下表格中，“是否支持” 这一栏中，Yes 表示Pedis 已经支持该命令; 暂时不支持，将实现
-表示目前还没支持，后续会支持; 如果Pedis 不支持该命令，会明确注明
-"不支持"。
-
-
 * 支持string相关的命令，详情如下：
 
 | 命令名称 | 是否支持 | 备注 |
 |--|--|--|
-|set | Yes | set 命令只接受2个参数|
-|setnx | Yes | |
-|setex | Yes |  |
-|mset | Yes | |
-|msetnx | 暂时不支持，将实现 | |
-|get | Yes| |
-|getset | Yes |  |
-|del | Yes |  |
-|exists | Yes |  |
-|strlen | Yes| |
-|append | Yes | |
-|incr | Yes | |
-|decr | Yes | |
-|incrby | Yes |
-|decrby | Yes |
-|setrange | 暂时不支持，将实现 |
-|getrange | 暂时不支持，将实现 |
+|set | 已支持 | set 命令只接受2个参数(原REDIS支持 NX, XX, PX等选项)|
+|setnx | 已支持 | |
+|setex | 已支持 |  |
+|mset | 已支持 | |
+|msetnx | 暂时不支持 | |
+|get | 已支持| |
+|getset | 已支持 |  |
+|del | 已支持 |  |
+|exists | 已支持 |  |
+|strlen | 已支持| |
+|append | 已支持 | |
+|incr | 已支持 | |
+|decr | 已支持 | |
+|incrby | 已支持 |
+|decrby | 已支持 |
+|setrange | 暂时不支持 |
+|getrange | 暂时不支持 |
 
 
 * 支持list 数据结构相关的命令，详情如下：
 
 | 命令名称 | 支持情况 | 备注 |
 |--|--|--|
-|lpush | Yes | |
-|lpushx | Yes | |
-|rpush | Yes | |
-|rpushx | Yes | |
-|lpop | Yes |
-|rpop | Yes |
-|lrange | Yes | |
-|llen | Yes | |
-|lindex | Yes | |
-|lrem | Yes | |
-|lset | Yes  | |
-|ltrim | Yes | |
-|blpop | 暂时不支持，将实现 | |
-|brpop | 暂时不支持，将实现 | |
-|brpoplpush | 暂时不支持，将实现 | |
+|lpush | 已支持 | |
+|lpushx | 已支持 | |
+|rpush | 已支持 | |
+|rpushx | 已支持 | |
+|lpop | 已支持 |
+|rpop | 已支持 |
+|lrange | 已支持 | |
+|llen | 已支持 | |
+|lindex | 已支持 | |
+|lrem | 已支持 | |
+|lset | 已支持  | |
+|ltrim | 已支持 | |
+|blpop | 暂时不支持 | |
+|brpop | 暂时不支持 | |
+|brpoplpush | 暂时不支持 | |
 
 * 支持 hashmap 数据结构相关的命令，详情如下：
 
 | 命令名称 | 支持情况 | 备注 |
 |--|--|--|
-|hset | Yes |
-|hsetnx | Yes |
-|hget | Yes |
-|hexists | Yes |
-|hdel | Yes |
-|hlen | Yes |
-|hstrlen | 暂时不支持，将实现 |
-|hincry | 暂时不支持，将实现 | 
-|hincrbyfloat | 暂时不支持，将实现 |
-|hmset | Yes |
-|hmget | Yes |
-|hkeys | Yes |
-|hvals | Yes |
-|hgetall | Yes |
-|hscan | Yes |
+|hset | 已支持 |
+|hsetnx | 已支持 |
+|hget | 已支持 |
+|hexists | 已支持 |
+|hdel | 已支持 |
+|hlen | 已支持 |
+|hstrlen | 暂时不支持 |
+|hincry | 暂时不支持 | 
+|hincrbyfloat | 暂时不支持 |
+|hmset | 已支持 |
+|hmget | 已支持 |
+|hkeys | 已支持 |
+|hvals | 已支持 |
+|hgetall | 已支持 |
+|hscan | 已支持 |
 
 * 支持 set 数据结构相关的命令，详情如下：
 
 | 命令名称 | 支持情况 | 备注 |
 |--|--|--|
-|sadd | Yes | |
-| sismember | Yes | |
-| spop | Yes | |
-| srandmember | 暂时不支持，将实现 | |
-| srem | Yes| |
-| smove | 暂时不支持，将实现 | |
-| scard| 暂时不支持，将实现| |
-| smembers | Yes | |
-| sscan | 暂时不支持，将实现 | |
-| sinter | 暂时不支持，将实现 | |
-| sinterstore | 暂时不支持，将实现 | |
-| sunion| 暂时不支持，将实现 | |
-| sunionstore | 暂时不支持，将实现 | |
-| sdiff | 暂时不支持，将实现 | |
-| sdiffstore | 暂时不支持，将实现 ||
+|sadd | 已支持 | |
+| sismember | 已支持 | |
+| spop | 已支持 | |
+| srandmember | 暂时不支持 | |
+| srem | 已支持| |
+| smove | 暂时不支持 | |
+| scard| 暂时不支持| |
+| smembers | 已支持 | |
+| sscan | 暂时不支持 | |
+| sinter | 暂时不支持 | |
+| sinterstore | 暂时不支持 | |
+| sunion| 暂时不支持 | |
+| sunionstore | 暂时不支持 | |
+| sdiff | 暂时不支持 | |
+| sdiffstore | 暂时不支持 ||
 
 * 支持 zset 数据结构相关的命令, 详情如下：
 
 | 命令名称 | 支持情况 | 备注 |
 |--|--|--|
-|zadd | Yes | |
-|zscore | Yes | |
-|zincrby | Yes | |
-|zcard | Yes | |
-|zcount | Yes | |
-|zrange | Yes | |
-|zrevrange | Yes | |
-| zrangebyscore | Yes | |
-| zrevrangebyscore | Yes | |
-| zrank | Yes | |
-| zrevrank | Yes | | 
-| zrem | Yes | |
-|zremrangebyrank| Yes | |
-|zremrangebyscore | Yes | |
-|zrangebylex | 暂时不支持，将实现 | |
-| zlexcount | 暂时不支持，将实现 | |
-| zremrangebyflx | 暂时不支持，将实现 | |
-|zscan | 暂时不支持，将实现 | |
-|zunionstore | 暂时不支持，将实现 | |
-|zintestore | 暂时不支持，将实现 | |
+|zadd | 已支持 | |
+|zscore | 已支持 | |
+|zincrby | 已支持 | |
+|zcard | 已支持 | |
+|zcount | 已支持 | |
+|zrange | 已支持 | |
+|zrevrange | 已支持 | |
+| zrangebyscore | 已支持 | |
+| zrevrangebyscore | 已支持 | |
+| zrank | 已支持 | |
+| zrevrank | 已支持 | | 
+| zrem | 已支持 | |
+|zremrangebyrank| 已支持 | |
+|zremrangebyscore | 已支持 | |
+|zrangebylex | 暂时不支持 | |
+| zlexcount | 暂时不支持 | |
+| zremrangebyflx | 暂时不支持 | |
+|zscan | 暂时不支持 | |
+|zunionstore | 暂时不支持 | |
+|zintestore | 暂时不支持 | |
 
 * 支持 HyperLogLog 数据结构相关命令，详情如下:
 
 | 命令名称 | 支持情况 | 备注 |
 |--|--|--|
-|PFADD | 暂时不支持，将实现 | |
-|PFCOUNT | 暂时不支持，将实现 | |
-|PFMERGE | 暂时不支持，将实现 | |
+|PFADD | 暂时不支持 | |
+|PFCOUNT | 暂时不支持 | |
+|PFMERGE | 暂时不支持 | |
 
 * 支持GEO 数据结构相关命令，详情如下：
 
 | 命令名称 | 支持情况 | 备注 |
 |--|--|--|
-|GEOADD | 暂时不支持，将实现 |
-|GEOPOS | 暂时不支持，将实现 |
-|GEODIST | 暂时不支持，将实现 |
-|GEORADIUS | 暂时不支持，将实现 |
-|GEORADIUSBYMEMBER | 暂时不支持，将实现 |
-|GEOHASH | 暂时不支持，将实现 |
+|GEOADD | 暂时不支持 |
+|GEOPOS | 暂时不支持 |
+|GEODIST | 暂时不支持 |
+|GEORADIUS | 暂时不支持 |
+|GEORADIUSBYMEMBER | 暂时不支持 |
+|GEOHASH | 暂时不支持 |
 
 
 * 支持 Bitmap 数据结构相关的命令，详情如下：
@@ -165,34 +160,34 @@ Pedis 将依赖开源社区，打磨**简单易用**、**高性能**、**易运�
 
 | 命令名称 | 支持情况 | 备注 |
 |--|--|--|
-|SETBIT | 暂时不支持，将实现 |
-|GETBIT | 暂时不支持，将实现 |
-|BITCOUNT | 暂时不支持，将实现 |
-|BITPOS | 暂时不支持，将实现 |
-|BITOP | 暂时不支持，将实现 |
-|BITFIELD | 暂时不支持，将实现 |
+|SETBIT | 暂时不支持 |
+|GETBIT | 暂时不支持 |
+|BITCOUNT | 暂时不支持 |
+|BITPOS | 暂时不支持 |
+|BITOP | 暂时不支持 |
+|BITFIELD | 暂时不支持 |
 
 * 支持 事物 相关命令，详情如下：
 
 | 命令名称 | 支持情况 | 备注 |
 |--|--|--|
-|MULTI | 暂时不支持，将实现|
-|EXEC | 暂时不支持，将实现 |
-|DISCARD | 暂时不支持，将实现 |
-|WATCH | 暂时不支持，将实现 |
-|UNWATCH | 暂时不支持，将实现 |
+|MULTI | 暂时不支持|
+|EXEC | 暂时不支持 |
+|DISCARD | 暂时不支持 |
+|WATCH | 暂时不支持 |
+|UNWATCH | 暂时不支持 |
 
 
 * 自动过期相关命令，详情如下：
 
 | 命令名称 | 支持情况 | 备注 |
 |--|--|--|
-|EXPIRE  | Yes | |
-|EXPIREAT | 暂时不支持，将实现 | |
-|TTL | 暂时不支持，将实现 |
-|PERSIST |Yes | |
-|PEXPIRE |暂时不支持，将实现| |
-|PEXPIREAT | 暂时不支持，将实现 | |
+|EXPIRE  | 已支持 | |
+|EXPIREAT | 暂时不支持 | |
+|TTL | 暂时不支持 |
+|PERSIST |已支持 | |
+|PEXPIRE |暂时不支持| |
+|PEXPIREAT | 暂时不支持 | |
 |PTTL | |
 
 * 支持LUA脚本相关命令，详情如下：
@@ -200,12 +195,12 @@ Pedis 将依赖开源社区，打磨**简单易用**、**高性能**、**易运�
 
 | 命令名称 | 支持情况 | 备注 |
 |--|--|--|
-|EVAL | 暂时不支持，将实现 |
-|EVALSHA | 暂时不支持，将实现 |
-|SCRIPT_LOAD | 暂时不支持，将实现 |
-|SCRIPT_EXISTS | 暂时不支持，将实现 |
-|SCRIPT_FLUSH | 暂时不支持，将实现 |
-|SCRIPT_KILL | 暂时不支持，将实现 |
+|EVAL | 暂时不支持 |
+|EVALSHA | 暂时不支持 |
+|SCRIPT_LOAD | 暂时不支持 |
+|SCRIPT_EXISTS | 暂时不支持 |
+|SCRIPT_FLUSH | 暂时不支持 |
+|SCRIPT_KILL | 暂时不支持 |
 
 
 * 持久化相关命令，详情如下：
@@ -221,9 +216,9 @@ Pedis 将依赖开源社区，打磨**简单易用**、**高性能**、**易运�
 
 | 命令名称 | 支持情况 | 备注 |
 |--|--|--|
-|PUBLISH | 暂时不支持，将实现 |
-|SUBSCRIBE | 暂时不支持，将实现 |
-|PSUBSCRIBE | 暂时不支持，将实现 |
-|UNSUBSCRIBE | 暂时不支持，将实现 |
-|PUNSUBSCRIBE | 暂时不支持，将实现 |
-|PUBSUB | 暂时不支持，将实现 |
+|PUBLISH | 暂时不支持 |
+|SUBSCRIBE | 暂时不支持 |
+|PSUBSCRIBE | 暂时不支持 |
+|UNSUBSCRIBE | 暂时不支持 |
+|PUNSUBSCRIBE | 暂时不支持 |
+|PUBSUB | 暂时不支持 |
