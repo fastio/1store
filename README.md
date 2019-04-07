@@ -1,4 +1,4 @@
-# Pedis (Parallel Redis) [中文介绍](README_ZN.md)
+# Pedis (Parallel Redis) [中文介绍](README_CN.md)
 
 ## What's Pedis?
 
