@@ -13,6 +13,25 @@ Pedis 开源协议为  Free Software Foundation’s GNU AGPL v3.0。
 
 Pedis 将依赖开源社区，打磨**简单易用**、**高性能**、**易运维**的Redis集群。
 
+## Pedis 数据持久化机制
+
+Pedis 兼容REDIS协议，实现了Redis 4.0 中常用数据结构。
+
+与MYSQL数据类比，在Scylla中，键空间(keyspace) 相当于MYSQL中的database概念， 列族(colunm family， 在Scylla中也称为table) 相当于MYSQL的table概念。Scylla集群将数据存储在具体的keyspace，具体table中。因此，在Pedis集群启动时候，试图创建存储REDIS 数据结构的keyspace 和 table. Pedis集群的数据将存储在名为 redis 的 keyspace 中，其中，strings 、 lists、 hashmap、set 和 zset 数据分别存储在redis.simple_objects 、redis.lists、redis.maps、redis.set和redis.zset 表中。
+
+通过配置这些表的数据备份数（replication-factor）, 可以确定将Pedis 数据持久化的存储在Scylla集群的各个节点中。当Scylla集群具备跨数据中心部署能力，Pedis 集群将继承该能力。
+
+另外，Scylla支持数据In-memory 存储机制，即数据只存储在内存中，不存储在磁盘中。在这种配置情况下，Pedis 数据可以只存储在内存中，部署成为缓存集群。
+
+## Pedis 集群数据一致性问题
+
+Scylla支持可调节数据一致性功能。通过该功能，Scylla可以实现数据强一致性，也可以自定义读写一致性级别。公式“R + W > N”常用于描述可调节数据一致性的实现。在这个公式里，R 和 W 分别是由所用的一致性级别决定的要读和写的节点数。N 是复制因子。实现强一致性的最常见的办法就是对读和写使用 QUORUM 一致性级别，QUORUM 常被定义成一个大于半数节点的数字。
+
+因此，Pedis集群也将具备可调节的数据一致性功能，可以设置不同级别的读写一致性级别，满足业务需求。
+
+## Pedis 集群数据与Scylla 集群数据互操作性
+
+通过REDIS协议写入的数据存储在集群中的特定的keyspace & table中。这些keyspace & table 中数据也可以通过Cassandra协议来读写。也就是PEDIS集群中的数据，既可以通过REDIS协议来访问，也可以通过Cassandra协议来访问。这为应用带来良好的灵活性。
 
 ## Pedis 项目规划
 
