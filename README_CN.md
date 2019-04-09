@@ -2,8 +2,7 @@
 
 Pedis 是Parallel Redis的简称。简单的说，Pedis 提供了一个分布式，持久化存储的Redis集群方案。
 
-Pedis 构建在Scylla基础之上。Scylla是兼容Apache Cassandra 协议的暂时不支持SQL数据库。
-由Avi Kivity 带领的团队，采用C++语言实现的高性能暂时不支持SQL数据库。
+Pedis 构建在Scylla基础之上。Scylla是兼容Apache Cassandra 协议的NoSQL数据库。
 目前，该项目已开源，开源协议为 Free Software Foundation’s GNU AGPL v3.0。
 
 在Scylla的基础之上，增加支持Redis协议的功能，构建Redis集群方案。
