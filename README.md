@@ -8,7 +8,7 @@ Pedis is built on [Scylla](https://www.scylladb.com/). Scylla is compatible with
 
 ## Pedis Vision
 
-Pedis will rely on the open source community to polish EDIS clusters of ** easy to use **, ** high performance **, ** easy to operate and maintain **.
+Pedis will rely on the open source community to polish REDIS clusters of ** easy to use **, ** high performance **, ** easy to operate and maintain **.
 
 ## Pedis data persistence mechanism
 
