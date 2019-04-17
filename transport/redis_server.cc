@@ -284,11 +284,11 @@ future<> redis_server::connection::process_request() {
                     return make_ready_future<redis_server::connection::result>(std::move(message));
                 });
             } else if (changed == 1) {
-                return redis::redis_message::make_exception("-invalid DB index").then([] (auto&& message) {
+                return redis::redis_message::make_exception("-invalid DB index\r\n").then([] (auto&& message) {
                     return make_ready_future<redis_server::connection::result>(std::move(message));
                 });
             } else {
-                return redis::redis_message::make_exception("-wrong number of arguments for 'select' command").then([] (auto&& message) {
+                return redis::redis_message::make_exception("-wrong number of arguments for 'select' command\r\n").then([] (auto&& message) {
                     return make_ready_future<redis_server::connection::result>(std::move(message));
                 });
             } 
