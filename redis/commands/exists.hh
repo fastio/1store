@@ -7,7 +7,7 @@ namespace redis {
 namespace commands {
 class exists final : public del {
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     exists(bytes&& name, std::vector<schema_ptr> schemas, bytes&& key)
         : del(std::move(name), std::move(schemas), std::move(key))
     {

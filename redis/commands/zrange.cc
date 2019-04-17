@@ -20,7 +20,7 @@ namespace redis {
 namespace commands {
 
 template<typename CommandType>
-shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 3) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
@@ -33,15 +33,15 @@ shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, request
     }
     auto begin = bytes2long(req._args[1]);
     auto end = bytes2long(req._args[2]);
-    return seastar::make_shared<CommandType>(std::move(req._command), zsets_schema(proxy), std::move(req._args[0]), begin, end, with_scores);
+    return seastar::make_shared<CommandType>(std::move(req._command), zsets_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), begin, end, with_scores);
 }
 
-shared_ptr<abstract_command> zrange::prepare(service::storage_proxy& proxy, request&& req) {
-    return prepare_impl<zrange>(proxy, std::move(req));
+shared_ptr<abstract_command> zrange::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
+    return prepare_impl<zrange>(proxy, cs, std::move(req));
 }
 
-shared_ptr<abstract_command> zrevrange::prepare(service::storage_proxy& proxy, request&& req) {
-    return prepare_impl<zrevrange>(proxy, std::move(req));
+shared_ptr<abstract_command> zrevrange::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
+    return prepare_impl<zrevrange>(proxy, cs, std::move(req));
 }
 
 future<redis_message> zrange::execute_impl(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs, bool reversed)

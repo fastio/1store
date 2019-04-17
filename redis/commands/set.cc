@@ -15,23 +15,23 @@ namespace redis {
 
 namespace commands {
 
-shared_ptr<abstract_command> set::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> set::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count != 2) {
         return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
     }
-    return seastar::make_shared<set> (std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
+    return seastar::make_shared<set> (std::move(req._command), simple_objects_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[1]));
 }
 
-shared_ptr<abstract_command> setnx::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> setnx::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count != 2) {
         return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
     }
-    return seastar::make_shared<setnx> (std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
+    return seastar::make_shared<setnx> (std::move(req._command), simple_objects_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[1]));
 }
 
-shared_ptr<abstract_command> setex::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> setex::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count != 3) {
         return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
@@ -43,7 +43,7 @@ shared_ptr<abstract_command> setex::prepare(service::storage_proxy& proxy, reque
         return unexpected::make_wrong_arguments_exception(std::move(req._command), to_bytes("-ERR value is not an integer or out of range"));
     }
     //std::chrono::seconds(ttl));
-    return seastar::make_shared<setex> (std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[2]), ttl);
+    return seastar::make_shared<setex> (std::move(req._command), simple_objects_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[2]), ttl);
 }
 
 future<redis_message> set::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
@@ -78,7 +78,7 @@ future<redis_message> setnx::execute(service::storage_proxy& proxy, db::consiste
 }
 
 template<typename Type>
-shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 2 || (req._args_count % 2 != 0)) {
         return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
@@ -87,17 +87,17 @@ shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, request
     for (size_t i = 0; i < req._args_count; i += 2) {
         data.emplace_back(std::move(std::pair<bytes, bytes>(std::move(req._args[i]), std::move(req._args[i + 1]))));
     }
-    return seastar::make_shared<Type> (std::move(req._command), simple_objects_schema(proxy), std::move(data));
+    return seastar::make_shared<Type> (std::move(req._command), simple_objects_schema(proxy, cs.get_keyspace()), std::move(data));
 }
 
-shared_ptr<abstract_command> mset::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> mset::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
-    return prepare_impl<mset>(proxy, std::move(req));
+    return prepare_impl<mset>(proxy, cs, std::move(req));
 }
 
-shared_ptr<abstract_command> msetnx::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> msetnx::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
-    return prepare_impl<msetnx>(proxy, std::move(req));
+    return prepare_impl<msetnx>(proxy, cs, std::move(req));
 }
 
 future<redis_message> mset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)

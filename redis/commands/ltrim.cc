@@ -21,7 +21,7 @@
 namespace redis {
 namespace commands {
 
-shared_ptr<abstract_command> ltrim::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> ltrim::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 3) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
@@ -31,7 +31,7 @@ shared_ptr<abstract_command> ltrim::prepare(service::storage_proxy& proxy, reque
     if (begin < 0 || end < 0) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
     }
-    return make_shared<ltrim>(std::move(req._command), lists_schema(proxy), std::move(req._args[0]), begin, end);
+    return make_shared<ltrim>(std::move(req._command), lists_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), begin, end);
 }
 
 future<redis_message> ltrim::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)

@@ -10,7 +10,7 @@ private:
     std::vector<bytes> _data;
 public:
 
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     srem(bytes&& name, const schema_ptr schema, bytes&& key, std::vector<bytes>&& data) 
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))

@@ -4,6 +4,7 @@
 
 namespace service {
 class storage_proxy;
+class client_state;
 }
 namespace redis {
 using namespace seastar;
@@ -13,6 +14,6 @@ class command_factory {
 public:
     command_factory() {}
     ~command_factory() {}
-    static shared_ptr<abstract_command> create(service::storage_proxy&, request&&);
+    static shared_ptr<abstract_command> create(service::storage_proxy&, const service::client_state&, request&&);
 };
 }

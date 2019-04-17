@@ -18,7 +18,7 @@
 namespace redis {
 namespace commands {
 
-shared_ptr<abstract_command> zscore::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> zscore::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 2 || req._args_count % 2 != 0) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
@@ -27,7 +27,7 @@ shared_ptr<abstract_command> zscore::prepare(service::storage_proxy& proxy, requ
     for (size_t i = 1; i < req._args_count; i++) {
         map_keys.emplace_back(req._args[i]);
     }
-    return seastar::make_shared<zscore>(std::move(req._command), zsets_schema(proxy), std::move(req._args[0]), std::move(map_keys));
+    return seastar::make_shared<zscore>(std::move(req._command), zsets_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(map_keys));
 }
 
 future<redis_message> zscore::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)

@@ -14,7 +14,7 @@ class zcard : public command_with_single_schema {
 protected:
     bytes _key;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     zcard(bytes&& name, const schema_ptr schema, bytes&& key) 
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))

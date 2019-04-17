@@ -16,7 +16,7 @@ protected:
     std::vector<bytes> _map_keys;
     bool _multi = false;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req, bool multi);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req, bool multi);
     hget(bytes&& name, const schema_ptr schema, bytes&& key, std::vector<bytes>&& map_keys, bool multi) 
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))
@@ -33,7 +33,7 @@ protected:
     bytes _key;
     redis::fetch_options _option;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     hall(bytes&& name, const schema_ptr schema, bytes&& key, redis::fetch_options option)
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))
@@ -46,19 +46,19 @@ public:
 
 class hkeys : public hall {
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     hkeys(bytes&& name, const schema_ptr schema, bytes&& key) : hall(std::move(name), schema, std::move(key), redis::fetch_options::keys) {}
     ~hkeys() {}
 };
 class hvals : public hall {
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     hvals(bytes&& name, const schema_ptr schema, bytes&& key) : hall(std::move(name), schema, std::move(key), redis::fetch_options::values) {}
     ~hvals() {}
 };
 class hgetall : public hall {
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     hgetall(bytes&& name, const schema_ptr schema, bytes&& key) : hall(std::move(name), schema, std::move(key), redis::fetch_options::all) {}
     ~hgetall() {}
 };

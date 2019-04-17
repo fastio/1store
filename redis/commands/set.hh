@@ -11,8 +11,7 @@ protected:
     bytes _data;
     long _ttl = 0;
 public:
-
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     set(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data, long ttl) 
         : command_with_single_schema(std::move(name), schema) 
         , _key(std::move(key))
@@ -30,7 +29,7 @@ public:
 
 class setnx : public set {
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     setnx(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data)
         : set(std::move(name), schema, std::move(key), std::move(data))
     {
@@ -41,7 +40,7 @@ public:
 
 class setex : public set {
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     setex(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data, long ttl)
         : set(std::move(name), schema, std::move(key), std::move(data), ttl)
     {
@@ -59,7 +58,7 @@ public:
     {
     }
     ~mset() {}
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     future<redis_message> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
 };
 
@@ -70,7 +69,7 @@ public:
     {
     }
     ~msetnx() {}
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     future<redis_message> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
 };
 }

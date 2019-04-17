@@ -40,7 +40,7 @@ public:
         virtual ~impl() {}
         virtual void init() = 0;
         virtual char* parse(char* p, char* limit, char* eof) = 0;
-        virtual request get_request() = 0;
+        virtual request& get_request() = 0;
     };
 public:
     explicit protocol_parser(std::unique_ptr<impl> p) : _impl(std::move(p)) {}

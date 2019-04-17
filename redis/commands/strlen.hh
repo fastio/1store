@@ -7,7 +7,7 @@ namespace redis {
 namespace commands {
 class strlen final : public get {
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     strlen(bytes&& name, const schema_ptr schema, bytes&& key) : get(std::move(name), schema, std::move(key))
     {
     }

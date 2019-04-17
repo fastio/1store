@@ -55,6 +55,7 @@
 
 #include "response.hh"
 #include "request.hh"
+#include "redis/reply.hh"
 namespace redis_transport {
 
 static logging::logger logging("redis_server");
@@ -170,6 +171,31 @@ future<redis_server::connection::result> redis_server::connection::process_reque
     });
 }
 
+int redis_server::connection::maybe_change_keyspace(const redis::request& req, tracing_request_type rt) {
+    if (req._command != "select") {
+        return -1;
+    }
+    if (req._args_count != 1) {
+        return 2;
+    }
+    long index = -1;
+    auto& arg = req._args[0];
+    if (!(!arg.empty() && std::find_if(arg.begin(), arg.end(), [] (auto c) { return !std::isdigit((char)c); }) == arg.end())) {
+        return 1;
+    }
+
+    try {
+        index = std::atol(sstring{reinterpret_cast<const char*>(arg.data()), arg.size()}.data());
+    } catch (std::exception const & e) {
+        return 1;
+    }
+    if (index >= 0 && index < 16) {
+        _client_state.set_raw_keyspace(sprint("redis_%d", static_cast<int>(index)));
+        return 0;
+    }
+    return 1;
+}
+
 redis_server::connection::connection(redis_server& server, ipv4_addr server_addr, connected_socket&& fd, socket_address addr)
     : _server(server)
     , _server_addr(server_addr)
@@ -177,7 +203,7 @@ redis_server::connection::connection(redis_server& server, ipv4_addr server_addr
     , _read_buf(_fd.input())
     , _write_buf(_fd.output())
     , _parser(redis::make_ragel_protocol_parser())
-    , _client_state(service::client_state::external_tag{}, server._auth_service, addr)
+    , _client_state(service::client_state::external_redis_tag{}, server._auth_service, addr, "redis_0")
 {
     ++_server._total_connections;
     ++_server._current_connections;
@@ -240,13 +266,32 @@ future<> redis_server::connection::process_request() {
         tracing_request_type tracing_requested = tracing_request_type::not_requested;
         [&] {
             auto cpu = pick_request_cpu();
-            if (cpu == engine().cpu_id()) {
-                return _process_request_stage(this, _parser.get_request(), service::client_state(service::client_state::request_copy_tag{}, _client_state, _client_state.get_timestamp()), tracing_requested);
-            } else {
-                return smp::submit_to(cpu, [this, request = std::move(_parser.get_request()), client_state = _client_state, tracing_requested, ts = _client_state.get_timestamp()] () mutable {
-                    return _process_request_stage(this, request, service::client_state(service::client_state::request_copy_tag{}, client_state, ts), tracing_requested);
+            // If the SELECT command coming,  Maybe we should change the
+            // keyspace of current connection.
+            // So do not submit the SELECT command to other shard.
+            auto changed = maybe_change_keyspace(_parser.get_request(), tracing_requested);
+            if (changed < 0) {
+                if (cpu == engine().cpu_id()) {
+                    return _process_request_stage(this, std::move(_parser.get_request()), service::client_state(service::client_state::request_copy_tag{}, _client_state, _client_state.get_timestamp()), tracing_requested);
+                } else {
+                    return smp::submit_to(cpu, [this, request = std::move(_parser.get_request()), client_state = _client_state, tracing_requested, ts = _client_state.get_timestamp()] () mutable {
+                        return _process_request_stage(this, request, service::client_state(service::client_state::request_copy_tag{}, client_state, ts), tracing_requested);
+                    });
+                }
+            } else if (changed == 0) {
+                // Move these codes to query processor.
+                return redis::redis_message::ok().then([] (auto&& message) {
+                    return make_ready_future<redis_server::connection::result>(std::move(message));
                 });
-            }
+            } else if (changed == 1) {
+                return redis::redis_message::make_exception("-invalid DB index").then([] (auto&& message) {
+                    return make_ready_future<redis_server::connection::result>(std::move(message));
+                });
+            } else {
+                return redis::redis_message::make_exception("-wrong number of arguments for 'select' command").then([] (auto&& message) {
+                    return make_ready_future<redis_server::connection::result>(std::move(message));
+                });
+            } 
         } ().then_wrapped([this, leave = std::move(leave)] (future<result> result_future) {
             try {
                 auto result = result_future.get0();

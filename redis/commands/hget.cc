@@ -19,7 +19,7 @@
 namespace redis {
 namespace commands {
 
-shared_ptr<abstract_command> hget::prepare(service::storage_proxy& proxy, request&& req, bool multi)
+shared_ptr<abstract_command> hget::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req, bool multi)
 {
     if (req._args_count < 2 || (!multi && req._args_count != 2)) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
@@ -28,23 +28,23 @@ shared_ptr<abstract_command> hget::prepare(service::storage_proxy& proxy, reques
     for (size_t i = 1; i < req._args_count; i++) {
         map_keys.emplace_back(req._args[i]);
     }
-    return seastar::make_shared<hget>(std::move(req._command), maps_schema(proxy), std::move(req._args[0]), std::move(map_keys), multi);
+    return seastar::make_shared<hget>(std::move(req._command), maps_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(map_keys), multi);
 }
 template<typename Type>
-shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, request&& req) {
+shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
     if (req._args_count != 1) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
     }
-    return seastar::make_shared<Type>(std::move(req._command), maps_schema(proxy), std::move(req._args[0]));
+    return seastar::make_shared<Type>(std::move(req._command), maps_schema(proxy, cs.get_keyspace()), std::move(req._args[0]));
 }
-shared_ptr<abstract_command> hkeys::prepare(service::storage_proxy& proxy, request&& req) {
-    return prepare_impl<hkeys>(proxy, std::move(req));
+shared_ptr<abstract_command> hkeys::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
+    return prepare_impl<hkeys>(proxy, cs, std::move(req));
 }
-shared_ptr<abstract_command> hvals::prepare(service::storage_proxy& proxy, request&& req) {
-    return prepare_impl<hvals>(proxy, std::move(req));
+shared_ptr<abstract_command> hvals::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
+    return prepare_impl<hvals>(proxy, cs, std::move(req));
 }
-shared_ptr<abstract_command> hgetall::prepare(service::storage_proxy& proxy, request&& req) {
-    return prepare_impl<hgetall>(proxy, std::move(req));
+shared_ptr<abstract_command> hgetall::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
+    return prepare_impl<hgetall>(proxy, cs, std::move(req));
 }
 future<redis_message> hget::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {

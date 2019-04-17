@@ -124,6 +124,7 @@ private:
 public:
     struct internal_tag {};
     struct external_tag {};
+    struct external_redis_tag {};
     struct request_copy_tag {};
 
     void create_tracing_session(tracing::trace_type type, tracing::trace_state_props_set props) {
@@ -168,6 +169,14 @@ public:
         if (!auth_service.underlying_authenticator().require_authentication()) {
             _user = ::make_shared<auth::authenticated_user>();
         }
+    }
+    client_state(external_redis_tag, auth::service& auth_service, const socket_address& remote_address, sstring keyspace)
+            : _keyspace(keyspace) 
+            , _cpu_of_origin(engine().cpu_id())
+            , _is_internal(false)
+            , _is_thrift(false)
+            , _remote_address(remote_address)
+            , _auth_service(&auth_service) {
     }
 
     gms::inet_address get_client_address() const {

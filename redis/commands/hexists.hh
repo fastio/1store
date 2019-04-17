@@ -10,7 +10,7 @@ protected:
     bytes _key;
     bytes _map_key;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     hexists(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& map_key)
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))

@@ -35,35 +35,34 @@ class redis_message;
 }
 namespace redis {
 
-static inline decltype(auto) keyspace() { return redis::NAME; }
 static inline decltype(auto) simple_objects() { return redis::SIMPLE_OBJECTS; }
 static inline decltype(auto) lists() { return redis::LISTS; }
 static inline decltype(auto) sets() { return redis::SETS; }
 static inline decltype(auto) maps() { return redis::MAPS; }
 static inline decltype(auto) zsets() { return redis::ZSETS; }
-static inline const schema_ptr simple_objects_schema(service::storage_proxy& proxy) {
+static inline const schema_ptr simple_objects_schema(service::storage_proxy& proxy, const sstring& keyspace) {
     auto& db = proxy.get_db().local();
-    auto schema = db.find_schema(keyspace(), simple_objects());
+    auto schema = db.find_schema(keyspace, simple_objects());
     return schema;
 }
-static inline const schema_ptr lists_schema(service::storage_proxy& proxy) {
+static inline const schema_ptr lists_schema(service::storage_proxy& proxy, const sstring& keyspace) {
     auto& db = proxy.get_db().local();
-    auto schema = db.find_schema(keyspace(), lists());
+    auto schema = db.find_schema(keyspace, lists());
     return schema;
 }
-static inline const schema_ptr sets_schema(service::storage_proxy& proxy) {
+static inline const schema_ptr sets_schema(service::storage_proxy& proxy, const sstring& keyspace) {
     auto& db = proxy.get_db().local();
-    auto schema = db.find_schema(keyspace(), sets());
+    auto schema = db.find_schema(keyspace, sets());
     return schema;
 }
-static inline const schema_ptr maps_schema(service::storage_proxy& proxy) {
+static inline const schema_ptr maps_schema(service::storage_proxy& proxy, const sstring& keyspace) {
     auto& db = proxy.get_db().local();
-    auto schema = db.find_schema(keyspace(), maps());
+    auto schema = db.find_schema(keyspace, maps());
     return schema;
 }
-static inline const schema_ptr zsets_schema(service::storage_proxy& proxy) {
+static inline const schema_ptr zsets_schema(service::storage_proxy& proxy, const sstring& keyspace) {
     auto& db = proxy.get_db().local();
-    auto schema = db.find_schema(keyspace(), zsets());
+    auto schema = db.find_schema(keyspace, zsets());
     return schema;
 }
 

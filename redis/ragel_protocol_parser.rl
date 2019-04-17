@@ -215,7 +215,10 @@ public:
     bool eof() const {
         return _req._state == protocol_state::eof;
     }
-    virtual redis::request get_request() { return std::move(_req); }
+    virtual redis::request& get_request() { 
+        std::transform(_req._command.begin(), _req._command.end(), _req._command.begin(), ::tolower);
+        return _req;
+    }
 };
 
 }

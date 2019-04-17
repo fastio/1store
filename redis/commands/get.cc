@@ -19,12 +19,12 @@
 namespace redis {
 namespace commands {
 
-shared_ptr<abstract_command> get::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> get::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count != 1) {
         return unexpected::prepare(std::move(req._command), std::move(to_bytes(sprint("-wrong number of arguments (given %ld, expected 1)\r\n", req._args_count))));
     }
-    return make_shared<get>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]));
+    return make_shared<get>(std::move(req._command), simple_objects_schema(proxy, cs.get_keyspace()), std::move(req._args[0]));
 }
 
 future<redis_message> get::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
@@ -39,12 +39,12 @@ future<redis_message> get::execute(service::storage_proxy& proxy, db::consistenc
     });
 }
 
-shared_ptr<abstract_command> getset::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> getset::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 2) {
         return unexpected::prepare(std::move(req._command), std::move(to_bytes(sprint("-wrong number of arguments (given %ld, expected 1)\r\n", req._args_count))));
     }
-    return make_shared<getset>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
+    return make_shared<getset>(std::move(req._command), simple_objects_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[1]));
 }
 
 future<redis_message> getset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
@@ -65,12 +65,12 @@ future<redis_message> getset::execute(service::storage_proxy& proxy, db::consist
     });
 }
 
-shared_ptr<abstract_command> mget::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> mget::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 1) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
     }
-    return seastar::make_shared<mget>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args));
+    return seastar::make_shared<mget>(std::move(req._command), simple_objects_schema(proxy, cs.get_keyspace()), std::move(req._args));
 }
 
 future<redis_message> mget::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)

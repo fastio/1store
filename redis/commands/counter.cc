@@ -14,33 +14,32 @@
 #include "cql3/query_options.hh"
 namespace redis {
 namespace commands {
-static logging::logger log("command_counter");
-shared_ptr<abstract_command> counter_by_prepare_impl(service::storage_proxy& proxy, request&& req, bool incr)
+shared_ptr<abstract_command> counter_by_prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req, bool incr)
 {
     if (req._args_count < 2) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
     }
-    return make_shared<counter>(std::move(req._command), simple_objects_schema(proxy), std::move(req._args[0]), std::move(req._args[1]), incr);
+    return make_shared<counter>(std::move(req._command), simple_objects_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[1]), incr);
 }
-shared_ptr<abstract_command> counter::prepare(service::storage_proxy& proxy, incrby_tag, request&& req)
+shared_ptr<abstract_command> counter::prepare(service::storage_proxy& proxy, const service::client_state& cs, incrby_tag, request&& req)
 {
-    return counter_by_prepare_impl(proxy, std::move(req), true);
+    return counter_by_prepare_impl(proxy, cs, std::move(req), true);
 }
-shared_ptr<abstract_command> counter::prepare(service::storage_proxy& proxy, decrby_tag, request&& req)
+shared_ptr<abstract_command> counter::prepare(service::storage_proxy& proxy, const service::client_state& cs, decrby_tag, request&& req)
 {
-    return counter_by_prepare_impl(proxy, std::move(req), false);
+    return counter_by_prepare_impl(proxy, cs, std::move(req), false);
 }
-shared_ptr<abstract_command> counter::prepare(service::storage_proxy& proxy, incr_tag, request&& req)
-{
-    req._args_count++;
-    req._args.emplace_back(std::move(to_bytes("1")));
-    return counter_by_prepare_impl(proxy, std::move(req), true);
-}
-shared_ptr<abstract_command> counter::prepare(service::storage_proxy& proxy, decr_tag, request&& req)
+shared_ptr<abstract_command> counter::prepare(service::storage_proxy& proxy, const service::client_state& cs, incr_tag, request&& req)
 {
     req._args_count++;
     req._args.emplace_back(std::move(to_bytes("1")));
-    return counter_by_prepare_impl(proxy, std::move(req), false);
+    return counter_by_prepare_impl(proxy, cs, std::move(req), true);
+}
+shared_ptr<abstract_command> counter::prepare(service::storage_proxy& proxy, const service::client_state& cs, decr_tag, request&& req)
+{
+    req._args_count++;
+    req._args.emplace_back(std::move(to_bytes("1")));
+    return counter_by_prepare_impl(proxy, cs, std::move(req), false);
 }
 
 future<redis_message> counter::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)

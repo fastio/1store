@@ -18,7 +18,7 @@ namespace redis {
 
 namespace commands {
 
-shared_ptr<abstract_command> expire::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> expire::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count != 2) {
         return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
@@ -29,16 +29,28 @@ shared_ptr<abstract_command> expire::prepare(service::storage_proxy& proxy, requ
     } catch(std::exception&) {
         return unexpected::make_wrong_arguments_exception(std::move(req._command), to_bytes("-ERR value is not an integer or out of range"));
     }
-    std::vector<schema_ptr> schemas { simple_objects_schema(proxy), lists_schema(proxy), sets_schema(proxy), maps_schema(proxy), zsets_schema(proxy) };
+    std::vector<schema_ptr> schemas {
+        simple_objects_schema(proxy, cs.get_keyspace()),
+        lists_schema(proxy, cs.get_keyspace()),
+        sets_schema(proxy, cs.get_keyspace()),
+        maps_schema(proxy, cs.get_keyspace()),
+        zsets_schema(proxy, cs.get_keyspace())
+    };
     return seastar::make_shared<expire> (std::move(req._command), std::move(schemas), std::move(req._args[0]), ttl);
 }
 
-shared_ptr<abstract_command> persist::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> persist::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count != 1) {
         return unexpected::make_wrong_arguments_exception(std::move(req._command), 1, req._args_count);
     }
-    std::vector<schema_ptr> schemas { simple_objects_schema(proxy), lists_schema(proxy), sets_schema(proxy), maps_schema(proxy), zsets_schema(proxy) };
+    std::vector<schema_ptr> schemas {
+        simple_objects_schema(proxy, cs.get_keyspace()),
+        lists_schema(proxy, cs.get_keyspace()),
+        sets_schema(proxy, cs.get_keyspace()),
+        maps_schema(proxy, cs.get_keyspace()),
+        zsets_schema(proxy, cs.get_keyspace())
+    };
     return seastar::make_shared<persist> (std::move(req._command), std::move(schemas), std::move(req._args[0]));
 }
 
@@ -47,9 +59,9 @@ future<redis_message> expire::execute(service::storage_proxy& proxy, db::consist
     auto timeout = now + tc.write_timeout;
     std::vector<std::function<future<bool>()>> executors {
         [this, timeout, &proxy, cl, &cs] () {
-            return prefetch_simple(proxy, redis::simple_objects_schema(proxy), _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+            return prefetch_simple(proxy, redis::simple_objects_schema(proxy, cs.get_keyspace()), _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
                 if (pd && pd->has_data()) {
-                    return redis::write_mutation(proxy, redis::make_simple(redis::simple_objects_schema(proxy), _key, std::move(pd->_data), _ttl), cl, timeout, cs).then([] {
+                    return redis::write_mutation(proxy, redis::make_simple(redis::simple_objects_schema(proxy, cs.get_keyspace()), _key, std::move(pd->_data), _ttl), cl, timeout, cs).then([] {
                         return make_ready_future<bool>(true);
                     });
                 }
@@ -57,9 +69,9 @@ future<redis_message> expire::execute(service::storage_proxy& proxy, db::consist
             });
         },
         [this, timeout, &proxy, cl, &cs] () {
-            return prefetch_list(proxy, redis::lists_schema(proxy), _key, fetch_options::all, false, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+            return prefetch_list(proxy, redis::lists_schema(proxy, cs.get_keyspace()), _key, fetch_options::all, false, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
                 if (pd && pd->has_data()) {
-                    auto list_cells = redis::make_list_indexed_cells(redis::lists_schema(proxy), _key, std::move(pd->_data), _ttl);
+                    auto list_cells = redis::make_list_indexed_cells(redis::lists_schema(proxy, cs.get_keyspace()), _key, std::move(pd->_data), _ttl);
                     return redis::write_mutation(proxy, list_cells, cl, timeout, cs).then([] {
                         return make_ready_future<bool>(true);
                     });
@@ -68,9 +80,9 @@ future<redis_message> expire::execute(service::storage_proxy& proxy, db::consist
             });
         },
         [this, timeout, &proxy, cl, &cs] () {
-            return prefetch_map(proxy, redis::maps_schema(proxy), _key, fetch_options::all, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+            return prefetch_map(proxy, redis::maps_schema(proxy, cs.get_keyspace()), _key, fetch_options::all, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
                 if (pd && pd->has_data()) {
-                    auto map_cells = redis::make_map_indexed_cells(redis::maps_schema(proxy), _key, std::move(pd->_data), _ttl);
+                    auto map_cells = redis::make_map_indexed_cells(redis::maps_schema(proxy, cs.get_keyspace()), _key, std::move(pd->_data), _ttl);
                     return redis::write_mutation(proxy, map_cells, cl, timeout, cs).then([] {
                         return make_ready_future<bool>(true);
                     });
@@ -79,9 +91,9 @@ future<redis_message> expire::execute(service::storage_proxy& proxy, db::consist
             });
         },
         [this, timeout, &proxy, cl, &tc, &cs] () {
-            return prefetch_set(proxy, redis::sets_schema(proxy), _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+            return prefetch_set(proxy, redis::sets_schema(proxy, cs.get_keyspace()), _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
                 if (pd && pd->has_data()) {
-                    auto set_cells = redis::make_set_indexed_cells(redis::maps_schema(proxy), _key, std::move(pd->_data), _ttl);
+                    auto set_cells = redis::make_set_indexed_cells(redis::sets_schema(proxy, cs.get_keyspace()), _key, std::move(pd->_data), _ttl);
                     return redis::write_mutation(proxy, set_cells, cl, timeout, cs).then([] {
                         return make_ready_future<bool>(true);
                     });
@@ -90,9 +102,9 @@ future<redis_message> expire::execute(service::storage_proxy& proxy, db::consist
             });
         },
         [this, timeout, &proxy, cl, &tc, &cs] () {
-            return prefetch_zset(proxy, redis::zsets_schema(proxy), _key, fetch_options::all, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
+            return prefetch_zset(proxy, redis::zsets_schema(proxy, cs.get_keyspace()), _key, fetch_options::all, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
                 if (pd && pd->has_data()) {
-                    auto zset_cells = redis::make_zset_indexed_cells(redis::maps_schema(proxy), _key, std::move(pd->_data), _ttl);
+                    auto zset_cells = redis::make_zset_indexed_cells(redis::zsets_schema(proxy, cs.get_keyspace()), _key, std::move(pd->_data), _ttl);
                     return redis::write_mutation(proxy, zset_cells, cl, timeout, cs).then([] {
                         return make_ready_future<bool>(true);
                     });

@@ -16,7 +16,7 @@ protected:
     bytes _member;
     future<redis_message> execute_impl(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs, bool reversed);
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     zrank(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& member) 
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))
@@ -31,7 +31,7 @@ public:
 
 class zrevrank : public zrank {
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     zrevrank(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& member)
         : zrank(std::move(name), schema, std::move(key), std::move(member))
     {

@@ -11,7 +11,7 @@ private:
     double _increment;
 public:
 
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     zincrby(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& member, double increment) 
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))

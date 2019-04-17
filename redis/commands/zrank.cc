@@ -20,18 +20,18 @@ namespace redis {
 namespace commands {
 
 template<typename RankType>
-shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 2) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
     }
-    return seastar::make_shared<RankType>(std::move(req._command), zsets_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
+    return seastar::make_shared<RankType>(std::move(req._command), zsets_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[1]));
 }
-shared_ptr<abstract_command> zrank::prepare(service::storage_proxy& proxy, request&& req) {
-    return prepare_impl<zrank>(proxy, std::move(req));
+shared_ptr<abstract_command> zrank::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
+    return prepare_impl<zrank>(proxy, cs, std::move(req));
 }
-shared_ptr<abstract_command> zrevrank::prepare(service::storage_proxy& proxy, request&& req) {
-    return prepare_impl<zrevrank>(proxy, std::move(req));
+shared_ptr<abstract_command> zrevrank::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
+    return prepare_impl<zrevrank>(proxy, cs, std::move(req));
 }
 
 future<redis_message> zrank::execute_impl(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs, bool reversed)

@@ -16,7 +16,7 @@ protected:
     double _min;
     double _max;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     zcount(bytes&& name, const schema_ptr schema, bytes&& key, double min, double max) 
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))

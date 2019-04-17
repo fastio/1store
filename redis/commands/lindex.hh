@@ -20,7 +20,7 @@ public:
     {
     }
     ~lindex() {}
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     virtual future<redis_message> execute(service::storage_proxy&,
         db::consistency_level,
         db::timeout_clock::time_point,

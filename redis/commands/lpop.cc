@@ -14,23 +14,22 @@
 namespace redis {
 namespace commands {
 
-static logging::logger log("command_pop");
 template<typename PopType>
-shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 1) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
     }
-    return make_shared<PopType>(std::move(req._command), lists_schema(proxy), std::move(req._args[0]));
+    return make_shared<PopType>(std::move(req._command), lists_schema(proxy, cs.get_keyspace()), std::move(req._args[0]));
 }
 
-shared_ptr<abstract_command> lpop::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> lpop::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
-    return prepare_impl<lpop>(proxy, std::move(req));
+    return prepare_impl<lpop>(proxy, cs, std::move(req));
 }
-shared_ptr<abstract_command> rpop::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> rpop::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
-    return prepare_impl<rpop>(proxy, std::move(req));
+    return prepare_impl<rpop>(proxy, cs, std::move(req));
 }
 future<redis_message> lpop::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)
 {

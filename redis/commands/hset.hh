@@ -12,7 +12,7 @@ private:
     bool _multi = false;
 public:
 
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req, bool multi);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req, bool multi);
     hset(bytes&& name, const schema_ptr schema, bytes&& key, std::unordered_map<bytes, bytes>&& data, bool multi) 
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))

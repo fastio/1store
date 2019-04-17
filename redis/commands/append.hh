@@ -10,7 +10,7 @@ class append : public get {
 protected:
     bytes _data;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     append(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data) : get(std::move(name), schema, std::move(key)), _data(std::move(data))
     {
     }

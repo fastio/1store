@@ -21,7 +21,7 @@ namespace redis {
 namespace commands {
 static logging::logger zblog("zrangebyscore");
 template<typename CommandType>
-shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 3) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
@@ -46,15 +46,15 @@ shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, request
             i++;
         }
     }
-    return seastar::make_shared<CommandType>(std::move(req._command), zsets_schema(proxy), std::move(req._args[0]), min, max, with_scores, offset, count);
+    return seastar::make_shared<CommandType>(std::move(req._command), zsets_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), min, max, with_scores, offset, count);
 }
 
-shared_ptr<abstract_command> zrangebyscore::prepare(service::storage_proxy& proxy, request&& req) {
-    return prepare_impl<zrangebyscore>(proxy, std::move(req));
+shared_ptr<abstract_command> zrangebyscore::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
+    return prepare_impl<zrangebyscore>(proxy, cs, std::move(req));
 }
 
-shared_ptr<abstract_command> zrevrangebyscore::prepare(service::storage_proxy& proxy, request&& req) {
-    return prepare_impl<zrevrangebyscore>(proxy, std::move(req));
+shared_ptr<abstract_command> zrevrangebyscore::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
+    return prepare_impl<zrevrangebyscore>(proxy, cs, std::move(req));
 }
 
 future<redis_message> zrangebyscore::execute_impl(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs, bool reversed)

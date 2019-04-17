@@ -18,12 +18,12 @@ namespace redis {
 
 namespace commands {
 
-shared_ptr<abstract_command> hexists::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> hexists::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count != 2) {
         return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
     }
-    return seastar::make_shared<hexists> (std::move(req._command), maps_schema(proxy), std::move(req._args[0]), std::move(req._args[1]));
+    return seastar::make_shared<hexists> (std::move(req._command), maps_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[1]));
 }
 
 future<redis_message> hexists::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)

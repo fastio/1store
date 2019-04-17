@@ -12,12 +12,18 @@
 #include "redis/prefetcher.hh"
 namespace redis {
 namespace commands {
-shared_ptr<abstract_command> exists::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> exists::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 1) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
     }
-    std::vector<schema_ptr> schemas { simple_objects_schema(proxy), lists_schema(proxy), sets_schema(proxy), maps_schema(proxy), zsets_schema(proxy) };
+    std::vector<schema_ptr> schemas {
+        simple_objects_schema(proxy, cs.get_keyspace()),
+        lists_schema(proxy, cs.get_keyspace()),
+        sets_schema(proxy, cs.get_keyspace()),
+        maps_schema(proxy, cs.get_keyspace()),
+        zsets_schema(proxy, cs.get_keyspace())
+    };
     return seastar::make_shared<exists> (std::move(req._command), std::move(schemas), std::move(req._args[0]));
 }
 

@@ -17,7 +17,7 @@ protected:
     long _end;
     bool _with_scores = false;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     zrange(bytes&& name, const schema_ptr schema, bytes&& key, long begin, long end, bool with_scores) 
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))
@@ -35,7 +35,7 @@ public:
 
 class zrevrange : public zrange {
 public: 
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     zrevrange(bytes&& name, const schema_ptr schema, bytes&& key, long begin, long end, bool with_scores)
         : zrange(std::move(name), schema, std::move(key), begin, end, with_scores)
     {

@@ -18,7 +18,7 @@ namespace redis {
 
 namespace commands {
 
-shared_ptr<abstract_command> hdel::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> hdel::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count != 2) {
         return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
@@ -26,7 +26,7 @@ shared_ptr<abstract_command> hdel::prepare(service::storage_proxy& proxy, reques
     std::vector<bytes> map_keys;
     map_keys.reserve(req._args.size() - 1);
     map_keys.insert(map_keys.end(), std::make_move_iterator(++(req._args.begin())), std::make_move_iterator(req._args.end()));
-    return seastar::make_shared<hdel> (std::move(req._command), maps_schema(proxy), std::move(req._args[0]), std::move(map_keys));
+    return seastar::make_shared<hdel> (std::move(req._command), maps_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(map_keys));
 }
 
 future<redis_message> hdel::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)

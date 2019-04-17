@@ -15,7 +15,7 @@ protected:
     bytes _key;
     std::vector<bytes> _members;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     zrem(bytes&& name, const schema_ptr schema, bytes&& key, std::vector<bytes>&& members) 
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))
@@ -32,7 +32,7 @@ protected:
     long _begin;
     long _end;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     zremrangebyrank(bytes&& name, const schema_ptr schema, bytes&& key, long begin, long end)
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))
@@ -50,7 +50,7 @@ protected:
     double _min;
     double _max;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     zremrangebyscore(bytes&& name, const schema_ptr schema, bytes&& key, double min, double max)
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))

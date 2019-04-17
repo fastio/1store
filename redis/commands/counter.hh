@@ -14,10 +14,10 @@ public:
     struct decr_tag {};
     struct incrby_tag {};
     struct decrby_tag {};
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, incr_tag tag, request&& req);
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, decr_tag tag, request&& req);
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, incrby_tag tag, request&& req);
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, decrby_tag tag, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, incr_tag tag, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, decr_tag tag, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, incrby_tag tag, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, decrby_tag tag, request&& req);
     counter(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data, bool incr) : append(std::move(name), schema, std::move(key), std::move(data)), _incr(incr)
     {
     }

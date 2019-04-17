@@ -15,7 +15,7 @@
 namespace redis {
 namespace commands {
 template<typename PushType>
-shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 2) {
         return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
@@ -23,27 +23,27 @@ shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, request
     std::vector<bytes> values;
     values.reserve(req._args.size() - 1);
     values.insert(values.end(), std::make_move_iterator(++(req._args.begin())), std::make_move_iterator(req._args.end()));
-    return seastar::make_shared<PushType>(std::move(req._command), lists_schema(proxy), std::move(req._args[0]), std::move(values));
+    return seastar::make_shared<PushType>(std::move(req._command), lists_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(values));
 }
 
-shared_ptr<abstract_command> lpush::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> lpush::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {   
-    return prepare_impl<lpush>(proxy, std::move(req));
+    return prepare_impl<lpush>(proxy, cs, std::move(req));
 }
 
-shared_ptr<abstract_command> lpushx::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> lpushx::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
-    return prepare_impl<lpushx>(proxy, std::move(req));
+    return prepare_impl<lpushx>(proxy, cs, std::move(req));
 }
 
-shared_ptr<abstract_command> rpush::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> rpush::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
-    return prepare_impl<rpush>(proxy, std::move(req));
+    return prepare_impl<rpush>(proxy, cs, std::move(req));
 }
 
-shared_ptr<abstract_command> rpushx::prepare(service::storage_proxy& proxy, request&& req)
+shared_ptr<abstract_command> rpushx::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
-    return prepare_impl<rpushx>(proxy, std::move(req));
+    return prepare_impl<rpushx>(proxy, cs, std::move(req));
 }
 
 

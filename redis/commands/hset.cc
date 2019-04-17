@@ -14,7 +14,7 @@ namespace redis {
 
 namespace commands {
 
-shared_ptr<abstract_command> hset::prepare(service::storage_proxy& proxy, request&& req, bool multi)
+shared_ptr<abstract_command> hset::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req, bool multi)
 {
     if (req._args_count < 3 || req._args_count % 2 != 1 || (multi && req._args_count > 3)) {
         return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
@@ -23,7 +23,7 @@ shared_ptr<abstract_command> hset::prepare(service::storage_proxy& proxy, reques
     for (size_t i = 1; i < req._args_count; i+= 2) {
         data.emplace(std::make_pair(req._args[i], req._args[i + 1]));
     }
-    return seastar::make_shared<hset> (std::move(req._command), maps_schema(proxy), std::move(req._args[0]), std::move(data), multi);
+    return seastar::make_shared<hset> (std::move(req._command), maps_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(data), multi);
 }
 
 future<redis_message> hset::execute(service::storage_proxy& proxy, db::consistency_level cl, db::timeout_clock::time_point now, const timeout_config& tc, service::client_state& cs)

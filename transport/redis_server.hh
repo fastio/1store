@@ -131,6 +131,7 @@ private:
         const ::timeout_config& timeout_config() { return _server.timeout_config(); }
         friend class process_request_executor;
         future<result> process_request_one(redis::request&& request,  service::client_state cs, tracing_request_type rt);
+        int maybe_change_keyspace(const redis::request& request, tracing_request_type rt);
         unsigned pick_request_cpu();
     };
 

@@ -13,7 +13,7 @@ class get : public command_with_single_schema {
 protected:
     bytes _key;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     get(bytes&& name, const schema_ptr schema, bytes&& key) 
         : command_with_single_schema(std::move(name), schema)
         , _key(std::move(key))
@@ -26,7 +26,7 @@ public:
 class getset : public get {
     bytes _data;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     getset(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data) 
         : get(std::move(name), schema, std::move(key))
         , _data(std::move(data))
@@ -40,7 +40,7 @@ class mget : public command_with_single_schema {
 protected:
     std::vector<bytes> _keys;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
     mget(bytes&& name, const schema_ptr schema, std::vector<bytes>&& keys) 
         : command_with_single_schema(std::move(name), schema)
         , _keys(std::move(keys))

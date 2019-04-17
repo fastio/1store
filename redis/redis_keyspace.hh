@@ -6,7 +6,8 @@
 using namespace seastar;
 namespace redis {
 
-static constexpr auto NAME = "redis";
+static constexpr auto REDIS_DATABASE_NAME_PREFIX = "redis_";
+static constexpr auto DEFAULT_DATABASE_NAME = "redis_0";
 static constexpr auto SIMPLE_OBJECTS = "simple_objects";
 static constexpr auto LISTS = "lists";
 static constexpr auto SETS = "sets";
