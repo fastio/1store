@@ -51,10 +51,7 @@
 #include "auth/service.hh"
 #include "db/system_keyspace.hh"
 #include "db/system_distributed_keyspace.hh"
-#include "redis/redis_keyspace.hh"
-#include "redis/query_processor.hh"
-#include "transport/redis_server.hh"
-#include "log.hh"
+
 using namespace std::chrono_literals;
 
 namespace sstables {
@@ -64,7 +61,7 @@ future<> await_background_jobs_on_all_shards();
 }
 
 static const sstring testing_superuser = "tester";
-static logging::logger envlog("cql_test_env");
+
 static future<> tst_init_ms_fd_gossiper(db::seed_provider_type seed_provider, sstring cluster_name = "Test Cluster") {
     return gms::get_failure_detector().start().then([seed_provider, cluster_name] {
         // Init gossiper
@@ -122,23 +119,6 @@ private:
         }
         return ::make_shared<service::query_state>(_core_local.local().client_state);
     }
-    auto split(const sstring& v) {
-        if (v.empty()) {
-            return std::vector<bytes>();
-        }    
-        std::vector<bytes> result;
-        std::size_t prev = 0; 
-        for (std::size_t i = 0; i < v.size(); ++i) {
-            if (v[i] == ' ') {
-                auto token = v.substr(prev, i - prev);
-                result.emplace_back(bytes(reinterpret_cast<const int8_t*>(token.data()), token.size()));
-                prev = i + 1; 
-            }    
-        }    
-        auto token = v.substr(prev, v.size() - prev);
-        result.emplace_back(bytes(reinterpret_cast<const int8_t*>(token.data()), token.size()));
-        return std::move(result);
-    }
 public:
     single_node_cql_env(
             ::shared_ptr<distributed<database>> db,
@@ -156,30 +136,6 @@ public:
         return local_qp().process(text, *qs, cql3::query_options::DEFAULT).finally([qs, this] {
             _core_local.local().client_state.merge(qs->get_client_state());
         });
-    }
-    
-    virtual future<redis::redis_message> execute_redis(const sstring& text) override {
-        auto make_timeout_config = [] () auto {
-            timeout_config tc;
-            tc.read_timeout = 1000 * 1ms; 
-            tc.write_timeout = 1000 * 1ms; 
-            tc.range_read_timeout = 2000 * 1ms; 
-            tc.counter_write_timeout = 2000 * 1ms; 
-            tc.truncate_timeout = 1000 * 1ms; 
-            tc.cas_timeout = 1000 * 1ms; 
-            tc.other_timeout = 1000 * 1ms; 
-            return tc;
-        };
-        auto tokens = split(text);
-        if (tokens.size() > 0) {
-            redis::request req;
-            req._command = std::move(tokens[0]);
-            tokens.erase(tokens.begin(), tokens.begin() + 1);
-            req._args = std::move(tokens);
-            req._args_count = req._args.size();
-            return redis::get_local_query_processor().process(std::move(req), _core_local.local().client_state, make_timeout_config());
-        }
-        return redis::redis_message::make(bytes("unexpected"));
     }
 
     virtual future<::shared_ptr<cql_transport::messages::result_message>> execute_cql(
@@ -335,8 +291,8 @@ public:
         return execute_cql(query).discard_result();
     }
 
-    static future<> do_with(std::function<future<>(cql_test_env&)> func, const db::config& cfg_in, bool load_redis) {
-        return seastar::async([cfg_in, func, load_redis] {
+    static future<> do_with(std::function<future<>(cql_test_env&)> func, const db::config& cfg_in) {
+        return seastar::async([cfg_in, func] {
             logalloc::prime_segment_pool(memory::stats().total_memory(), memory::min_free_memory()).get();
             bool old_active = false;
             if (!active.compare_exchange_strong(old_active, true)) {
@@ -430,9 +386,7 @@ public:
             cql3::query_processor::memory_config qp_mcfg = {memory::stats().total_memory() / 256, memory::stats().total_memory() / 2560};
             qp.start(std::ref(proxy), std::ref(*db), qp_mcfg).get();
             auto stop_qp = defer([&qp] { qp.stop().get(); });
-            auto& rqp = redis::get_query_processor();
-            rqp.start(std::ref(proxy), std::ref(*db)).get();
-            auto stop_rqp = defer([&rqp] { rqp.stop().get(); });
+
             bm.start(std::ref(qp)).get();
             auto stop_bm = defer([&bm] { bm.stop().get(); });
 
@@ -487,10 +441,6 @@ public:
             auto stop_view_update_generator = defer([view_update_generator] {
                 view_update_generator->stop().get();
             });
-            if (load_redis) {
-                redis::redis_keyspace_helper::create_if_not_exists(cfg).get();
-            }
-
             single_node_cql_env env(db, auth_service, view_builder, view_update_generator);
             env.start().get();
             auto stop_env = defer([&env] { env.stop().get(); });
@@ -508,7 +458,7 @@ const char* single_node_cql_env::ks_name = "ks";
 std::atomic<bool> single_node_cql_env::active = { false };
 
 future<> do_with_cql_env(std::function<future<>(cql_test_env&)> func, const db::config& cfg_in) {
-    return single_node_cql_env::do_with(func, cfg_in, false);
+    return single_node_cql_env::do_with(func, cfg_in);
 }
 
 future<> do_with_cql_env(std::function<future<>(cql_test_env&)> func) {
@@ -520,31 +470,11 @@ future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func, const d
         return seastar::async([func = std::move(func), &e] {
             return func(e);
         });
-    }, cfg_in, false);
+    }, cfg_in);
 }
 
 future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func) {
     return do_with_cql_env_thread(std::move(func), db::config{});
-}
-
-future<> do_with_redis_env(std::function<future<>(cql_test_env&)> func, const db::config& cfg_in) {
-    return single_node_cql_env::do_with(func, cfg_in, true);
-}
-
-future<> do_with_redis_env(std::function<future<>(cql_test_env&)> func) {
-    return do_with_redis_env(std::move(func), db::config{});
-}
-
-future<> do_with_redis_env_thread(std::function<void(cql_test_env&)> func, const db::config& cfg_in) {
-    return single_node_cql_env::do_with([func = std::move(func)] (auto& e) {
-        return seastar::async([func = std::move(func), &e] {
-            return func(e);
-        });
-    }, cfg_in, true);
-}
-
-future<> do_with_redis_env_thread(std::function<void(cql_test_env&)> func) {
-    return do_with_redis_env_thread(std::move(func), db::config{});
 }
 
 class storage_service_for_tests::impl {

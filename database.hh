@@ -128,9 +128,6 @@ class rp_handle;
 
 namespace system_keyspace {
 void make(database& db, bool durable, bool volatile_testing_only);
-namespace redis {
-void make(database& db, bool durable, bool volatile_testing_only);
-}
 }
 }
 
@@ -1282,7 +1279,6 @@ private:
     void add_keyspace(sstring name, keyspace k);
     void create_in_memory_keyspace(const lw_shared_ptr<keyspace_metadata>& ksm);
     friend void db::system_keyspace::make(database& db, bool durable, bool volatile_testing_only);
-    friend void db::system_keyspace::redis::make(database& db, bool durable, bool volatile_testing_only);
     void setup_metrics();
 
     friend class db_apply_executor;

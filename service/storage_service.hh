@@ -65,11 +65,9 @@
 namespace cql_transport {
     class cql_server;
 }
-
 namespace redis_transport {
     class redis_server;
 }
-
 class thrift_server;
 
 namespace dht {
@@ -359,8 +357,9 @@ public:
     future<> start_redis_transport();
 
     future<> stop_redis_transport();
-    
+
     future<bool> is_redis_transport_running();
+
 private:
     future<> do_stop_rpc_server();
     future<> do_stop_native_transport();

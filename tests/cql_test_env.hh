@@ -37,8 +37,7 @@
 #include "schema.hh"
 #include "tests/eventually.hh"
 #include "db/view/view_update_from_staging_generator.hh"
-#include "redis/request.hh"
-#include "redis/reply.hh"
+
 class database;
 
 namespace db::view {
@@ -61,17 +60,13 @@ public:
 namespace db {
     class config;
 }
-namespace redis {
-    class request;
-}
+
 class cql_test_env {
 public:
     virtual ~cql_test_env() {};
 
     virtual future<::shared_ptr<cql_transport::messages::result_message>> execute_cql(const sstring& text) = 0;
 
-    virtual future<redis::redis_message> execute_redis(const sstring& text) = 0;
-    
     virtual future<::shared_ptr<cql_transport::messages::result_message>> execute_cql(
         const sstring& text, std::unique_ptr<cql3::query_options> qo) = 0;
 
@@ -116,8 +111,3 @@ future<> do_with_cql_env(std::function<future<>(cql_test_env&)> func);
 future<> do_with_cql_env(std::function<future<>(cql_test_env&)> func, const db::config&);
 future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func);
 future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func, const db::config&);
-
-future<> do_with_redis_env(std::function<future<>(cql_test_env&)> func);
-future<> do_with_redis_env(std::function<future<>(cql_test_env&)> func, const db::config&);
-future<> do_with_redis_env_thread(std::function<void(cql_test_env&)> func);
-future<> do_with_redis_env_thread(std::function<void(cql_test_env&)> func, const db::config&);

@@ -49,7 +49,7 @@
  */
 
 #include "crc_combine.hh"
-#include "crc_combine_table.hh"
+#include "utils/gz/crc_combine_table.hh"
 #include "utils/clmul.hh"
 
 using u32 = uint32_t;

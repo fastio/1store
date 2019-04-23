@@ -273,6 +273,7 @@ scylla_tests = [
     'tests/perf/perf_sstable',
     'tests/cql_query_test',
     'tests/secondary_index_test',
+    'tests/json_cql_query_test',
     'tests/filtering_test',
     'tests/storage_proxy_test',
     'tests/schema_change_test',
@@ -365,21 +366,17 @@ perf_tests = [
     'tests/perf/perf_idl',
 ]
 
-
-redis_tests = [
-    'tests/redis/kv_test',
-]
 apps = [
-    'pedis',
+    'scylla',
 ]
 
-tests = scylla_tests + perf_tests + redis_tests
+tests = scylla_tests + perf_tests
 
 other = [
     'iotune',
 ]
 
-all_artifacts = apps + tests + other
+all_artifacts = apps + other
 
 arg_parser = argparse.ArgumentParser('Configure scylla')
 arg_parser.add_argument('--static', dest='static', action='store_const', default='',
@@ -397,7 +394,7 @@ arg_parser.add_argument('--ldflags', action='store', dest='user_ldflags', defaul
                         help='Extra flags for the linker')
 arg_parser.add_argument('--target', action='store', dest='target', default=default_target_arch(),
                         help='Target architecture (-march)')
-arg_parser.add_argument('--compiler', action='store', dest='cxx', default='g++',
+arg_parser.add_argument('--compiler', action='store', dest='cxx', default='/opt/scylladb/bin/g++-7.3',
                         help='C++ compiler path')
 arg_parser.add_argument('--c-compiler', action='store', dest='cc', default='gcc',
                         help='C compiler path')
@@ -542,7 +539,37 @@ scylla_core = (['database.cc',
                 'thrift/handler.cc',
                 'thrift/server.cc',
                 'thrift/thrift_validation.cc',
-                'redis/query_processor.cc',
+                'utils/runtime.cc',
+                'utils/murmur_hash.cc',
+                'utils/uuid.cc',
+                'utils/big_decimal.cc',
+                'types.cc',
+                'validation.cc',
+                'service/priority_manager.cc',
+                'service/migration_manager.cc',
+                'service/storage_proxy.cc',
+                'cql3/operator.cc',
+                'cql3/relation.cc',
+                'cql3/column_identifier.cc',
+                'cql3/column_specification.cc',
+                'cql3/constants.cc',
+                'cql3/query_processor.cc',
+                'cql3/query_options.cc',
+                'cql3/single_column_relation.cc',
+                'cql3/token_relation.cc',
+                'cql3/column_condition.cc',
+                'cql3/user_types.cc',
+                'cql3/untyped_result_set.cc',
+                'cql3/selection/abstract_function_selector.cc',
+                'cql3/selection/simple_selector.cc',
+                'cql3/selection/selectable.cc',
+                'cql3/selection/selector_factories.cc',
+                'cql3/selection/selection.cc',
+                'cql3/selection/selector.cc',
+                'cql3/restrictions/statement_restrictions.cc',
+                'cql3/result_set.cc',
+                'cql3/variable_specifications.cc',
+		'redis/query_processor.cc',
                 'redis/redis_keyspace.cc',
                 'redis/protocol_parser.cc',
                 'redis/ragel_protocol_parser.rl',
@@ -582,36 +609,6 @@ scylla_core = (['database.cc',
                 'redis/commands/zrangebyscore.cc',
                 'redis/commands/zrank.cc',
                 'redis/commands/zrem.cc',
-                'utils/runtime.cc',
-                'utils/murmur_hash.cc',
-                'utils/uuid.cc',
-                'utils/big_decimal.cc',
-                'types.cc',
-                'validation.cc',
-                'service/priority_manager.cc',
-                'service/migration_manager.cc',
-                'service/storage_proxy.cc',
-                'cql3/operator.cc',
-                'cql3/relation.cc',
-                'cql3/column_identifier.cc',
-                'cql3/column_specification.cc',
-                'cql3/constants.cc',
-                'cql3/query_processor.cc',
-                'cql3/query_options.cc',
-                'cql3/single_column_relation.cc',
-                'cql3/token_relation.cc',
-                'cql3/column_condition.cc',
-                'cql3/user_types.cc',
-                'cql3/untyped_result_set.cc',
-                'cql3/selection/abstract_function_selector.cc',
-                'cql3/selection/simple_selector.cc',
-                'cql3/selection/selectable.cc',
-                'cql3/selection/selector_factories.cc',
-                'cql3/selection/selection.cc',
-                'cql3/selection/selector.cc',
-                'cql3/restrictions/statement_restrictions.cc',
-                'cql3/result_set.cc',
-                'cql3/variable_specifications.cc',
                 'db/consistency_level.cc',
                 'db/system_keyspace.cc',
                 'db/system_distributed_keyspace.cc',
@@ -814,7 +811,7 @@ scylla_tests_seastar_deps = [
 ]
 
 deps = {
-    'pedis': idls + ['main.cc', 'release.cc'] + scylla_core + api,
+    'scylla': idls + ['main.cc', 'release.cc'] + scylla_core + api,
 }
 
 pure_boost_tests = set([
@@ -888,14 +885,6 @@ perf_tests_seastar_deps = [
 
 for t in perf_tests:
     deps[t] = [t + '.cc'] + scylla_tests_dependencies + perf_tests_seastar_deps
-
-for t in redis_tests:
-    deps[t] = [t + '.cc']
-    if t not in tests_not_using_seastar_test_framework:
-        deps[t] += scylla_tests_dependencies
-        deps[t] += scylla_tests_seastar_deps
-    else:
-        deps[t] += scylla_core + idls + ['tests/cql_test_env.cc']
 
 deps['tests/sstable_test'] += ['tests/sstable_datafile_test.cc', 'tests/sstable_utils.cc', 'tests/normalizing_reader.cc']
 deps['tests/mutation_reader_test'] += ['tests/sstable_utils.cc']

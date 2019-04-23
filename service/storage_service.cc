@@ -479,13 +479,9 @@ void storage_service::join_token_ring(int delay) {
             db::system_keyspace::set_bootstrap_state(db::system_keyspace::bootstrap_state::IN_PROGRESS).get();
         }
         set_mode(mode::JOINING, "waiting for ring information", true);
-        // first sleep the delay to make sure we see all our peers
-        for (int i = 0; i < delay; i += 1000) {
-            // if we see schema, we can proceed to the next check directly
-            if (_db.local().get_version() != database::empty_version) {
-                slogger.debug("got schema: {}", _db.local().get_version());
-                break;
-            }
+        auto& gossiper = gms::get_gossiper().local();
+        // first sleep the delay to make sure we see *at least* one other node
+        for (int i = 0; i < delay && gossiper.get_live_members().size() < 2; i += 1000) {
             sleep(std::chrono::seconds(1)).get();
         }
         // if our schema hasn't matched yet, keep sleeping until it does
@@ -542,7 +538,6 @@ void storage_service::join_token_ring(int delay) {
                 for (auto token : _bootstrap_tokens) {
                     auto existing = _token_metadata.get_endpoint(token);
                     if (existing) {
-                        auto& gossiper = gms::get_local_gossiper();
                         auto* eps = gossiper.get_endpoint_state_for_endpoint_ptr(*existing);
                         if (eps && eps->get_update_timestamp() > gms::gossiper::clk::now() - std::chrono::milliseconds(delay)) {
                             throw std::runtime_error("Cannot replace a live node...");
@@ -2099,8 +2094,9 @@ future<> storage_service::start_native_transport() {
                     ipv4_addr addr;
                     std::shared_ptr<seastar::tls::credentials_builder> cred;
                 };
-
-                std::vector<listen_cfg> configs({ { ipv4_addr{ip, cfg.native_transport_port()} }});
+		auto new_ip = seastar::net::inet_address::find(addr).get0();
+                //std::vector<listen_cfg> configs({ { ipv4_addr{ip, cfg.native_transport_port()} }});
+                std::vector<listen_cfg> configs({ { ipv4_addr{new_ip, cfg.native_transport_port()} }});
 
                 // main should have made sure values are clean and neatish
                 if (ceo.at("enabled") == "true") {
@@ -2277,6 +2273,7 @@ future<bool> storage_service::is_redis_transport_running() {
         return bool(ss._redis_server);
     });
 }
+
 future<> storage_service::decommission() {
     return run_with_api_lock(sstring("decommission"), [] (storage_service& ss) {
         return seastar::async([&ss] {
@@ -2570,15 +2567,17 @@ future<> storage_service::rebuild(sstring source_dc) {
         if (source_dc != "") {
             streamer->add_source_filter(std::make_unique<dht::range_streamer::single_datacenter_filter>(source_dc));
         }
-        for (const auto& keyspace_name : ss._db.local().get_non_system_keyspaces()) {
-            streamer->add_ranges(keyspace_name, ss.get_local_ranges(keyspace_name));
-        }
-        return streamer->stream_async().then([streamer] {
-            slogger.info("Streaming for rebuild successful");
-        }).handle_exception([] (auto ep) {
-            // This is used exclusively through JMX, so log the full trace but only throw a simple RTE
-            slogger.warn("Error while rebuilding node: {}", std::current_exception());
-            return make_exception_future<>(std::move(ep));
+        auto keyspaces = make_lw_shared<std::vector<sstring>>(ss._db.local().get_non_system_keyspaces());
+        return do_for_each(*keyspaces, [keyspaces, streamer, &ss] (sstring& keyspace_name) {
+            return streamer->add_ranges(keyspace_name, ss.get_local_ranges(keyspace_name));
+        }).then([streamer] {
+            return streamer->stream_async().then([streamer] {
+                slogger.info("Streaming for rebuild successful");
+            }).handle_exception([] (auto ep) {
+                // This is used exclusively through JMX, so log the full trace but only throw a simple RTE
+                slogger.warn("Error while rebuilding node: {}", std::current_exception());
+                return make_exception_future<>(std::move(ep));
+            });
         });
     });
 }
@@ -3339,8 +3338,8 @@ future<> storage_service::set_cql_ready(bool ready) {
 }
 
 future<> storage_service::set_redis_ready(bool ready) {
-    //return gms::get_local_gossiper().add_local_application_state(application_state::RPC_READY, value_factory.cql_ready(ready));
     return make_ready_future<>();
+    //return gms::get_local_gossiper().add_local_application_state(application_state::RPC_READY, value_factory.cql_ready(ready));
 }
 
 void storage_service::notify_down(inet_address endpoint) {
