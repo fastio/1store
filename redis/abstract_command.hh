@@ -35,7 +35,7 @@ class redis_message;
 }
 namespace redis {
 
-static inline decltype(auto) simple_objects() { return redis::SIMPLE_OBJECTS; }
+static inline decltype(auto) simple_objects() { return redis::STRINGS; }
 static inline decltype(auto) lists() { return redis::LISTS; }
 static inline decltype(auto) sets() { return redis::SETS; }
 static inline decltype(auto) maps() { return redis::MAPS; }

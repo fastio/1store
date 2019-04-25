@@ -15,7 +15,7 @@ SEASTAR_TEST_CASE(test_redis_set) {
         assert_that(std::move(reply)).is_redis_reply()
             .with_status(bytes("OK"));
 
-        auto msg = e.execute_cql(sprint("select * from redis.%s where pkey = \'a\'", redis::SIMPLE_OBJECTS)).get0();
+        auto msg = e.execute_cql(sprint("select * from redis.%s where pkey = \'a\'", redis::STRINGS)).get0();
         assert_that(msg).is_rows()
             .with_size(1)
             .with_row({
@@ -32,7 +32,7 @@ SEASTAR_TEST_CASE(test_redis_set_3_args) {
         assert_that(std::move(reply)).is_redis_reply()
             .with_error(bytes("ERR syntax error"));
 
-        auto msg = e.execute_cql(sprint("select * from redis.%s where pkey = \'a1\'", redis::SIMPLE_OBJECTS)).get0();
+        auto msg = e.execute_cql(sprint("select * from redis.%s where pkey = \'a1\'", redis::STRINGS)).get0();
         assert_that(msg).is_rows()
             .is_empty();
         return make_ready_future<>();
@@ -45,7 +45,7 @@ SEASTAR_TEST_CASE(test_redis_get) {
         assert_that(std::move(reply)).is_redis_reply()
             .with_status(bytes("OK"));
 
-        auto msg = e.execute_cql(sprint("select * from redis.%s where pkey = \'a\'", redis::SIMPLE_OBJECTS)).get0();
+        auto msg = e.execute_cql(sprint("select * from redis.%s where pkey = \'a\'", redis::STRINGS)).get0();
         assert_that(msg).is_rows()
             .with_size(1)
             .with_row({
