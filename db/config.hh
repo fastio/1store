@@ -753,11 +753,22 @@ public:
     val(cpu_scheduler, bool, true, Used, "Enable cpu scheduling") \
     val(view_building, bool, true, Used, "Enable view building; should only be set to false when the node is experience issues due to view building") \
     val(enable_sstables_mc_format, bool, false, Used, "Enable SSTables 'mc' format to be used as the default file format") \
+    val(enable_redis_protocol, bool, false, Used, "Enable redis protocol; Scylla will process redis protocol as a redis cluster if enable") \
+    val(redis_keyspace_replication_properties, string_map, /*none*/, Used,     \
+            "Enable redis protocol, list of properties of replication of redis keyspace. The available options are:\n"    \
+            "\n"    \
+            "\tclass : (Default: SimpleStrategy ).\n"    \
+            "\treplication_factor: (Default: 1) If the class is SimpleStrategy, set the replication factor for the strategy.\n"   \
+            "\tdatacenter_i: (Default: 1) If the class is NetworkTopologyStrategy, set the replication factor per datacenter.\n"   \
+            "\n"    \
+            "The properties of replication for redis keyspace."    \
+    )   \
     /* done! */
 
 #define _make_value_member(name, type, deflt, status, desc, ...)    \
     named_value<type, value_status::status> name;
 
+    //val(redis_keyspace_replcation_factor_per_datacenter, string_map, /*none*/, Used,  "The replication factor per datacenter")   
     _make_config_values(_make_value_member)
 
     seastar::logging_settings logging_settings(const boost::program_options::variables_map&) const;

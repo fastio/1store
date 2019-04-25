@@ -329,7 +329,6 @@ int main(int ac, char** av) {
     seastar::sharded<service::cache_hitrate_calculator> cf_cache_hitrate_calculator;
     debug::db = &db;
     auto& qp = cql3::get_query_processor();
-    auto& redis_qp = redis::get_query_processor();
     auto& proxy = service::get_storage_proxy();
     auto& mm = service::get_migration_manager();
     api::http_context ctx(db, proxy);
@@ -363,7 +362,7 @@ int main(int ac, char** av) {
 
         tcp_syncookies_sanity();
 
-        return seastar::async([cfg, ext, &db, &qp, &redis_qp, &proxy, &mm, &ctx, &opts, &dirs, &pctx, &prometheus_server, &return_value, &cf_cache_hitrate_calculator] {
+        return seastar::async([cfg, ext, &db, &qp, &proxy, &mm, &ctx, &opts, &dirs, &pctx, &prometheus_server, &return_value, &cf_cache_hitrate_calculator] {
             read_config(opts, *cfg).get();
             configurable::init_all(opts, *cfg, *ext).get();
 
@@ -615,10 +614,7 @@ int main(int ac, char** av) {
                     , cfg->internode_compression()
                     , seed_provider
                     , memory::stats().total_memory()
-                    , scfg
-                    , cluster_name
-                    , phi
-                    , cfg->listen_on_broadcast_address());
+                    , scfg , cluster_name , phi , cfg->listen_on_broadcast_address());
             supervisor::notify("starting storage proxy");
             service::storage_proxy::config spcfg;
             spcfg.hinted_handoff_enabled = hinted_handoff_enabled;
@@ -634,8 +630,11 @@ int main(int ac, char** av) {
             supervisor::notify("starting query processor");
             cql3::query_processor::memory_config qp_mcfg = {memory::stats().total_memory() / 256, memory::stats().total_memory() / 2560};
             qp.start(std::ref(proxy), std::ref(db), qp_mcfg).get();
-            supervisor::notify("starting redis query processor");
-            redis_qp.start(std::ref(proxy), std::ref(db)).get();
+            if (cfg->enable_redis_protocol()) {
+                supervisor::notify("starting redis query processor");
+                auto& redis_qp = redis::get_query_processor();
+                redis_qp.start(std::ref(proxy), std::ref(db)).get();
+            }
             // #293 - do not stop anything
             // engine().at_exit([&qp] { return qp.stop(); });
             supervisor::notify("initializing batchlog manager");
@@ -814,12 +813,14 @@ int main(int ac, char** av) {
                     return service::get_local_storage_service().start_rpc_server();
                 }).get();
             }
-            supervisor::notify("starting redis transport");
-            with_scheduling_group(dbcfg.statement_scheduling_group, [&cfg] {
-                return redis::redis_keyspace_helper::create_if_not_exists(cfg).then([] () {
-                    return service::get_local_storage_service().start_redis_transport();
-                });
-            }).get();
+            if (cfg->enable_redis_protocol()) {
+                supervisor::notify("starting redis transport");
+                with_scheduling_group(dbcfg.statement_scheduling_group, [&cfg] {
+                    return redis::redis_keyspace_helper::create_if_not_exists(cfg).then([] () {
+                        return service::get_local_storage_service().start_redis_transport();
+                    });
+                }).get();
+            }
             if (cfg->defragment_memory_on_idle()) {
                 smp::invoke_on_all([] () {
                     engine().set_idle_cpu_handler([] (reactor::work_waiting_on_reactor check_for_work) {
