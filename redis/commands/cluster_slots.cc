@@ -38,13 +38,13 @@ future<redis_message> cluster_slots::execute(service::storage_proxy& proxy, db::
             peers.emplace_back(local);
             auto slots_per_peer = REDIS_CLUSTER_SLOTS / peers.size();
             std::vector<std::tuple<size_t, size_t, bytes, uint16_t>> ret;
+            auto port = proxy.get_db().local().get_config().redis_transport_port();
             size_t start = 0;
             for (auto& peer : peers) {
                 auto end = start + slots_per_peer - 1;
-                if (end >= REDIS_CLUSTER_SLOTS) {
+                if (end >= (REDIS_CLUSTER_SLOTS - slots_per_peer)) {
                     end = REDIS_CLUSTER_SLOTS - 1;
                 }
-                auto port = proxy.get_db().local().get_config().redis_transport_port();
                 ret.emplace_back(std::tuple<size_t, size_t, bytes, uint16_t> (start, end, to_bytes(peer.to_sstring()), uint16_t { port }));
                 start = end + 1;
             }

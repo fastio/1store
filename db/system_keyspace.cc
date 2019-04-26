@@ -1356,7 +1356,7 @@ future<std::unordered_map<gms::inet_address, std::unordered_set<dht::token>>> lo
 }
 
 future<std::vector<gms::inet_address>> load_peers() {
-    sstring req = sprint("SELECT peer FROM system.%s", PEERS);
+    sstring req = sprint("SELECT peer, tokens FROM system.%s", PEERS);
     return execute_cql(req).then([] (::shared_ptr<cql3::untyped_result_set> cql_result) {
         std::vector<gms::inet_address> ret;
         for (auto& row : *cql_result) {
