@@ -494,6 +494,12 @@ enum class bootstrap_state {
     future<std::unordered_set<dht::token>> get_saved_tokens();
 
     future<std::unordered_map<gms::inet_address, sstring>> load_peer_features();
+    
+    /**
+     * Return a vector of peer's IP addresses
+     *
+     */
+    future<std::vector<gms::inet_address>> load_peers();
 
 future<int> increment_and_get_generation();
 bool bootstrap_complete();

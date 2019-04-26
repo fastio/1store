@@ -1355,6 +1355,20 @@ future<std::unordered_map<gms::inet_address, std::unordered_set<dht::token>>> lo
     });
 }
 
+future<std::vector<gms::inet_address>> load_peers() {
+    sstring req = sprint("SELECT peer FROM system.%s", PEERS);
+    return execute_cql(req).then([] (::shared_ptr<cql3::untyped_result_set> cql_result) {
+        std::vector<gms::inet_address> ret;
+        for (auto& row : *cql_result) {
+            auto peer = gms::inet_address(row.get_as<net::inet_address>("peer"));
+            if (row.has("tokens")) {
+                ret.emplace_back(peer);
+            }
+        }
+        return ret;
+    });
+}
+
 future<std::unordered_map<gms::inet_address, utils::UUID>> load_host_ids() {
     sstring req = sprint("SELECT peer, host_id FROM system.%s", PEERS);
     return execute_cql(req).then([] (::shared_ptr<cql3::untyped_result_set> cql_result) {

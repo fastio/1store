@@ -67,6 +67,7 @@ static const bytes msg_type_hll {"+hyperloglog\r\n"};
 static const bytes msg_type_set {"+set\r\n"};
 static const bytes msg_type_zset {"+zset\r\n"};
 static const bytes msg_type_hash {"+hash\r\n"};
+static const size_t redis_cluser_slots { 16384 };
 class redis_message final {
 private:
     std::unique_ptr<bytes_ostream> _message;
@@ -84,7 +85,24 @@ public:
         }
         return *this;
     }
-    
+   
+    static future<redis_message> make(std::vector<std::tuple<size_t, size_t, bytes, uint16_t>>&& peer_slots) {
+        redis_message m;
+        m.write_sstring(sstring(sprint("*%d\r\n", peer_slots.size())));
+        if (peer_slots.size() > 0) {
+            for (auto& peer_slot : peer_slots) {
+                m.write_sstring(sstring("*3\r\n"));
+                m.write_sstring(sstring(sprint(":%zd\r\n", std::get<0>(peer_slot))));
+                m.write_sstring(sstring(sprint(":%zd\r\n", std::get<1>(peer_slot))));
+                m.write_sstring(sstring(sprint("*2\r\n")));
+                m.write_sstring(sstring(sprint("$%d\r\n", std::get<2>(peer_slot).size())));
+                m.write(bytes_view(std::get<2>(peer_slot)));
+                m.write(bytes_view(msg_crlf));
+                m.write_sstring(sstring(sprint(":%d\r\n", std::get<3>(peer_slot))));
+            }
+        }
+        return make_ready_future<redis_message>(std::move(m));
+    }
     bytes_ostream& ostream() { return *_message; }
     static future<redis_message> make(const bytes& content) {
         redis_message m;
