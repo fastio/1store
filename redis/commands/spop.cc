@@ -32,7 +32,8 @@ future<redis_message> spop::execute(service::storage_proxy& proxy, db::consisten
             auto make_random_index = [] (int max) {
                 auto gen = std::default_random_engine(std::random_device()());
                 auto dist = std::uniform_int_distribution(0, max);
-                return dist(gen);
+                // std::uniform_int_distribution(0, max) will return [0, max]
+                return dist(gen) % max;
             };
             auto index = make_random_index(static_cast<int>(pd->data().size()));
             auto member = *(pd->data()[index].first);
