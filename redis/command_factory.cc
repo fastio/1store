@@ -37,6 +37,7 @@
 #include "redis/commands/cluster_slots.hh"
 #include "redis/commands/spop.hh"
 #include "redis/commands/srandmember.hh"
+#include "redis/commands/scard.hh"
 namespace redis {
 shared_ptr<abstract_command> command_factory::create(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
@@ -83,6 +84,7 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "sadd",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::sset::prepare(proxy, cs, std::move(req)); } }, 
     { "smembers",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::smembers::prepare(proxy, cs, std::move(req)); } }, 
     { "spop",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::spop::prepare(proxy, cs, std::move(req)); } }, 
+    { "scard",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::scard::prepare(proxy, cs, std::move(req)); } }, 
     { "srandmember",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::srandmember::prepare(proxy, cs, std::move(req)); } }, 
     { "srem",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::srem::prepare(proxy, cs, std::move(req)); } }, 
     { "zadd",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::zadd::prepare(proxy, cs, std::move(req)); } }, 
