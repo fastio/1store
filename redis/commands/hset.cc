@@ -16,8 +16,8 @@ namespace commands {
 
 shared_ptr<abstract_command> hset::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req, bool multi)
 {
-    if (req._args_count < 3 || req._args_count % 2 != 1 || (multi && req._args_count > 3)) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
+    if (req._args_count < 3 || req._args_count % 2 != 1 || (!multi && req._args_count > 3)) {
+        return unexpected::prepare(std::move(req._command), std::move(bytes {"-ERR wrong number of arguments for HMSET\r\n"}));
     }
     std::unordered_map<bytes, bytes> data;
     for (size_t i = 1; i < req._args_count; i+= 2) {
