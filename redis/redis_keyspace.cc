@@ -117,7 +117,12 @@ schema_ptr zsets_schema(sstring ks_name) {
     return builder.build(schema_builder::compact_storage::yes);
 }
 future<> redis_keyspace_helper::create_if_not_exists(lw_shared_ptr<db::config> config) {
-    auto keyspace_gen = [config]  (sstring name) {
+    auto keyspace_replication_properties = config->redis_keyspace_replication_properties();
+    if (keyspace_replication_properties.count("class") == 0) {
+        keyspace_replication_properties["class"] = "SimpleStrategy";
+        keyspace_replication_properties["replication_factor"] = "1";
+    }
+    auto keyspace_gen = [config, keyspace_replication_properties = std::move(keyspace_replication_properties)]  (sstring name) {
         auto& proxy = service::get_local_storage_proxy();
         if (proxy.get_db().local().has_keyspace(name)) {
             return make_ready_future<>();
@@ -125,7 +130,7 @@ future<> redis_keyspace_helper::create_if_not_exists(lw_shared_ptr<db::config> c
         auto attrs = make_shared<cql3::statements::ks_prop_defs>();
         attrs->add_property(cql3::statements::ks_prop_defs::KW_DURABLE_WRITES, "true");
         std::map<sstring, sstring> replication_properties;
-        for (auto&& e : config->redis_keyspace_replication_properties()) {
+        for (auto&& e : keyspace_replication_properties) {
             replication_properties.emplace(e.first, e.second);
         }
         attrs->add_property(cql3::statements::ks_prop_defs::KW_REPLICATION, replication_properties); 

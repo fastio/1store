@@ -9,7 +9,7 @@ namespace commands {
 class unexpected : public abstract_command {
     bytes _exception_message;
     bytes default_exception_message() { 
-        bytes m {"-ERR Unknown or disabled command\r\n'"};
+        bytes m { to_bytes(sprint("-ERR Unknown or disabled command '" + sstring(reinterpret_cast<const char*>(_name.data()), _name.size()) + "'\r\n")) };
         return m;
     }
 public:
