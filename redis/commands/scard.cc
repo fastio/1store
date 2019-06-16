@@ -28,7 +28,7 @@ future<redis_message> scard::execute(service::storage_proxy& proxy, db::consiste
     auto timeout = now + tc.read_timeout;
     return prefetch_set(proxy, _schema, _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            return redis_message::make(pd->data().size());
+            return redis_message::make_long(static_cast<long>(pd->data().size()));
         }
         return redis_message::null(); 
     });

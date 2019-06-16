@@ -17,7 +17,7 @@ namespace commands {
 shared_ptr<abstract_command> counter_by_prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req, bool incr)
 {
     if (req._args_count < 2) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
     }
     return make_shared<counter>(std::move(req._command), simple_objects_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[1]), incr);
 }
@@ -49,7 +49,7 @@ future<redis_message> counter::execute(service::storage_proxy& proxy, db::consis
         long result = 0;
         if (pd && pd->has_data()) {
             if (is_number(pd->_data) == false) {
-                return redis_message::make(bytes("-ERR value is not an integer or out of range\r\n"));
+                return redis_message::make_exception(sstring("-ERR value is not an integer or out of range\r\n"));
             }
             result = bytes2long(pd->_data);
         }
@@ -62,7 +62,7 @@ future<redis_message> counter::execute(service::storage_proxy& proxy, db::consis
             } catch(...) {
                 return redis_message::err(); 
             }
-            return redis_message::make(result);
+            return redis_message::make_long(result);
         });
     });
 }

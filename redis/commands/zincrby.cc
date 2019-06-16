@@ -22,7 +22,7 @@ namespace commands {
 shared_ptr<abstract_command> zincrby::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 3) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
     }
     return seastar::make_shared<zincrby>(std::move(req._command), zsets_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[2]), bytes2double(req._args[1]));
 }
@@ -45,7 +45,7 @@ future<redis_message> zincrby::execute(service::storage_proxy& proxy, db::consis
             } catch (std::exception& e) {
                 return redis_message::err();
             }
-            return redis_message::make(double2bytes(result));
+            return redis_message::make_bytes(double2bytes(result));
         });
     });
 }

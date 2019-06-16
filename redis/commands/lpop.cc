@@ -18,7 +18,7 @@ template<typename PopType>
 shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 1) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 1, req._args_count);
     }
     return make_shared<PopType>(std::move(req._command), lists_schema(proxy, cs.get_keyspace()), std::move(req._args[0]));
 }
@@ -53,13 +53,13 @@ future<redis_message> pop::do_execute(service::storage_proxy& proxy, db::consist
                 }
                 std::vector<std::optional<bytes>> removed_cell_keys { std::move(removed_cell_key) };
                 return redis::write_mutation(proxy, redis::make_list_dead_cells(_schema, _key, std::move(removed_cell_keys)), cl, timeout, cs);
-            } ().then_wrapped([this, value = removed.second, pd] (auto f) {
+            } ().then_wrapped([this, pd] (auto f) {
                 try {
                     f.get();
                 } catch(...) {
                     return redis_message::err();
                 }
-                return redis_message::make(*value);
+                return redis_message::make_list_bytes(pd, size_t { 0 } );
             });
         }
         return redis_message::null();

@@ -19,7 +19,7 @@ namespace commands {
 shared_ptr<abstract_command> smembers::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 1 ) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 1, req._args_count);
     }
     return seastar::make_shared<smembers> (std::move(req._command), sets_schema(proxy, cs.get_keyspace()), std::move(req._args[0]));
 }
@@ -29,10 +29,7 @@ future<redis_message> smembers::execute(service::storage_proxy& proxy, db::consi
     auto timeout = now + tc.read_timeout;
     return prefetch_set(proxy, _schema, _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            auto&& result = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::transformed([this] (auto& data) {
-                return std::move(data.first); 
-            }));
-            return redis_message::make(std::move(result));
+            return redis_message::make_map_key_bytes(pd);
         }
         return redis_message::null(); 
     });

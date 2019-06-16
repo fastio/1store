@@ -22,7 +22,7 @@ namespace commands {
 shared_ptr<abstract_command> zcard::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 1) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 1, req._args_count);
     }
     return seastar::make_shared<zcard>(std::move(req._command), zsets_schema(proxy, cs.get_keyspace()), std::move(req._args[0]));
 }
@@ -32,7 +32,7 @@ future<redis_message> zcard::execute(service::storage_proxy& proxy, db::consiste
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, fetch_options::keys, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            return redis_message::make(pd->data().size());
+            return redis_message::make_long(static_cast<long>(pd->data().size()));
         }
         return redis_message::null();
     });

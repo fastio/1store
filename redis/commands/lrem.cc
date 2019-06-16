@@ -24,7 +24,7 @@ namespace commands {
 shared_ptr<abstract_command> lrem::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 3) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
     }
     return make_shared<lrem>(std::move(req._command), lists_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[2]), bytes2long(req._args[1]));
 }
@@ -72,7 +72,7 @@ future<redis_message> lrem::execute(service::storage_proxy& proxy, db::consisten
                 } catch(...) {
                     return redis_message::err();
                 }
-                return redis_message::make(static_cast<size_t>(total));
+                return redis_message::make_long(static_cast<long>(total));
             });
         }
         return redis_message::null(); 

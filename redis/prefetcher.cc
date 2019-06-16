@@ -17,7 +17,6 @@
 #include <memory>
 
 namespace redis {
-
 class prefetched_map_builder {
     using data_type = prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>;
     data_type& _data;
@@ -51,7 +50,7 @@ private:
         }
     }
 public:
-    prefetched_map_builder(std::shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps, const fetch_options& option)
+    prefetched_map_builder(lw_shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps, const fetch_options& option)
         : _data(*data)
         , _partition_slice(ps)
         , _schema(schema)
@@ -75,7 +74,7 @@ public:
     void accept_new_row(const query::result_row_view& static_row, const query::result_row_view& row) {}
     void accept_partition_end(const query::result_row_view& static_row) {}
 };
-future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_map_impl(service::storage_proxy& proxy,
+future<map_return_type> prefetch_map_impl(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
     std::vector<query::clustering_range>&& ranges,
@@ -104,14 +103,14 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     partition_ranges.emplace_back(std::move(partition_range));
     return proxy.query(schema, make_lw_shared(std::move(cmd)), std::move(partition_ranges), cl, {timeout, cs.get_trace_state()}).then([ps, schema, option] (auto qr) {
         return query::result_view::do_with(*qr.query_result, [&] (query::result_view v) {
-            auto pd = std::make_shared<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>(schema);
+            auto pd = make_lw_shared<prefetched_map_type>(schema);
             v.consume(ps, prefetched_map_builder(pd, schema, ps, option));
-            return pd;
+            return map_return_type { pd };
         });
     });
 }
 
-future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_map(service::storage_proxy& proxy,
+future<map_return_type> prefetch_map(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
     const std::vector<bytes> ckeys,
@@ -128,7 +127,7 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     return prefetch_map_impl(proxy, schema, key, std::move(ranges), option, false, cl, timeout, cs);
 }
 
-future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_map(service::storage_proxy& proxy,
+future<map_return_type> prefetch_map(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
     fetch_options option,
@@ -159,7 +158,7 @@ private:
         }
     }
 public:
-    prefetched_bytes_builder(std::shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps)
+    prefetched_bytes_builder(lw_shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps)
         : _data(*data)
         , _partition_slice(ps)
         , _schema(schema)
@@ -183,7 +182,7 @@ public:
     void accept_partition_end(const query::result_row_view& static_row) {}
 };
 
-future<std::shared_ptr<prefetched_struct<bytes>>> prefetch_simple(service::storage_proxy& proxy,
+future<bytes_return_type> prefetch_simple(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
     db::consistency_level cl,
@@ -198,9 +197,9 @@ future<std::shared_ptr<prefetched_struct<bytes>>> prefetch_simple(service::stora
     partition_ranges.emplace_back(std::move(partition_range));
     return proxy.query(schema, make_lw_shared(std::move(cmd)), std::move(partition_ranges), cl, {timeout, nullptr}).then([ps, schema] (auto qr) {
         return query::result_view::do_with(*qr.query_result, [&] (query::result_view v) {
-            auto pd = std::make_shared<prefetched_struct<bytes>>(schema);
+            auto pd = make_lw_shared<prefetched_struct<bytes>>(schema);
             v.consume(ps, prefetched_bytes_builder(pd, schema, ps));
-            return pd;
+            return bytes_return_type { pd };
         });
     });
 }
@@ -212,7 +211,7 @@ class prefetched_multi_struct_builder {
     const schema_ptr _schema;
     bytes _current;
 public:
-    prefetched_multi_struct_builder(std::shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps)
+    prefetched_multi_struct_builder(lw_shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps)
         : _data(*data)
         , _partition_slice(ps)
         , _schema(schema)
@@ -253,7 +252,7 @@ public:
     void accept_partition_end(const query::result_row_view& static_row) {}
 };
 
-future<std::shared_ptr<prefetched_struct<std::vector<std::pair<bytes, bytes>>>>> prefetch_simple(service::storage_proxy& proxy,
+future<mbytes_return_type> prefetch_simple(service::storage_proxy& proxy,
     const schema_ptr schema,
     const std::vector<bytes>& keys,
     db::consistency_level cl,
@@ -270,14 +269,14 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<bytes, bytes>>>>>
     // consume the result, and convert it to redis format.
     return proxy.query(schema, command, std::move(partition_ranges), cl, {timeout, nullptr}).then([schema, full_slice] (auto qr) {
         return query::result_view::do_with(*qr.query_result, [&] (query::result_view v) {
-            auto pd = std::make_shared<prefetched_struct<std::vector<std::pair<bytes, bytes>>>>(schema);
+            auto pd = make_lw_shared<prefetched_struct<std::vector<std::pair<bytes, bytes>>>>(schema);
             v.consume(full_slice, prefetched_multi_struct_builder(pd, schema, full_slice));
-            return pd;
+            return mbytes_return_type { pd };
         });
     });
 }
 
-future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_list(service::storage_proxy& proxy,
+future<map_return_type> prefetch_list(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
     const fetch_options option,
@@ -290,7 +289,7 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     return prefetch_map_impl(proxy, schema, key, std::move(ranges), option, reversed, cl, timeout, cs);
 }
 
-future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_set(service::storage_proxy& proxy,
+future<map_return_type> prefetch_set(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
     db::consistency_level cl,
@@ -316,14 +315,14 @@ future<bool> exists(service::storage_proxy& proxy,
     auto partition_range = dht::partition_range::make_singular(dht::global_partitioner().decorate_key(*schema, std::move(pkey)));
     dht::partition_range_vector partition_ranges;
     partition_ranges.emplace_back(std::move(partition_range));
-    return proxy.query(schema, command, std::move(partition_ranges), cl, {timeout, /*cs.get_trace_state()*/ nullptr}).then([schema] (auto co_result) {
+    return proxy.query(schema, command, std::move(partition_ranges), cl, {timeout, nullptr}).then([schema] (auto co_result) {
         const auto& q_result = co_result.query_result; 
         return q_result && q_result->partition_count() && (*(q_result->partition_count()) > 0);
     });
 }
 
 class prefetched_zset_builder {
-    using data_type = prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<double>>>>;
+    using data_type = prefetched_zset_type;
     data_type& _data;
     const query::partition_slice& _partition_slice;
     const schema_ptr _schema;
@@ -356,7 +355,7 @@ private:
         }
     }
 public:
-    prefetched_zset_builder(std::shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps, const fetch_options& option)
+    prefetched_zset_builder(lw_shared_ptr<data_type> data, const schema_ptr schema, const query::partition_slice& ps, const fetch_options& option)
         : _data(*data)
         , _partition_slice(ps)
         , _schema(schema)
@@ -381,7 +380,7 @@ public:
     void accept_partition_end(const query::result_row_view& static_row) {}
 };
 
-future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<double>>>>>> prefetch_zset_impl(service::storage_proxy& proxy,
+future<zset_return_type> prefetch_zset_impl(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
     std::vector<query::clustering_range>&& ranges,
@@ -410,14 +409,14 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     partition_ranges.emplace_back(std::move(partition_range));
     return proxy.query(schema, make_lw_shared(std::move(cmd)), std::move(partition_ranges), cl, {timeout, cs.get_trace_state()}).then([ps, schema, option] (auto qr) {
         return query::result_view::do_with(*qr.query_result, [&] (query::result_view v) {
-            auto pd = std::make_shared<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<double>>>>>(schema);
+            auto pd = make_lw_shared<prefetched_zset_type>(schema);
             v.consume(ps, prefetched_zset_builder(pd, schema, ps, option));
-            return pd;
+            return zset_return_type { pd };
         });
     });
 }
 
-future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_zset(service::storage_proxy& proxy,
+future<zset_return_type> prefetch_zset(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
     const std::vector<bytes> ckeys,
@@ -431,10 +430,10 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     boost::range::push_back(ranges, ckeys | boost::adaptors::transformed([schema, ckey_col] (const auto& ckey) {
         return query::clustering_range::make_singular(clustering_key_prefix::from_single_value(*schema, ckey));
     }));
-    return prefetch_map_impl(proxy, schema, key, std::move(ranges), option, false, cl, timeout, cs);
+    return prefetch_zset_impl(proxy, schema, key, std::move(ranges), option, false, cl, timeout, cs);
 }
 
-future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>>>> prefetch_zset(service::storage_proxy& proxy,
+future<zset_return_type> prefetch_zset(service::storage_proxy& proxy,
     const schema_ptr schema,
     const bytes& key,
     fetch_options option,
@@ -443,7 +442,6 @@ future<std::shared_ptr<prefetched_struct<std::vector<std::pair<std::optional<byt
     service::client_state& cs)
 {
     std::vector<query::clustering_range> ranges { query::full_clustering_range };
-    return prefetch_map_impl(proxy, schema, key, std::move(ranges), option, false, cl, timeout, cs);
+    return prefetch_zset_impl(proxy, schema, key, std::move(ranges), option, false, cl, timeout, cs);
 }
-
 } // end of redis namespace

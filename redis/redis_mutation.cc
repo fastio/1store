@@ -16,6 +16,7 @@
 #include <boost/range/adaptor/reversed.hpp>
 #include <memory>
 #include "seastar/core/sstring.hh"
+#include "redis/abstract_command.hh"
 #include "log.hh"
 using namespace seastar;
 namespace redis {
@@ -235,7 +236,9 @@ mutation make_mutation(seastar::lw_shared_ptr<zset_indexed_cells_mutation> r)
     auto pkey = partition_key::from_single_value(*schema, r->key());
     auto m = mutation(schema, std::move(pkey));
     for (auto&& data : r->data()._indexed_cells) {
-        m.set_cell(clustering_key::from_single_value(*schema, *(data.first)), column, make_cell(schema, *column.type, *(data.second), r->ttl()));
+        auto& d = *(data.second);
+        auto dv = double2bytes(d);
+        m.set_cell(clustering_key::from_single_value(*schema, *(data.first)), column, make_cell(schema, *column.type, dv, r->ttl()));
     }
     return std::move(m);
 }

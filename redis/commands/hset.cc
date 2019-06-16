@@ -36,7 +36,7 @@ future<redis_message> hset::execute(service::storage_proxy& proxy, db::consisten
         } catch (std::exception& e) {
             return redis_message::err();
         }
-        return _multi == false ? redis_message::make(total) : redis_message::ok();
+        return _multi == false ? redis_message::make_long(static_cast<long>(total)) : redis_message::ok();
     });
 }
 

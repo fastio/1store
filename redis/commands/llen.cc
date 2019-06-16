@@ -16,7 +16,7 @@ namespace commands {
 shared_ptr<abstract_command> llen::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 1) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 1, req._args_count);
     }
     return make_shared<llen>(std::move(req._command), lists_schema(proxy, cs.get_keyspace()), std::move(req._args[0]));
 }
@@ -26,7 +26,7 @@ future<redis_message> llen::execute(service::storage_proxy& proxy, db::consisten
     auto timeout = now + tc.read_timeout;
     return prefetch_list(proxy, _schema, _key, fetch_options::values, false, cl, timeout, cs).then([] (auto pd) {
         if (pd && pd->has_data()) {
-            return redis_message::make(static_cast<size_t>(pd->data().size()));
+            return redis_message::make_long(static_cast<long>(pd->data().size()));
         }
         return redis_message::null();
     });

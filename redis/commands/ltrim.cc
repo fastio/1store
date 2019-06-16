@@ -24,12 +24,12 @@ namespace commands {
 shared_ptr<abstract_command> ltrim::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 3) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
     }
     auto begin = bytes2long(req._args[1]);
     auto end = bytes2long(req._args[2]);
     if (begin < 0 || end < 0) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
     }
     return make_shared<ltrim>(std::move(req._command), lists_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), begin, end);
 }

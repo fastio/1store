@@ -20,7 +20,7 @@ namespace commands {
 
 shared_ptr<abstract_command> zrem::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
     if (req._args_count < 2) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
     }
     std::vector<bytes> members;
     members.reserve(req._args_count - 1);
@@ -32,7 +32,7 @@ shared_ptr<abstract_command> zrem::prepare(service::storage_proxy& proxy, const 
 
 shared_ptr<abstract_command> zremrangebyrank::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
     if (req._args_count < 3) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
     }
     auto begin = bytes2long(req._args[1]);
     auto end = bytes2long(req._args[2]);
@@ -41,7 +41,7 @@ shared_ptr<abstract_command> zremrangebyrank::prepare(service::storage_proxy& pr
 
 shared_ptr<abstract_command> zremrangebyscore::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
     if (req._args_count < 3) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
     }
     auto min = bytes2double(req._args[1]);
     auto max = bytes2double(req._args[2]);
@@ -60,7 +60,7 @@ future<redis_message> zrem::execute(service::storage_proxy& proxy, db::consisten
             }));
             total_removed = removed_keys.size();
             if (total_removed == 0) {
-                return redis_message::make(total_removed);
+                return redis_message::make_long(static_cast<long>(total_removed));
             }
             return redis::write_mutation(proxy, redis::make_zset_dead_cells(_schema, _key, std::move(removed_keys)), cl, timeout, cs).then_wrapped([this, total_removed] (auto f) {
                 try {
@@ -68,10 +68,10 @@ future<redis_message> zrem::execute(service::storage_proxy& proxy, db::consisten
                 } catch (std::exception& e) {
                     return redis_message::err();
                 }
-                return redis_message::make(total_removed);
+                return redis_message::make_long(static_cast<long>(total_removed));
             });
         }
-        return redis_message::make(total_removed);
+        return redis_message::make_long(static_cast<long>(total_removed));
     });
 }
 
@@ -99,7 +99,7 @@ future<redis_message> zremrangebyrank::execute(service::storage_proxy& proxy, db
             }));
             total_removed = removed_keys.size();
             if (total_removed == 0) {
-                return redis_message::make(total_removed);
+                return redis_message::make_long(static_cast<long>(total_removed));
             }
             return redis::write_mutation(proxy, redis::make_zset_dead_cells(_schema, _key, std::move(removed_keys)), cl, timeout, cs).then_wrapped([this, total_removed] (auto f) {
                 try {
@@ -107,10 +107,10 @@ future<redis_message> zremrangebyrank::execute(service::storage_proxy& proxy, db
                 } catch (std::exception& e) {
                     return redis_message::err();
                 }
-                return redis_message::make(total_removed);
+                return redis_message::make_long(static_cast<long>(total_removed));
             });
         }
-        return redis_message::make(total_removed);
+        return redis_message::make_long(static_cast<long>(total_removed));
     });
 }
 
@@ -128,7 +128,7 @@ future<redis_message> zremrangebyscore::execute(service::storage_proxy& proxy, d
             }));
             total_removed = removed_keys.size();
             if (total_removed == 0) {
-                return redis_message::make(total_removed);
+                return redis_message::make_long(static_cast<long>(total_removed));
             }
             return redis::write_mutation(proxy, redis::make_zset_dead_cells(_schema, _key, std::move(removed_keys)), cl, timeout, cs).then_wrapped([this, total_removed] (auto f) {
                 try {
@@ -136,10 +136,10 @@ future<redis_message> zremrangebyscore::execute(service::storage_proxy& proxy, d
                 } catch (std::exception& e) {
                     return redis_message::err();
                 }
-                return redis_message::make(total_removed);
+                return redis_message::make_long(static_cast<long>(total_removed));
             });
         }
-        return redis_message::make(total_removed);
+        return redis_message::make_long(static_cast<long>(total_removed));
     });
 }
 

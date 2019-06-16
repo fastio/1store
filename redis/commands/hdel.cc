@@ -21,7 +21,7 @@ namespace commands {
 shared_ptr<abstract_command> hdel::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count != 2) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
     }
     std::vector<bytes> map_keys;
     map_keys.reserve(req._args.size() - 1);

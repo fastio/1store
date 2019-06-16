@@ -37,7 +37,8 @@ future<redis_message> cluster_slots::execute(service::storage_proxy& proxy, db::
         return gms::inet_address::lookup(proxy.get_db().local().get_config().listen_address()).then([peers = std::move(peers), &proxy] (auto&& local) mutable {
             peers.emplace_back(local);
             auto slots_per_peer = REDIS_CLUSTER_SLOTS / peers.size();
-            std::vector<std::tuple<size_t, size_t, bytes, uint16_t>> ret;
+            using slots_type = std::vector<std::tuple<size_t, size_t, bytes, uint16_t>>;
+            lw_shared_ptr<slots_type> ret = make_lw_shared<slots_type>();
             auto port = proxy.get_db().local().get_config().redis_transport_port();
             size_t start = 0;
             for (auto& peer : peers) {
@@ -45,10 +46,10 @@ future<redis_message> cluster_slots::execute(service::storage_proxy& proxy, db::
                 if (end >= (REDIS_CLUSTER_SLOTS - slots_per_peer)) {
                     end = REDIS_CLUSTER_SLOTS - 1;
                 }
-                ret.emplace_back(std::tuple<size_t, size_t, bytes, uint16_t> (start, end, to_bytes(peer.to_sstring()), uint16_t { port }));
+                ret->emplace_back(std::tuple<size_t, size_t, bytes, uint16_t> (start, end, to_bytes(peer.to_sstring()), uint16_t { port }));
                 start = end + 1;
             }
-            return redis_message::make(std::move(ret));
+            return redis_message::make_slots(ret);
         });
     });
 }

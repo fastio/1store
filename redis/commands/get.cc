@@ -22,7 +22,7 @@ namespace commands {
 shared_ptr<abstract_command> get::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count != 1) {
-        return unexpected::prepare(std::move(req._command), std::move(to_bytes(sprint("-wrong number of arguments (given %ld, expected 1)\r\n", req._args_count))));
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 1, req._args_count);
     }
     return make_shared<get>(std::move(req._command), simple_objects_schema(proxy, cs.get_keyspace()), std::move(req._args[0]));
 }
@@ -33,12 +33,12 @@ future<redis_message> get::execute(service::storage_proxy& proxy, db::consistenc
     auto fetched = prefetch_simple(proxy, _schema, _key, cl, timeout, cs);
     return fetched.then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            return redis_message::make(std::move(pd->_data));
+            return redis_message::make_bytes(std::move(pd));
         }
         return redis_message::null();
     });
 }
-
+/*
 shared_ptr<abstract_command> getset::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 2) {
@@ -58,17 +58,18 @@ future<redis_message> getset::execute(service::storage_proxy& proxy, db::consist
                 return redis_message::err();
             }
             if (pd && pd->has_data()) {
-                return redis_message::make(std::move(pd->_data));
+                return redis_message::make_bytes(std::move(pd));
             }
             return redis_message::null();
         });
     });
 }
 
+*/
 shared_ptr<abstract_command> mget::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 1) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 1, req._args_count);
     }
     return seastar::make_shared<mget>(std::move(req._command), simple_objects_schema(proxy, cs.get_keyspace()), std::move(req._args));
 }
@@ -78,13 +79,10 @@ future<redis_message> mget::execute(service::storage_proxy& proxy, db::consisten
     auto timeout = now + tc.read_timeout;
     return prefetch_simple(proxy, _schema, _keys, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            //FIXME: if key was not exists, we should return nil message to client.
-            auto&& values = boost::copy_range<std::vector<std::optional<bytes>>>(pd->data() | boost::adaptors::transformed([] (auto& p) { return std::optional<bytes>(std::move(p.second)); }));
-            return redis_message::make(std::move(values));
+            return redis_message::make_mbytes(pd);
         }
         return redis_message::null();
     });
 }
-
 }
 }

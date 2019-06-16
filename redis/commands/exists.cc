@@ -15,7 +15,7 @@ namespace commands {
 shared_ptr<abstract_command> exists::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 1) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 1, req._args_count);
     }
     std::vector<schema_ptr> schemas {
         simple_objects_schema(proxy, cs.get_keyspace()),

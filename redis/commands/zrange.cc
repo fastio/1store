@@ -11,7 +11,6 @@
 #include "partition_slice_builder.hh"
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
-#include "log.hh"
 #include <boost/range/adaptor/transformed.hpp>
 #include <boost/range/algorithm_ext/push_back.hpp>
 #include <boost/range/adaptor/filtered.hpp>
@@ -23,7 +22,7 @@ template<typename CommandType>
 shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 3) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
     }
     bool with_scores = false;
     if (req._args_count > 3) {
@@ -48,7 +47,7 @@ future<redis_message> zrange::execute_impl(service::storage_proxy& proxy, db::co
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, fetch_options::all, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs, reversed] (auto pd) {
-        std::vector<std::optional<bytes>> results; 
+        auto results = make_lw_shared<std::vector<std::optional<bytes>>> ();
         if (_begin < 0) _begin = 0;
         if (pd && pd->has_data()) {
             while (_end < 0 && pd->data().size() > 0) _end += static_cast<long>(pd->data().size());
@@ -62,21 +61,21 @@ future<redis_message> zrange::execute_impl(service::storage_proxy& proxy, db::co
                 } else {
                     std::sort(result_scores.begin(), result_scores.end(), [] (auto& e1, auto& e2) { return e1.second < e2.second; });
                 }
-                if (static_cast<size_t>(_end) < result_scores.size()) {
+                if (static_cast<size_t>(_end) + 1 < result_scores.size()) {
                     result_scores.erase(result_scores.begin() + static_cast<size_t>(_end), result_scores.end());
                 }
                 if (_begin > 0) {
                     result_scores.erase(result_scores.begin(), result_scores.begin() + static_cast<size_t>(_begin));
                 }
                 for (auto&& e : result_scores) {
-                    results.emplace_back(std::move(e.first));
+                    results->emplace_back(std::move(e.first));
                     if (_with_scores) {
-                        results.emplace_back(std::move(double2bytes(e.second)));
+                        results->emplace_back(std::move(double2bytes(e.second)));
                     }
                 }
             }
         }
-        return redis_message::make(std::move(results));
+        return redis_message::make_zset_bytes(results);
     });
 }
 

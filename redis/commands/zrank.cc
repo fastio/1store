@@ -23,7 +23,7 @@ template<typename RankType>
 shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 2) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
     }
     return seastar::make_shared<RankType>(std::move(req._command), zsets_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[1]));
 }
@@ -53,7 +53,7 @@ future<redis_message> zrank::execute_impl(service::storage_proxy& proxy, db::con
                     }
                 });
                 --rank;
-                return redis_message::make(rank);
+                return redis_message::make_long(static_cast<long>(rank));
             }
         }
         return redis_message::null();

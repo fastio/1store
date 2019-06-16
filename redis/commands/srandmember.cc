@@ -34,23 +34,20 @@ future<redis_message> srandmember::execute(service::storage_proxy& proxy, db::co
     return prefetch_set(proxy, _schema, _key, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
             if (_count > 0 && pd->data().size() <= static_cast<size_t>(_count)) {
-                auto&& result = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::transformed([this] (auto& data) {
-                    return std::move(data.first); 
-                }));
-                return redis_message::make(std::move(result));
+                return redis_message::make_map_key_bytes(pd);
             }
             auto make_random_indexes = [] (int max, long count) {
-                std::vector<int> indexes;
+                std::vector<size_t> indexes;
                 auto gen = std::default_random_engine(std::random_device()());
                 auto dist = std::uniform_int_distribution(0, max);
                 if (count == 0) {
-                    indexes.emplace_back(dist(gen) % max);
+                    indexes.emplace_back(static_cast<size_t>(dist(gen) % max));
                 } else if (count > 0) {
                     indexes.reserve(count);
                     // generate the sequence of unique index.
                     std::unordered_set<int> temp;
                     while (temp.size() < static_cast<size_t>(count)) {
-                        temp.emplace(dist(gen) % max); 
+                        temp.emplace(static_cast<size_t>(dist(gen) % max)); 
                     }
                     for (auto e : temp) {
                         indexes.emplace_back(e);
@@ -59,16 +56,13 @@ future<redis_message> srandmember::execute(service::storage_proxy& proxy, db::co
                     auto abs_count = std::abs(count);
                     indexes.reserve(abs_count);
                     while (indexes.size() < static_cast<size_t>(abs_count)) {
-                        indexes.emplace_back(dist(gen) % max); 
+                        indexes.emplace_back(static_cast<size_t>(dist(gen) % max)); 
                     }
                 }
                 return std::move(indexes);
             };
             auto indexes = make_random_indexes(pd->data().size(), _count);
-            std::vector<std::optional<bytes>> result;
-            result.reserve(indexes.size());
-            for (auto index : indexes) { result.emplace_back(pd->data()[index].first); }
-            return redis_message::make(std::move(result)); 
+            return redis_message::make_set_bytes(pd, std::move(indexes)); 
         }
         return redis_message::null(); 
     });

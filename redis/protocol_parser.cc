@@ -20,9 +20,13 @@
 */
 #include "protocol_parser.hh"
 #include "redis/ragel_protocol_parser.hh"
+#include "redis/native_protocol_parser.hh"
 namespace redis {
 
 protocol_parser make_ragel_protocol_parser() {
     return protocol_parser { std::make_unique<ragel_protocol_parser> () };
+}
+protocol_parser make_native_protocol_parser() {
+    return protocol_parser { std::make_unique<native_protocol_parser> () };
 }
 }

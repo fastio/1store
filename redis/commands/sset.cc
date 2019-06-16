@@ -18,7 +18,7 @@ namespace commands {
 shared_ptr<abstract_command> sset::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 2 ) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
     }
     std::vector<bytes> data;
     for (size_t i = 1; i < req._args_count; i++) {
@@ -37,7 +37,7 @@ future<redis_message> sset::execute(service::storage_proxy& proxy, db::consisten
         } catch (std::exception& e) {
             return redis_message::err();
         }
-        return redis_message::make(total);
+        return redis_message::make_long(static_cast<long>(total));
     });
 }
 

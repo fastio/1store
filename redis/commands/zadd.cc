@@ -19,7 +19,7 @@ namespace commands {
 shared_ptr<abstract_command> zadd::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 3) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
     }
     std::vector<std::pair<bytes, bytes>> data;
     for (size_t i = 1; i < req._args_count; i += 2) {
@@ -28,11 +28,11 @@ shared_ptr<abstract_command> zadd::prepare(service::storage_proxy& proxy, const 
             auto& score = req._args[ i ];
             boost::lexical_cast<double>(score);
         } catch (boost::bad_lexical_cast&) {
-            return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
         }
         */
         if (is_number(req._args[i]) == false) {
-            return unexpected::prepare(std::move(req._command), std::move(bytes {msg_syntax_err}));
+            //FIXME
+            return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
         }
         data.emplace_back(std::make_pair(req._args[i + 1], req._args[i]));
     }
@@ -49,7 +49,7 @@ future<redis_message> zadd::execute(service::storage_proxy& proxy, db::consisten
         } catch (std::exception& e) {
             return redis_message::err();
         }
-        return redis_message::make(total);
+        return redis_message::make_long(static_cast<long>(total));
     });
 }
 

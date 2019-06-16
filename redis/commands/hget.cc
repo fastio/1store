@@ -33,7 +33,7 @@ shared_ptr<abstract_command> hget::prepare(service::storage_proxy& proxy, const 
 template<typename Type>
 shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req) {
     if (req._args_count != 1) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 1, req._args_count);
     }
     return seastar::make_shared<Type>(std::move(req._command), maps_schema(proxy, cs.get_keyspace()), std::move(req._args[0]));
 }
@@ -51,10 +51,7 @@ future<redis_message> hget::execute(service::storage_proxy& proxy, db::consisten
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, _map_keys, fetch_options::values, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            auto&& vals = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::transformed([this] (auto& data) {
-                return std::move(data.first); 
-            }));
-            return redis_message::make(std::move(vals));
+            return redis_message::make_map_key_bytes(pd);
         }
         return redis_message::null();
     });
@@ -64,26 +61,14 @@ future<redis_message> hall::execute(service::storage_proxy& proxy, db::consisten
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, _option, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            std::vector<std::optional<bytes>> result;
+            //std::vector<std::optional<bytes>> result;
             if (_option == redis::fetch_options::keys) {
-                auto&& keys = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::transformed([this] (auto& data) {
-                    return std::move(data.first); 
-                }));
-                result = std::move(keys);
+                return redis_message::make_map_key_bytes(pd);
             } else if (_option == redis::fetch_options::values) {
-                // values was saved in the first of the pair.
-                auto&& vals = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::transformed([this] (auto& data) {
-                    return std::move(data.first); 
-                }));
-                result = std::move(vals);
+                return redis_message::make_map_key_bytes(pd);
             } else {
-                result.reserve(pd->data().size() * 2);
-                for (auto&& data : pd->data()) {
-                    result.emplace_back(data.first);
-                    result.emplace_back(data.second);
-                }
+                return redis_message::make_map_bytes(pd);
             }
-            return redis_message::make(std::move(result));
         }
         return redis_message::null();
     });

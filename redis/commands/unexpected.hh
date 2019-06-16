@@ -20,7 +20,7 @@ public:
         return make_shared<unexpected>(std::move(name));
     }
     static shared_ptr<abstract_command> make_wrong_arguments_exception(bytes&& name, size_t except, size_t given) {
-        return make_shared<unexpected>(std::move(name), std::move(to_bytes(sprint("-wrong number of arguments (given %ld, expected %ld)\r\n", given, except))));
+        return make_shared<unexpected>(std::move(name), std::move(to_bytes(sprint("-ERR wrong number of arguments (given %ld, expected %ld)\r\n", given, except))));
     }
     static shared_ptr<abstract_command> make_wrong_arguments_exception(bytes&& name, bytes&& message) {
         return make_shared<unexpected>(std::move(name), std::move(message));
@@ -29,7 +29,8 @@ public:
         return make_shared<unexpected>(std::move(name), std::move(message));
     }
     virtual future<redis_message> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config&, service::client_state&) override {
-        return redis_message::make_exception(std::move(_exception_message)); 
+       // return redis_message::make_exception(std::move(_exception_message)); 
+                return redis_message::ok();
     }
 };
 }

@@ -99,9 +99,9 @@ struct set_indexed_cells {
 using set_indexed_cells_mutation = redis_mutation<set_indexed_cells>;
 
 struct zset_indexed_cells {
-    std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>> _indexed_cells;
+    std::vector<std::pair<std::optional<bytes>, std::optional<double>>> _indexed_cells;
     size_t size() const { return _indexed_cells.size(); }
-    zset_indexed_cells(std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>&& indexed_cells) : _indexed_cells(std::move(indexed_cells)) {}
+    zset_indexed_cells(std::vector<std::pair<std::optional<bytes>, std::optional<double>>>&& indexed_cells) : _indexed_cells(std::move(indexed_cells)) {}
 };
 using zset_indexed_cells_mutation = redis_mutation<zset_indexed_cells>;
 
@@ -208,7 +208,7 @@ static inline seastar::lw_shared_ptr<zset_mutation> make_zset_cells(const schema
 }
 static inline seastar::lw_shared_ptr<zset_indexed_cells_mutation> make_zset_indexed_cells(const schema_ptr schema,
     const bytes& key,
-    std::vector<std::pair<std::optional<bytes>, std::optional<bytes>>>&& indexed_cells, long ttl = 0)
+    std::vector<std::pair<std::optional<bytes>, std::optional<double>>>&& indexed_cells, long ttl = 0)
 {
     return seastar::make_lw_shared<zset_indexed_cells_mutation> (schema, key, std::move(zset_indexed_cells (std::move(indexed_cells))), ttl);
 }

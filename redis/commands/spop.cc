@@ -37,8 +37,8 @@ future<redis_message> spop::execute(service::storage_proxy& proxy, db::consisten
             };
             auto index = make_random_index(static_cast<int>(pd->data().size()));
             auto member = *(pd->data()[index].first);
-            return redis::write_mutation(proxy, redis::make_set_dead_cells(_schema, _key, std::vector<bytes> { member }), cl, timeout, cs).then_wrapped([this, member] (auto fut) {
-                return redis_message::make(member); 
+            return redis::write_mutation(proxy, redis::make_set_dead_cells(_schema, _key, std::vector<bytes> { member }), cl, timeout, cs).then_wrapped([this, index, pd] (auto fut) {
+                return redis_message::make_set_bytes(pd, index); 
             });
         }
         return redis_message::null(); 

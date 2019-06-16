@@ -64,5 +64,6 @@ private:
 };
 
 extern protocol_parser make_ragel_protocol_parser();
+extern protocol_parser make_native_protocol_parser();
 }
 

@@ -22,7 +22,7 @@ namespace commands {
 shared_ptr<abstract_command> zcount::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 3) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
     }
     auto min = bytes2double(req._args[1]);
     auto max = bytes2double(req._args[2]);
@@ -39,7 +39,7 @@ future<redis_message> zcount::execute(service::storage_proxy& proxy, db::consist
                 auto v = bytes2double(*(e.first));
                 if (min <= v && v <= max) count++;
             });
-            return redis_message::make(count);
+            return redis_message::make_long(static_cast<long>(count));
         }
         return redis_message::null();
     });

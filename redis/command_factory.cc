@@ -20,6 +20,7 @@
 #include "redis/commands/hset.hh"
 #include "redis/commands/hget.hh"
 #include "redis/commands/hdel.hh"
+#include "redis/commands/hincrby.hh"
 #include "redis/commands/hexists.hh"
 #include "redis/commands/sset.hh"
 #include "redis/commands/smembers.hh"
@@ -38,17 +39,19 @@
 #include "redis/commands/spop.hh"
 #include "redis/commands/srandmember.hh"
 #include "redis/commands/scard.hh"
+#include "log.hh"
 namespace redis {
+static logging::logger logging("command_factory");
 shared_ptr<abstract_command> command_factory::create(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     static thread_local std::unordered_map<bytes, std::function<shared_ptr<abstract_command> (service::storage_proxy& proxy, const service::client_state& cs, request&& req)>> _commands = {
     { "set",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::set::prepare(proxy, cs, std::move(req)); } }, 
-    { "setnx",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::setnx::prepare(proxy, cs, std::move(req)); } }, 
+//  { "setnx",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::setnx::prepare(proxy, cs, std::move(req)); } }, 
     { "setex",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::setex::prepare(proxy, cs, std::move(req)); } }, 
     { "mset",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::mset::prepare(proxy, cs, std::move(req)); } }, 
-    { "msetnx",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::msetnx::prepare(proxy, cs, std::move(req)); } }, 
+//  { "msetnx",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::msetnx::prepare(proxy, cs, std::move(req)); } }, 
     { "get",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::get::prepare(proxy, cs, std::move(req)); } }, 
-    { "getset",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::getset::prepare(proxy, cs, std::move(req)); } }, 
+//  { "getset",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::getset::prepare(proxy, cs, std::move(req)); } }, 
     { "mget",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::mget::prepare(proxy, cs, std::move(req)); } }, 
     { "del",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::del::prepare(proxy, cs, std::move(req)); } }, 
     { "exists",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::exists::prepare(proxy, cs, std::move(req)); } }, 
@@ -77,6 +80,7 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "hget",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::hget::prepare(proxy, cs, std::move(req), false); } }, 
     { "hmget",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::hget::prepare(proxy, cs, std::move(req), true); } }, 
     { "hdel",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::hdel::prepare(proxy, cs, std::move(req)); } }, 
+    { "hincrby",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::hincrby::prepare(proxy, cs, std::move(req)); } }, 
     { "hexists",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::hexists::prepare(proxy, cs, std::move(req)); } }, 
     { "hkeys",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::hkeys::prepare(proxy, cs, std::move(req)); } }, 
     { "hvals",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::hvals::prepare(proxy, cs, std::move(req)); } }, 
@@ -101,12 +105,13 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "zrem",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::zrem::prepare(proxy, cs, std::move(req)); } }, 
     { "zremrangebyrank",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::zremrangebyrank::prepare(proxy, cs, std::move(req)); } }, 
     { "zremrangebyscore",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::zremrangebyscore::prepare(proxy, cs, std::move(req)); } }, 
-    { "cluster",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::cluster_slots::prepare(proxy, cs, std::move(req)); } }, 
+    //{ "cluster",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::cluster_slots::prepare(proxy, cs, std::move(req)); } }, 
     };
     auto&& command = _commands.find(req._command);
     if (command != _commands.end()) {
         return (command->second)(proxy, cs, std::move(req));
     }
+    logging.error("unkown command = {}", req._command);
     return commands::unexpected::prepare(std::move(req._command));
 }
 

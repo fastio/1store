@@ -21,7 +21,7 @@ namespace commands {
 shared_ptr<abstract_command> zscore::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 2 || req._args_count % 2 != 0) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
     }
     std::vector<bytes> map_keys;
     for (size_t i = 1; i < req._args_count; i++) {
@@ -35,10 +35,7 @@ future<redis_message> zscore::execute(service::storage_proxy& proxy, db::consist
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, _map_keys, fetch_options::values, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs] (auto pd) {
         if (pd && pd->has_data()) {
-            auto&& vals = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::transformed([this] (auto& data) {
-                return std::move(data.first); 
-            }));
-            return redis_message::make(std::move(vals));
+            return redis_message::make_map_key_bytes(pd);
         }
         return redis_message::null();
     });

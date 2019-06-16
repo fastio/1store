@@ -18,7 +18,7 @@ template<typename PushType>
 shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 2) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 2, req._args_count);
     }
     std::vector<bytes> values;
     values.reserve(req._args.size() - 1);
@@ -67,7 +67,7 @@ future<redis_message> push::do_execute(service::storage_proxy& proxy,
                 // FIXME: what kind of exceptions.
                 return redis_message::err();
             }
-            return redis_message::ok();
+            return redis_message::make_long(static_cast<long>(total));
         });
     });
 }

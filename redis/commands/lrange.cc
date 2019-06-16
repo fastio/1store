@@ -16,7 +16,7 @@ namespace commands {
 shared_ptr<abstract_command> lrange::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 3) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
     }
     return make_shared<lrange>(std::move(req._command), lists_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), bytes2long(req._args[1]), bytes2long(req._args[2]));
 }
@@ -30,18 +30,10 @@ future<redis_message> lrange::execute(service::storage_proxy& proxy, db::consist
             while (_end < 0 && pd->data().size() > 0) _end += static_cast<long>(pd->data().size());
             if (static_cast<size_t>(_end) >= pd->data().size()) _end = static_cast<long>(pd->data().size()) - 1;
             if (_begin <= _end) {
-                size_t index = 0;
-                auto&& vals = boost::copy_range<std::vector<std::optional<bytes>>> (pd->data() | boost::adaptors::filtered([this, &index] (auto&) {
-                    auto r = static_cast<size_t>(_begin) <= index && index <= static_cast<size_t>(_end);
-                    index++;
-                    return r;
-                }) | boost::adaptors::transformed([] (auto& data) {
-                    return std::move(data.first); 
-                }));
-                return redis_message::make(std::move(vals));
+                return redis_message::make_list_bytes(pd, static_cast<size_t> (_begin), static_cast<size_t> (_end));
             }
         }
-        return redis_message::make(std::vector<std::optional<bytes>> {});
+        return redis_message::make_empty_list_bytes();
     });
 }
 }

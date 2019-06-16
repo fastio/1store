@@ -11,20 +11,17 @@
 #include "partition_slice_builder.hh"
 #include "gc_clock.hh"
 #include "dht/i_partitioner.hh"
-#include "log.hh"
 #include <boost/range/adaptor/transformed.hpp>
 #include <boost/range/algorithm_ext/push_back.hpp>
 #include <boost/range/adaptor/filtered.hpp>
 #include <boost/range/adaptor/indirected.hpp>
-#include "log.hh"
 namespace redis {
 namespace commands {
-static logging::logger zblog("zrangebyscore");
 template<typename CommandType>
 shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 3) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+        return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
     }
     auto min = bytes2double(req._args[1]);
     auto max = bytes2double(req._args[2]);
@@ -37,7 +34,7 @@ shared_ptr<abstract_command> prepare_impl(service::storage_proxy& proxy, const s
         }
         else if (req._args[i] == bytes("limit")) {
             if (req._args_count < i + 3) {
-                return unexpected::prepare(std::move(req._command), std::move(bytes { msg_syntax_err }) );
+                return unexpected::make_wrong_arguments_exception(std::move(req._command), i + 3, req._args_count);
             }
             offset = bytes2long(req._args[i + 1]);
             count = bytes2long(req._args[i + 2]);
@@ -61,9 +58,10 @@ future<redis_message> zrangebyscore::execute_impl(service::storage_proxy& proxy,
 {
     auto timeout = now + tc.read_timeout;
     return prefetch_map(proxy, _schema, _key, fetch_options::all, cl, timeout, cs).then([this, &proxy, cl, timeout, &cs, reversed] (auto pd) {
-        std::vector<std::optional<bytes>> results; 
+        auto results = make_lw_shared<std::vector<std::optional<bytes>>> ();
         if (pd && pd->has_data()) {
-            auto&& result_scores = boost::copy_range<std::vector<std::pair<std::optional<bytes>, double>>> (pd->data() | boost::adaptors::filtered([min = _min, max = _max] (auto& e) {
+            using result_type = std::vector<std::pair<std::optional<bytes>, double>>;
+            auto result_scores = boost::copy_range<result_type> (pd->data() | boost::adaptors::filtered([min = _min, max = _max] (auto& e) {
                 auto v = bytes2double(*(e.second));
                 return min <= v && v <= max;
             }) | boost::adaptors::transformed([] (auto& e) {
@@ -81,13 +79,13 @@ future<redis_message> zrangebyscore::execute_impl(service::storage_proxy& proxy,
                 result_scores.erase(result_scores.begin() + static_cast<size_t>(_count), result_scores.end());
             }
             for (auto&& e : result_scores) {
-                results.emplace_back(std::move(e.first));
+                results->emplace_back(std::move(e.first));
                 if (_with_scores) {
-                    results.emplace_back(std::move(double2bytes(e.second)));
+                    results->emplace_back(std::move(double2bytes(e.second)));
                 }
             }
         }
-        return redis_message::make(std::move(results));
+        return redis_message::make_zset_bytes(results);
     });
 }
 
