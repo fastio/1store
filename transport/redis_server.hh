@@ -82,12 +82,8 @@ public:
     struct result {
         result(redis::redis_message&& m) : _data(make_foreign(std::make_unique<redis::redis_message>(std::move(m)))) {}
         foreign_ptr<std::unique_ptr<redis::redis_message>> _data;
-        lw_shared_ptr<scattered_message<char>> make_message() {
-            auto m = seastar::make_lw_shared<scattered_message<char>> ();
-            for (auto&& fragment : _data->ostream().fragments()) {
-                m->append_static(reinterpret_cast<const char*>(fragment.data()), fragment.size());
-            }
-            return m;
+        inline lw_shared_ptr<scattered_message<char>> make_message()  {
+            return _data->message();
         }
     };
     using response_type = result;
