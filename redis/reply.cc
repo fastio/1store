@@ -1,7 +1,5 @@
 #include "reply.hh"
-#include "log.hh"
 namespace redis {
-static logging::logger logging("reply");
 future<redis_message> redis_message::make_list_bytes(map_return_type r, size_t begin, size_t end) {
     auto m = make_lw_shared<scattered_message<char>> ();
     m->append(sstring(sprint("*%d\r\n", end - begin + 1)));
@@ -84,8 +82,6 @@ future<redis_message> redis_message::make_zset_bytes(lw_shared_ptr<std::vector<s
     auto m = make_lw_shared<scattered_message<char>> ();
     m->append(sstring(sprint("*%d\r\n", r->size())));
     for (auto& e : *r) {
-        auto& b = *e;
-        logging.info("zset e = {}", sstring(reinterpret_cast<const char*>(b.data()), b.size()));
         write_bytes(m, *e);
     }
     m->on_delete([ r = std::move(foreign_ptr { r }) ] {});
