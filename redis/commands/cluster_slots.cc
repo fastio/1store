@@ -20,12 +20,12 @@ static const bytes slots {"slots"};
 shared_ptr<abstract_command> cluster_slots::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count != 1) {
-        return unexpected::prepare(std::move(req._command), std::move(to_bytes(sprint("-wrong number of arguments (given %ld, expected 1)\r\n", req._args_count))));
+        return unexpected::make_exception(std::move(req._command), sprint("-wrong number of arguments (given %ld, expected 1)\r\n", req._args_count));
     }
     auto& slots = req._args[0];
     std::transform(slots.begin(), slots.end(), slots.begin(), ::tolower);
     if (slots != slots) {
-        return unexpected::prepare(std::move(req._command), std::move(to_bytes(sprint("-unknown cluster command '%s'\r\n", slots))));
+        return unexpected::make_exception(std::move(req._command), sprint("-unknown cluster command '%s'\r\n", slots));
     }
     return seastar::make_shared<cluster_slots> (std::move(req._command));
 }

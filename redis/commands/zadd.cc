@@ -31,8 +31,8 @@ shared_ptr<abstract_command> zadd::prepare(service::storage_proxy& proxy, const 
         }
         */
         if (is_number(req._args[i]) == false) {
-            //FIXME
-            return unexpected::make_wrong_arguments_exception(std::move(req._command), 3, req._args_count);
+            //value is not a valid float
+            return unexpected::make_exception(std::move(req._command), sstring("-ERR value is not a valid float\r\n"));
         }
         data.emplace_back(std::make_pair(req._args[i + 1], req._args[i]));
     }

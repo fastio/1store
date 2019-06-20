@@ -105,13 +105,14 @@ shared_ptr<abstract_command> command_factory::create(service::storage_proxy& pro
     { "zrem",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::zrem::prepare(proxy, cs, std::move(req)); } }, 
     { "zremrangebyrank",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::zremrangebyrank::prepare(proxy, cs, std::move(req)); } }, 
     { "zremrangebyscore",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::zremrangebyscore::prepare(proxy, cs, std::move(req)); } }, 
-    //{ "cluster",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::cluster_slots::prepare(proxy, cs, std::move(req)); } }, 
+    { "cluster",  [] (service::storage_proxy& proxy, const service::client_state& cs, request&& req) { return commands::cluster_slots::prepare(proxy, cs, std::move(req)); } }, 
     };
     auto&& command = _commands.find(req._command);
     if (command != _commands.end()) {
         return (command->second)(proxy, cs, std::move(req));
     }
-    logging.error("unkown command = {}", req._command);
+    auto& b = req._command;
+    logging.error("unkown command = {}", sstring(reinterpret_cast<const char*>(b.data()), b.size()));
     return commands::unexpected::prepare(std::move(req._command));
 }
 

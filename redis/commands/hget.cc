@@ -22,7 +22,7 @@ namespace commands {
 shared_ptr<abstract_command> hget::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req, bool multi)
 {
     if (req._args_count < 2 || (!multi && req._args_count != 2)) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes {"-ERR wrong number of arguments for HMGET\r\n"}));
+        return unexpected::prepare(std::move(req._command), sstring("-ERR wrong number of arguments for HMGET\r\n"));
     }
     std::vector<bytes> map_keys;
     for (size_t i = 1; i < req._args_count; i++) {

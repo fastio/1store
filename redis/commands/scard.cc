@@ -18,7 +18,7 @@ namespace commands {
 shared_ptr<abstract_command> scard::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count != 1) {
-        return unexpected::prepare(std::move(req._command), std::move(to_bytes(sprint("-wrong number of arguments (given %ld, expected 1)\r\n", req._args_count))));
+        return unexpected::make_exception(std::move(req._command), sprint("-wrong number of arguments (given %ld, expected 1)\r\n", req._args_count));
     }
     return seastar::make_shared<scard> (std::move(req._command), sets_schema(proxy, cs.get_keyspace()), std::move(req._args[0]));
 }

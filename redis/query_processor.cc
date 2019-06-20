@@ -24,9 +24,10 @@
 #include "redis/abstract_command.hh"
 #include <seastar/core/metrics.hh>
 #include "timeout_config.hh"
-
+#include "log.hh"
 namespace redis {
 
+static logging::logger logging("redisqp");
 distributed<query_processor> _the_query_processor;
 
 query_processor::query_processor(service::storage_proxy& proxy, distributed<database>& db)

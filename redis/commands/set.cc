@@ -40,7 +40,7 @@ shared_ptr<abstract_command> setex::prepare(service::storage_proxy& proxy, const
     try {
         ttl = bytes2long(req._args[1]);
     } catch(std::exception&) {
-        return unexpected::make_wrong_arguments_exception(std::move(req._command), to_bytes("-ERR value is not an integer or out of range"));
+        return unexpected::make_exception(std::move(req._command), sstring("-ERR value is not an integer or out of range"));
     }
     //std::chrono::seconds(ttl));
     return seastar::make_shared<setex> (std::move(req._command), simple_objects_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[2]), ttl);

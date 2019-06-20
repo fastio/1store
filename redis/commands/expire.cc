@@ -27,7 +27,7 @@ shared_ptr<abstract_command> expire::prepare(service::storage_proxy& proxy, cons
     try {
         ttl = bytes2long(req._args[1]);
     } catch(std::exception&) {
-        return unexpected::make_wrong_arguments_exception(std::move(req._command), to_bytes("-ERR value is not an integer or out of range"));
+        return unexpected::make_exception(std::move(req._command), "-ERR value is not an integer or out of range");
     }
     std::vector<schema_ptr> schemas {
         simple_objects_schema(proxy, cs.get_keyspace()),

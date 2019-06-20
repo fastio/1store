@@ -22,7 +22,7 @@ namespace commands {
 shared_ptr<abstract_command> hincrby::prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req)
 {
     if (req._args_count < 3) {
-        return unexpected::prepare(std::move(req._command), std::move(bytes {"-ERR wrong number of arguments for HINCRBY\r\n"}));
+        return unexpected::make_exception(std::move(req._command), sprint("-wrong number of arguments (given %ld, expected 1)\r\n", req._args_count));
     }
     return seastar::make_shared<hincrby>(std::move(req._command), maps_schema(proxy, cs.get_keyspace()), std::move(req._args[0]), std::move(req._args[1]), bytes2double(req._args[2]));
 }

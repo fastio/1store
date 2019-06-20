@@ -90,7 +90,9 @@ inline bytes double2bytes(double d) {
 }
 inline bool is_number(const bytes& b)
 {
-    return !b.empty() && std::find_if(b.begin(), b.end(), [] (auto c) { return !std::isdigit((char)c); }) == b.end();
+    return !b.empty() && std::find_if(b.begin(), b.end(), [] (auto c) { 
+        return !(std::isdigit((char)c) || c == '.' || c == '+' || c == '-');
+    }) == b.end();
 }
 class abstract_command : public enable_shared_from_this<abstract_command> {
 protected:
