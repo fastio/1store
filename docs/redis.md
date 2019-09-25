@@ -91,9 +91,9 @@ create the table with the schame as follow:
 
 ```
 CREATE TABLE redis （
-key text,
-value variant\<text, list\<text\>, map\<text\>\>,
-PRIMARY KEY(key)
+    key text,
+    value variant\<text, list\<text\>, map\<text\>\>,
+    PRIMARY KEY(key)
 ）WITH ...
 ```
 
@@ -151,9 +151,9 @@ following CQL:
 
 ```
 CREATE TABLE STRINGs (
-pkey text,
-data text,
-PRIMARY KEY (key)
+    pkey text,
+    data text,
+    PRIMARY KEY (key)
 ) WITH ... ;
 ```
 
@@ -184,10 +184,10 @@ operate on this table, which is created by following CQL:
 
 ```
 CREATE TABLE LISTs (
-pkey text,
-ckey text,
-data text,
-PRIMARY KEY(pkey, ckey)
+    pkey text,
+    ckey text,
+    data text,
+    PRIMARY KEY(pkey, ckey)
 ) WITH ... ;
 ```
 
@@ -334,7 +334,7 @@ timestamp.
 
 ### 5.5 Consistency
 
-edis Cluster is not able to [guarantee strong
+Redis Cluster is not able to [guarantee strong
 onsistency](https://redis.io/topics/cluster-tutorial). 
 
 In Scylla, data is always replicated automatically.  Read  or  write
