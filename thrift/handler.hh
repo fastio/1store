@@ -24,13 +24,20 @@
 
 #include "Cassandra.h"
 #include "auth/service.hh"
-#include "database.hh"
-#include "core/distributed.hh"
+#include "database_fwd.hh"
+#include <seastar/core/distributed.hh>
 #include "cql3/query_processor.hh"
 #include <memory>
 
 struct timeout_config;
 
-std::unique_ptr<::cassandra::CassandraCobSvIfFactory> create_handler_factory(distributed<database>& db, distributed<cql3::query_processor>& qp, auth::service&, timeout_config);
+namespace cql3 {
+
+class cql_config;
+
+}
+
+std::unique_ptr<::cassandra::CassandraCobSvIfFactory> create_handler_factory(distributed<database>& db, distributed<cql3::query_processor>& qp, auth::service&,
+        const cql3::cql_config& cql_config, timeout_config);
 
 #endif /* APPS_SEASTAR_THRIFT_HANDLER_HH_ */

@@ -1,77 +1,52 @@
-#pragma once
-#include "redis/command_with_single_schema.hh"
-#include "redis/request.hh"
+/*
+ * Copyright (C) 2019 pengjian.uestc @ gmail.com
+ */
 
-class timeout_config;
+/*
+ * This file is part of Scylla.
+ *
+ * Scylla is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Scylla is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#pragma once
+
+#include "redis/request.hh"
+#include "redis/abstract_command.hh"
+
 namespace redis {
+
 namespace commands {
-class set : public command_with_single_schema {
-protected:
+
+class set : public abstract_command {
     bytes _key;
     bytes _data;
     long _ttl = 0;
 public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
-    set(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data, long ttl) 
-        : command_with_single_schema(std::move(name), schema) 
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    set(bytes&& name, bytes&& key, bytes&& data, long ttl) 
+        : abstract_command(std::move(name)) 
         , _key(std::move(key))
         , _data(std::move(data))
         , _ttl(ttl)
     {
     }
-    set(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data)
-        : set(std::move(name), schema, std::move(key), std::move(data), 0)
+    set(bytes&& name, bytes&& key, bytes&& data)
+        : set(std::move(name), std::move(key), std::move(data), 0)
     {
     }
     ~set() {}
-    future<redis_message> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
+    future<redis_message> execute(service::storage_proxy&, redis_options&, service_permit) override;
 };
-/*
-class setnx : public set {
-public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
-    setnx(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data)
-        : set(std::move(name), schema, std::move(key), std::move(data))
-    {
-    }
-    ~setnx() {}
-    future<redis_message> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
-};
-*/
-class setex : public set {
-public:
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
-    setex(bytes&& name, const schema_ptr schema, bytes&& key, bytes&& data, long ttl)
-        : set(std::move(name), schema, std::move(key), std::move(data), ttl)
-    {
-    }
-    ~setex() {}
-};
-
-class mset : public command_with_single_schema {
-protected:
-    std::vector<std::pair<bytes, bytes>> _data;
-public:
-    mset(bytes&& name, const schema_ptr schema, std::vector<std::pair<bytes, bytes>>&& data)
-        : command_with_single_schema(std::move(name), schema)
-        , _data(std::move(data))
-    {
-    }
-    ~mset() {}
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
-    future<redis_message> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
-};
-/*
-class msetnx : public mset {
-public:
-    msetnx(bytes&& name, const schema_ptr schema, std::vector<std::pair<bytes, bytes>>&& data)
-        : mset(std::move(name), schema, std::move(data))
-    {
-    }
-    ~msetnx() {}
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
-    future<redis_message> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
-};
-*/
 }
 }

@@ -5,7 +5,12 @@ set -e
 case "$1" in
     purge|remove)
         rm -rf /etc/systemd/system/scylla-server.service.d/
+        rm -rf /etc/systemd/system/scylla-helper.slice.d/
         ;;
 esac
+
+if [ -d /run/systemd/system ]; then
+    systemctl --system daemon-reload >/dev/null || true
+fi
 
 #DEBHELPER#

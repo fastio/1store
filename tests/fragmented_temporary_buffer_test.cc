@@ -20,7 +20,7 @@
  */
 
 #include <seastar/core/thread.hh>
-#include <seastar/tests/test-utils.hh>
+#include <seastar/testing/thread_test_case.hh>
 
 #include "utils/fragmented_temporary_buffer.hh"
 
@@ -444,6 +444,58 @@ SEASTAR_THREAD_TEST_CASE(test_read_fragmented_buffer) {
                           expected_suffix);
 
         in.close().get();
+    }
+}
+
+SEASTAR_THREAD_TEST_CASE(test_skip) {
+    auto test = [&] (auto expected_value1, auto expected_value2, fragmented_temporary_buffer& ftb) {
+        using type1 = std::decay_t<decltype(expected_value1)>;
+        using type2 = std::decay_t<decltype(expected_value2)>;
+
+        auto in = ftb.get_istream();
+        BOOST_CHECK_EQUAL(in.bytes_left(), sizeof(type1) + sizeof(type2));
+        in.skip(sizeof(type1));
+        BOOST_CHECK_EQUAL(in.bytes_left(), sizeof(type2));
+        BOOST_CHECK_EQUAL(in.read<type2>(), expected_value2);
+        BOOST_CHECK_EQUAL(in.bytes_left(), 0);
+        in.skip(sizeof(type2));
+        BOOST_CHECK_EQUAL(in.bytes_left(), 0);
+    };
+
+    auto [ buffers, value1, value2 ] = get_buffers();
+    for (auto& frag_buffer : buffers) {
+        test(value1, value2, frag_buffer);
+    }
+}
+
+SEASTAR_THREAD_TEST_CASE(test_remove_suffix) {
+    auto test = [&] (auto expected_value1, auto expected_value2, fragmented_temporary_buffer& ftb) {
+        using type1 = std::decay_t<decltype(expected_value1)>;
+        using type2 = std::decay_t<decltype(expected_value2)>;
+
+        BOOST_CHECK_EQUAL(ftb.size_bytes(), sizeof(type1) + sizeof(type2));
+        ftb.remove_suffix(sizeof(type2));
+        BOOST_CHECK_EQUAL(ftb.size_bytes(), sizeof(type1));
+
+        auto in = ftb.get_istream();
+        BOOST_CHECK_EQUAL(in.read<type1>(), expected_value1);
+        BOOST_CHECK_EQUAL(in.bytes_left(), 0);
+        BOOST_CHECK_THROW(in.read<char>(), std::out_of_range);
+
+        ftb.remove_suffix(sizeof(type1) - 1);
+        BOOST_CHECK_EQUAL(ftb.size_bytes(), 1);
+
+        auto v = fragmented_temporary_buffer::view(ftb);
+        v.remove_prefix(1);
+        BOOST_CHECK(v.empty());
+
+        ftb.remove_suffix(1);
+        BOOST_CHECK_EQUAL(ftb.size_bytes(), 0);
+    };
+
+    auto [ buffers, value1, value2 ] = get_buffers();
+    for (auto& frag_buffer : buffers) {
+        test(value1, value2, frag_buffer);
     }
 }
 

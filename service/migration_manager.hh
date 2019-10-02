@@ -44,7 +44,7 @@
 #include "service/migration_listener.hh"
 #include "gms/endpoint_state.hh"
 #include "db/schema_tables.hh"
-#include "core/distributed.hh"
+#include <seastar/core/distributed.hh>
 #include "gms/inet_address.hh"
 #include "message/msg_addr.hh"
 #include "utils/UUID.hh"
@@ -57,6 +57,8 @@ namespace service {
 class migration_manager : public seastar::async_sharded_service<migration_manager> {
     std::vector<migration_listener*> _listeners;
     std::unordered_map<netw::msg_addr, serialized_action, netw::msg_addr::hash> _schema_pulls;
+    std::vector<gms::feature::listener_registration> _feature_listeners;
+    seastar::gate _background_tasks;
     static const std::chrono::milliseconds migration_delay;
 public:
     migration_manager();
@@ -73,6 +75,9 @@ public:
 
     future<> submit_migration_task(const gms::inet_address& endpoint);
 
+    // Makes sure that this node knows about all schema changes known by "nodes" that were made prior to this call.
+    future<> sync_schema(const database& db, const std::vector<gms::inet_address>& nodes);
+
     // Fetches schema from remote node and applies it locally.
     // Differs from submit_migration_task() in that all errors are propagated.
     // Coalesces requests.
@@ -81,6 +86,8 @@ public:
 
     // Merge mutations received from src.
     // Keep mutations alive around whole async operation.
+    future<> merge_schema_from(netw::msg_addr src, const std::vector<canonical_mutation>& mutations);
+    // Deprecated. The canonical mutation should be used instead.
     future<> merge_schema_from(netw::msg_addr src, const std::vector<frozen_mutation>& mutations);
 
     future<> notify_create_keyspace(const lw_shared_ptr<keyspace_metadata>& ksm);
@@ -119,7 +126,9 @@ public:
 
     future<> announce_keyspace_drop(const sstring& ks_name, bool announce_locally = false);
 
-    future<> announce_column_family_drop(const sstring& ks_name, const sstring& cf_name, bool announce_locally = false);
+    class drop_views_tag;
+    using drop_views = bool_class<drop_views_tag>;
+    future<> announce_column_family_drop(const sstring& ks_name, const sstring& cf_name, bool announce_locally = false, drop_views drop_views = drop_views::no);
 
     future<> announce_type_drop(user_type dropped_type, bool announce_locally = false);
 

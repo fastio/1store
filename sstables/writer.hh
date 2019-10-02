@@ -21,8 +21,8 @@
 
 #pragma once
 
-#include "core/iostream.hh"
-#include "core/fstream.hh"
+#include <seastar/core/iostream.hh>
+#include <seastar/core/fstream.hh>
 #include "types.hh"
 #include "checksum_utils.hh"
 #include "progress_monitor.hh"
@@ -33,6 +33,10 @@
 #include "service/storage_service.hh"
 
 namespace sstables {
+
+class index_sampling_state;
+class compression;
+class metadata_collector;
 
 class file_writer {
     output_stream<char> _out;
@@ -432,6 +436,7 @@ inline void write(sstable_version_types v, file_writer& out, const disk_hash<Siz
     write(v, out, h.map);
 }
 
+
 class bytes_writer_for_column_name {
     bytes _buf;
     bytes::iterator _pos;
@@ -483,11 +488,14 @@ void write_compound_non_dense_column_name(sstable_version_types v, Writer& out, 
     // marker should be in the end of it, and we just join them together as we
     // do for any normal component
     if (c.size() == 1) {
+        if (ck_bview.empty()) {
+            throw std::runtime_error("Open-ended range tombstones are not allowed in LA/KA SSTables.");
+        }
         ck_bview.remove_suffix(1);
     }
     size_t sz = ck_bview.size() + c.size();
     if (sz > std::numeric_limits<uint16_t>::max()) {
-        throw std::runtime_error(sprint("Column name too large (%d > %d)", sz, std::numeric_limits<uint16_t>::max()));
+        throw std::runtime_error(format("Column name too large ({:d} > {:d})", sz, std::numeric_limits<uint16_t>::max()));
     }
     out.prepare(uint16_t(sz));
     out.write(ck_bview, c);
@@ -502,7 +510,7 @@ template<typename Writer>
 void write_column_name(sstable_version_types v, Writer& out, bytes_view column_names) {
     size_t sz = column_names.size();
     if (sz > std::numeric_limits<uint16_t>::max()) {
-        throw std::runtime_error(sprint("Column name too large (%d > %d)", sz, std::numeric_limits<uint16_t>::max()));
+        throw std::runtime_error(format("Column name too large ({:d} > {:d})", sz, std::numeric_limits<uint16_t>::max()));
     }
     out.prepare(uint16_t(sz));
     out.write(column_names);
@@ -593,13 +601,13 @@ size_t summary_byte_cost();
 void prepare_summary(summary& s, uint64_t expected_partition_count, uint32_t min_index_interval);
 
 void seal_summary(summary& s,
-    std::experimental::optional<key>&& first_key,
-    std::experimental::optional<key>&& last_key,
+    std::optional<key>&& first_key,
+    std::optional<key>&& last_key,
     const index_sampling_state& state);
 
 void seal_statistics(sstable_version_types, statistics&, metadata_collector&,
     const sstring partitioner, double bloom_filter_fp_chance, schema_ptr,
-    const dht::decorated_key& first_key, const dht::decorated_key& last_key, encoding_stats enc_stats = {});
+    const dht::decorated_key& first_key, const dht::decorated_key& last_key, const encoding_stats& enc_stats = {});
 
 void write(sstable_version_types, file_writer&, const utils::estimated_histogram&);
 void write(sstable_version_types, file_writer&, const utils::streaming_histogram&);

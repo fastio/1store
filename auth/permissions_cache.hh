@@ -22,7 +22,7 @@
 #pragma once
 
 #include <chrono>
-#include <experimental/string_view>
+#include <string_view>
 #include <functional>
 #include <iostream>
 #include <optional>
@@ -37,7 +37,6 @@
 #include "auth/resource.hh"
 #include "auth/role_or_anonymous.hh"
 #include "log.hh"
-#include "stdx.hh"
 #include "utils/hash.hh"
 #include "utils/loading_cache.hh"
 
@@ -59,8 +58,6 @@ namespace auth {
 class service;
 
 struct permissions_cache_config final {
-    static permissions_cache_config from_db_config(const db::config&);
-
     std::size_t max_entries;
     std::chrono::milliseconds validity_period;
     std::chrono::milliseconds update_period;

@@ -116,7 +116,7 @@ BOOST_AUTO_TEST_CASE(test_pod) {
     auto generate_object = [] {
         std::uniform_int_distribution<decltype(test_pod_type::x)> dist_x;
         std::uniform_int_distribution<decltype(test_pod_type::y)> dist_y;
-        return test_pod_type { dist_x(tests::random::gen), dist_y(tests::random::gen) };
+        return test_pod_type { dist_x(tests::random::gen()), dist_y(tests::random::gen()) };
     };
     using pod_type = imr::pod<test_pod_type>;
 
@@ -807,7 +807,7 @@ BOOST_AUTO_TEST_CASE(test_object_exception_safety) {
                 [&] (auto nested_serializer) {
                     return nested_serializer
                         .serialize(128)
-                        .serialize(128, [] (auto&&...) { })
+                        .serialize(128, [] (auto&&...) noexcept { })
                         .done();
                 }
             ))
@@ -816,7 +816,7 @@ BOOST_AUTO_TEST_CASE(test_object_exception_safety) {
                 [&] (auto nested_serializer) {
                     return nested_serializer
                         .serialize(1024)
-                        .serialize(1024, [] (auto&&...) { })
+                        .serialize(1024, [] (auto&&...) noexcept { })
                         .done();
                 }
             ))

@@ -21,16 +21,16 @@
 
 #pragma once
 
-#include <experimental/optional>
+#include <optional>
 #include <boost/functional/hash.hpp>
 #include <iosfwd>
 #include "data/cell.hh"
 #include <sstream>
 
-#include "core/sstring.hh"
-#include "core/shared_ptr.hh"
+#include <seastar/core/sstring.hh>
+#include <seastar/core/shared_ptr.hh>
 #include "utils/UUID.hh"
-#include "net/byteorder.hh"
+#include <seastar/net/byteorder.hh>
 #include "db_clock.hh"
 #include "bytes.hh"
 #include "log.hh"
@@ -44,12 +44,11 @@
 #include <boost/range/algorithm/for_each.hpp>
 #include <boost/range/numeric.hpp>
 #include <boost/range/combine.hpp>
-#include "net/ip.hh"
+#include <seastar/net/ip.hh>
 #include <seastar/net/inet_address.hh>
-#include "util/backtrace.hh"
+#include <seastar/util/backtrace.hh>
 #include "hashing.hh"
 #include <boost/multiprecision/cpp_int.hpp>  // FIXME: remove somehow
-#include "stdx.hh"
 #include "utils/fragmented_temporary_buffer.hh"
 
 class tuple_type_impl;
@@ -63,7 +62,6 @@ namespace cql3 {
 
 class cql3_type;
 class column_specification;
-shared_ptr<cql3_type> make_cql3_tuple_type(shared_ptr<const tuple_type_impl> t);
 
 }
 
@@ -319,12 +317,17 @@ using maybe_empty =
 class abstract_type;
 class data_value;
 
+struct ascii_native_type {
+    using primary_type = sstring;
+    primary_type string;
+};
+
 struct simple_date_native_type {
     using primary_type = uint32_t;
     primary_type days;
 };
 
-struct timestamp_native_type {
+struct date_type_native_type {
     using primary_type = db_clock::time_point;
     primary_type tp;
 };
@@ -365,6 +368,7 @@ public:
     explicit data_value(bytes);
     data_value(sstring);
     data_value(const char*);
+    data_value(ascii_native_type);
     data_value(bool);
     data_value(int8_t);
     data_value(int16_t);
@@ -374,18 +378,19 @@ public:
     data_value(float);
     data_value(double);
     data_value(net::ipv4_address);
+    data_value(net::ipv6_address);
     data_value(seastar::net::inet_address);
     data_value(simple_date_native_type);
-    data_value(timestamp_native_type);
+    data_value(db_clock::time_point);
     data_value(time_native_type);
     data_value(timeuuid_native_type);
-    data_value(db_clock::time_point);
+    data_value(date_type_native_type);
     data_value(boost::multiprecision::cpp_int);
     data_value(big_decimal);
     data_value(cql_duration);
-    explicit data_value(std::experimental::optional<bytes>);
+    explicit data_value(std::optional<bytes>);
     template <typename NativeType>
-    data_value(std::experimental::optional<NativeType>);
+    data_value(std::optional<NativeType>);
     template <typename NativeType>
     data_value(const std::unordered_set<NativeType>&);
 
@@ -431,61 +436,97 @@ class abstract_type : public enable_shared_from_this<abstract_type> {
     std::optional<uint32_t> _value_length_if_fixed;
     data::type_imr_descriptor _imr_state;
 public:
-    abstract_type(sstring name, std::optional<uint32_t> value_length_if_fixed, data::type_info ti)
-        : _name(name), _value_length_if_fixed(std::move(value_length_if_fixed)), _imr_state(ti) {}
+    enum class kind : int8_t {
+        ascii,
+        boolean,
+        byte,
+        bytes,
+        counter,
+        date,
+        decimal,
+        double_kind,
+        duration,
+        empty,
+        float_kind,
+        inet,
+        int32,
+        list,
+        long_kind,
+        map,
+        reversed,
+        set,
+        short_kind,
+        simple_date,
+        time,
+        timestamp,
+        timeuuid,
+        tuple,
+        user,
+        utf8,
+        uuid,
+        varint,
+    };
+private:
+    kind _kind;
+public:
+    kind get_kind() const { return _kind; }
+
+    enum class cql3_kind : int8_t {
+        ASCII, BIGINT, BLOB, BOOLEAN, COUNTER, DECIMAL, DOUBLE, EMPTY, FLOAT, INT, SMALLINT, TINYINT, INET, TEXT, TIMESTAMP, UUID, VARINT, TIMEUUID, DATE, TIME, DURATION
+    };
+    using cql3_kind_enum = super_enum<cql3_kind,
+        cql3_kind::ASCII,
+        cql3_kind::BIGINT,
+        cql3_kind::BLOB,
+        cql3_kind::BOOLEAN,
+        cql3_kind::COUNTER,
+        cql3_kind::DECIMAL,
+        cql3_kind::DOUBLE,
+        cql3_kind::EMPTY,
+        cql3_kind::FLOAT,
+        cql3_kind::INET,
+        cql3_kind::INT,
+        cql3_kind::SMALLINT,
+        cql3_kind::TINYINT,
+        cql3_kind::TEXT,
+        cql3_kind::TIMESTAMP,
+        cql3_kind::UUID,
+        cql3_kind::VARINT,
+        cql3_kind::TIMEUUID,
+        cql3_kind::DATE,
+        cql3_kind::TIME,
+        cql3_kind::DURATION>;
+    using cql3_kind_enum_set = enum_set<cql3_kind_enum>;
+
+    abstract_type(kind k, sstring name, std::optional<uint32_t> value_length_if_fixed, data::type_info ti)
+        : _name(name), _value_length_if_fixed(std::move(value_length_if_fixed)), _imr_state(ti), _kind(k) {}
     virtual ~abstract_type() {}
     const data::type_imr_descriptor& imr_state() const { return _imr_state; }
-    virtual void serialize(const void* value, bytes::iterator& out) const = 0;
-    void serialize(const data_value& value, bytes::iterator& out) const {
-        return serialize(get_value_ptr(value), out);
-    }
-    virtual size_t serialized_size(const void* value) const = 0;
-    virtual bool less(bytes_view v1, bytes_view v2) const = 0;
+    bool less(bytes_view v1, bytes_view v2) const { return compare(v1, v2) < 0; }
     // returns a callable that can be called with two byte_views, and calls this->less() on them.
     serialized_compare as_less_comparator() const ;
     serialized_tri_compare as_tri_comparator() const ;
     static data_type parse_type(const sstring& name);
-    virtual size_t hash(bytes_view v) const = 0;
-    virtual bool equal(bytes_view v1, bytes_view v2) const {
-        if (is_byte_order_equal()) {
-            return compare_unsigned(v1, v2) == 0;
-        }
-        return compare(v1, v2) == 0;
-    }
-    virtual int32_t compare(bytes_view v1, bytes_view v2) const {
-        if (less(v1, v2)) {
-            return -1;
-        } else if (less(v2, v1)) {
-            return 1;
-        } else {
-            return 0;
-        }
-    }
-    virtual data_value deserialize(bytes_view v) const = 0;
+    size_t hash(bytes_view v) const;
+    bool equal(bytes_view v1, bytes_view v2) const;
+    int32_t compare(bytes_view v1, bytes_view v2) const;
+    data_value deserialize(bytes_view v) const;
     data_value deserialize_value(bytes_view v) const {
         return deserialize(v);
     };
-    virtual void validate(bytes_view v) const {
-        // FIXME
-    }
-    virtual void validate(const fragmented_temporary_buffer::view& view) const {
-        with_linearized(view, [this] (bytes_view bv) {
-            validate(bv);
+    void validate(bytes_view v, cql_serialization_format sf) const;
+    virtual void validate(const fragmented_temporary_buffer::view& view, cql_serialization_format sf) const {
+        with_linearized(view, [this, sf] (bytes_view bv) {
+            validate(bv, sf);
         });
     }
-    virtual void validate_collection_member(bytes_view v, const bytes& collection_name) const {
-        validate(v);
-    }
-    virtual bool is_compatible_with(const abstract_type& previous) const {
-        return equals(previous);
-    }
+    bool is_compatible_with(const abstract_type& previous) const;
     /*
-     * Types which are wrappers over other types should override this.
+     * Types which are wrappers over other types return the inner type.
      * For example the reversed_type returns the type it is reversing.
      */
-    virtual shared_ptr<const abstract_type> underlying_type() const {
-        return shared_from_this();
-    }
+    shared_ptr<const abstract_type> underlying_type() const;
+
     /**
      * Returns true if values of the other AbstractType can be read and "reasonably" interpreted by the this
      * AbstractType. Note that this is a weaker version of isCompatibleWith, as it does not require that both type
@@ -497,47 +538,18 @@ public:
      *
      * Note that a type should be compatible with at least itself.
      */
-    bool is_value_compatible_with(const abstract_type& other) const {
-        return is_value_compatible_with_internal(*other.underlying_type());
-    }
-    bool equals(const shared_ptr<const abstract_type>& other) const {
-        return equals(*other);
-    }
-    virtual bool references_user_type(const sstring& keyspace, const bytes& name) const = 0;
-    virtual std::experimental::optional<data_type> update_user_type(const shared_ptr<const user_type_impl> updated) const = 0;
-    virtual bool references_duration() const {
-        return false;
-    }
+    bool is_value_compatible_with(const abstract_type& other) const;
+    bool references_user_type(const sstring& keyspace, const bytes& name) const;
+    std::optional<data_type> update_user_type(const shared_ptr<const user_type_impl> updated) const;
+    bool references_duration() const;
     std::optional<uint32_t> value_length_if_fixed() const {
         return _value_length_if_fixed;
     }
-protected:
-    virtual bool equals(const abstract_type& other) const {
-        return this == &other;
-    }
-    /**
-     * Needed to handle ReversedType in value-compatibility checks.  Subclasses should implement this instead of
-     * is_value_compatible_with().
-     */
-    virtual bool is_value_compatible_with_internal(const abstract_type& other) const {
-        return is_compatible_with(other);
-    }
 public:
-    bytes decompose(const data_value& value) const {
-        if (!value._value) {
-            return {};
-        }
-        bytes b(bytes::initialized_later(), serialized_size(value._value));
-        auto i = b.begin();
-        serialize(value._value, i);
-        return b;
-    }
+    bytes decompose(const data_value& value) const;
     // Safe to call across shards
     const sstring& name() const {
         return _name;
-    }
-    virtual bool is_byte_order_comparable() const {
-        return false;
     }
 
     /**
@@ -546,42 +558,49 @@ public:
      *
      * When returns false, nothing can be inferred.
      */
-    virtual bool is_byte_order_equal() const {
-        // If we're byte order comparable, then we must also be byte order equal.
-        return is_byte_order_comparable();
+    bool is_byte_order_equal() const;
+    sstring get_string(const bytes& b) const;
+    sstring to_string(bytes_view bv) const {
+        return to_string_impl(deserialize(bv));
     }
-    virtual sstring get_string(const bytes& b) const {
-        validate(b);
-        return to_string(b);
+    sstring to_string(const bytes& b) const {
+        return to_string(bytes_view(b));
     }
-    virtual sstring to_string(const bytes& b) const = 0;
-    virtual bytes from_string(sstring_view text) const = 0;
-    virtual sstring to_json_string(const bytes& b) const = 0;
+    sstring to_string_impl(const data_value& v) const;
+    bytes from_string(sstring_view text) const;
+    sstring to_json_string(bytes_view bv) const;
+    sstring to_json_string(const bytes& b) const {
+        return to_json_string(bytes_view(b));
+    }
     sstring to_json_string(const bytes_opt& b) const {
         return b ? to_json_string(*b) : "null";
     }
-    virtual bytes from_json_object(const Json::Value& value, cql_serialization_format sf) const = 0;
-    virtual bool is_counter() const { return false; }
-    virtual bool is_collection() const { return false; }
-    virtual bool is_multi_cell() const { return false; }
-    virtual bool is_atomic() const { return !is_multi_cell(); }
-    virtual bool is_reversed() const { return false; }
-    virtual bool is_tuple() const { return false; }
-    virtual bool is_user_type() const { return false; }
-    virtual ::shared_ptr<cql3::cql3_type> as_cql3_type() const = 0;
+    bytes from_json_object(const Json::Value& value, cql_serialization_format sf) const;
+    bool is_counter() const;
+    bool is_string() const;
+    bool is_collection() const;
+    bool is_map() const { return _kind == kind::map; }
+    bool is_set() const { return _kind == kind::set; }
+    bool is_list() const { return _kind == kind::list; }
+    bool is_multi_cell() const;
+    bool is_atomic() const { return !is_multi_cell(); }
+    bool is_reversed() const { return _kind == kind::reversed; }
+    bool is_tuple() const;
+    bool is_user_type() const { return _kind == kind::user; }
+    bool is_native() const;
+    cql3::cql3_type as_cql3_type() const;
+    const sstring& cql3_type_name() const;
+    cql3_kind_enum_set::prepared get_cql3_kind() const;
     virtual shared_ptr<const abstract_type> freeze() const { return shared_from_this(); }
     friend class list_type_impl;
+private:
+    cql3_kind get_cql3_kind_impl() const;
+    mutable sstring _cql3_type_name;
 protected:
     // native_value_* methods are virualized versions of native_type's
     // sizeof/alignof/copy-ctor/move-ctor etc.
-    virtual size_t native_value_size() const = 0;
-    virtual size_t native_value_alignment() const = 0;
-    virtual void native_value_copy(const void* from, void* to) const = 0;
-    virtual void native_value_move(void* from, void* to) const = 0;
-    virtual void* native_value_clone(const void* from) const = 0;
-    virtual void native_value_destroy(void* object) const = 0;
-    virtual void native_value_delete(void* object) const = 0;
-    virtual const std::type_info& native_typeid() const = 0;
+    void* native_value_clone(const void* from) const;
+    const std::type_info& native_typeid() const;
     // abstract_type is a friend of data_value, but derived classes are not.
     static const void* get_value_ptr(const data_value& v) {
         return v._value;
@@ -593,37 +612,11 @@ protected:
     template <typename T> friend const T& value_cast(const data_value& value);
     template <typename T> friend T&& value_cast(data_value&& value);
     friend bool operator==(const abstract_type& x, const abstract_type& y);
-    static sstring quote_json_string(const sstring& s);
 };
 
 inline bool operator==(const abstract_type& x, const abstract_type& y)
 {
-     return x.equals(y);
-}
-
-inline
-size_t
-data_value::serialized_size() const {
-    return _type->serialized_size(_value);
-}
-
-
-inline
-void
-data_value::serialize(bytes::iterator& out) const {
-    return _type->serialize(_value, out);
-}
-
-inline
-bytes
-data_value::serialize() const {
-    if (!_value) {
-        return {};
-    }
-    bytes b(bytes::initialized_later(), serialized_size());
-    auto i = b.begin();
-    serialize(i);
-    return b;
+     return &x == &y;
 }
 
 template <typename T>
@@ -665,38 +658,7 @@ class concrete_type : public AbstractType {
 public:
     using native_type = maybe_empty<NativeType>;
     using AbstractType::AbstractType;
-protected:
-    virtual size_t native_value_size() const override {
-        return sizeof(native_type);
-    }
-    virtual size_t native_value_alignment() const override {
-        return alignof(native_type);
-    }
-    virtual void native_value_copy(const void* from, void* to) const override {
-        new (to) native_type(*reinterpret_cast<const native_type*>(from));
-    }
-    virtual void native_value_move(void* from, void* to) const override {
-        new (to) native_type(std::move(*reinterpret_cast<native_type*>(from)));
-    }
-    virtual void native_value_destroy(void* object) const override {
-        reinterpret_cast<native_type*>(object)->~native_type();
-    }
-    virtual void native_value_delete(void* object) const override {
-        delete reinterpret_cast<native_type*>(object);
-    }
-    virtual void* native_value_clone(const void* object) const override {
-        return new native_type(*reinterpret_cast<const native_type*>(object));
-    }
-    virtual const std::type_info& native_typeid() const override {
-        return typeid(native_type);
-    }
-    virtual bool references_user_type(const sstring& keyspace, const bytes& name) const override {
-        return false;
-    }
-    virtual std::experimental::optional<data_type> update_user_type(const shared_ptr<const user_type_impl> updated) const override {
-        return std::experimental::nullopt;
-    }
-protected:
+public:
     data_value make_value(std::unique_ptr<native_type> value) const {
         return data_value::make(this->shared_from_this(), std::move(value));
     }
@@ -709,17 +671,20 @@ protected:
     data_value make_empty() const {
         return make_value(native_type(empty_t()));
     }
+protected:
     const native_type& from_value(const void* v) const {
         return *reinterpret_cast<const native_type*>(v);
     }
     const native_type& from_value(const data_value& v) const {
         return this->from_value(AbstractType::get_value_ptr(v));
     }
+
+    friend class abstract_type;
 };
 
 inline bool operator==(const data_value& x, const data_value& y)
 {
-     return x._type->equals(y._type) && x._type->equal(x._type->decompose(x), y._type->decompose(y));
+     return x._type == y._type && x._type->equal(x._type->decompose(x), y._type->decompose(y));
 }
 
 inline bool operator!=(const data_value& x, const data_value& y)
@@ -727,7 +692,7 @@ inline bool operator!=(const data_value& x, const data_value& y)
     return !(x == y);
 }
 
-using bytes_view_opt = std::experimental::optional<bytes_view>;
+using bytes_view_opt = std::optional<bytes_view>;
 
 static inline
 bool optional_less_compare(data_type t, bytes_view_opt e1, bytes_view_opt e2) {
@@ -778,93 +743,7 @@ bool equal(data_type t, bytes_view e1, bytes_view e2) {
 
 class row_tombstone;
 
-class collection_type_impl : public abstract_type {
-    static logging::logger _logger;
-    static thread_local std::unordered_map<data_type, shared_ptr<cql3::cql3_type>> _cql3_type_cache;  // initialized on demand
-public:
-    static constexpr size_t max_elements = 65535;
-
-    class kind {
-        std::function<shared_ptr<cql3::column_specification> (shared_ptr<cql3::column_specification> collection, bool is_key)> _impl;
-    public:
-        kind(std::function<shared_ptr<cql3::column_specification> (shared_ptr<cql3::column_specification> collection, bool is_key)> impl)
-            : _impl(std::move(impl)) {}
-        shared_ptr<cql3::column_specification> make_collection_receiver(shared_ptr<cql3::column_specification> collection, bool is_key) const;
-        static const kind map;
-        static const kind set;
-        static const kind list;
-    };
-
-    const kind& _kind;
-
-protected:
-    explicit collection_type_impl(sstring name, const kind& k)
-            : abstract_type(std::move(name), {}, data::type_info::make_collection()), _kind(k) {}
-    virtual sstring cql3_type_name() const = 0;
-public:
-    // representation of a collection mutation, key/value pairs, value is a mutation itself
-    struct mutation {
-        tombstone tomb;
-        std::vector<std::pair<bytes, atomic_cell>> cells;
-        // Expires cells based on query_time. Expires tombstones based on max_purgeable and gc_before.
-        // Removes cells covered by tomb or this->tomb.
-        bool compact_and_expire(row_tombstone tomb, gc_clock::time_point query_time,
-            can_gc_fn&, gc_clock::time_point gc_before);
-    };
-    struct mutation_view {
-        tombstone tomb;
-        std::vector<std::pair<bytes_view, atomic_cell_view>> cells;
-        mutation materialize(const collection_type_impl&) const;
-    };
-    virtual data_type name_comparator() const = 0;
-    virtual data_type value_comparator() const = 0;
-    shared_ptr<cql3::column_specification> make_collection_receiver(shared_ptr<cql3::column_specification> collection, bool is_key) const;
-    virtual bool is_collection() const override { return true; }
-    bool is_map() const { return &_kind == &kind::map; }
-    bool is_set() const { return &_kind == &kind::set; }
-    bool is_list() const { return &_kind == &kind::list; }
-    std::vector<atomic_cell> enforce_limit(std::vector<atomic_cell>, int version) const;
-    virtual std::vector<bytes> serialized_values(std::vector<atomic_cell> cells) const = 0;
-    bytes serialize_for_native_protocol(std::vector<atomic_cell> cells, int version) const;
-    virtual bool is_compatible_with(const abstract_type& previous) const override;
-    virtual bool is_value_compatible_with_internal(const abstract_type& other) const override;
-    virtual bool is_compatible_with_frozen(const collection_type_impl& previous) const = 0;
-    virtual bool is_value_compatible_with_frozen(const collection_type_impl& previous) const = 0;
-    virtual shared_ptr<cql3::cql3_type> as_cql3_type() const override;
-    template <typename BytesViewIterator>
-    static bytes pack(BytesViewIterator start, BytesViewIterator finish, int elements, cql_serialization_format sf);
-    // requires linearized collection_mutation_view, lifetime
-    mutation_view deserialize_mutation_form(bytes_view in) const;
-    bool is_empty(collection_mutation_view in) const;
-    bool is_any_live(collection_mutation_view in, tombstone tomb = tombstone(), gc_clock::time_point now = gc_clock::time_point::min()) const;
-    api::timestamp_type last_update(collection_mutation_view in) const;
-    virtual bytes to_value(mutation_view mut, cql_serialization_format sf) const = 0;
-    bytes to_value(collection_mutation_view mut, cql_serialization_format sf) const;
-    // FIXME: use iterators?
-    collection_mutation serialize_mutation_form(const mutation& mut) const;
-    collection_mutation serialize_mutation_form(mutation_view mut) const;
-    collection_mutation serialize_mutation_form_only_live(mutation_view mut, gc_clock::time_point now) const;
-    collection_mutation merge(collection_mutation_view a, collection_mutation_view b) const;
-    collection_mutation difference(collection_mutation_view a, collection_mutation_view b) const;
-    // Calls Func(atomic_cell_view) for each cell in this collection.
-    // noexcept if Func doesn't throw.
-    template<typename Func>
-    void for_each_cell(collection_mutation_view c, Func&& func) const {
-      c.data.with_linearized([&] (bytes_view c_bv) {
-        auto m_view = deserialize_mutation_form(c_bv);
-        for (auto&& c : m_view.cells) {
-            func(std::move(c.second));
-        }
-      });
-    }
-    virtual void serialize(const void* value, bytes::iterator& out, cql_serialization_format sf) const = 0;
-    virtual data_value deserialize(bytes_view v, cql_serialization_format sf) const = 0;
-    data_value deserialize_value(bytes_view v, cql_serialization_format sf) const {
-        return deserialize(v, sf);
-    }
-    bytes_opt reserialize(cql_serialization_format from, cql_serialization_format to, bytes_view_opt v) const;
-};
-
+class collection_type_impl;
 using collection_type = shared_ptr<const collection_type_impl>;
 
 template <typename... T>
@@ -931,250 +810,29 @@ class reversed_type_impl : public abstract_type {
 
     data_type _underlying_type;
     reversed_type_impl(data_type t)
-        : abstract_type("org.apache.cassandra.db.marshal.ReversedType(" + t->name() + ")",
+        : abstract_type(kind::reversed, "org.apache.cassandra.db.marshal.ReversedType(" + t->name() + ")",
                         t->value_length_if_fixed(), t->imr_state().type_info())
         , _underlying_type(t)
     {}
-protected:
-    virtual bool is_value_compatible_with_internal(const abstract_type& other) const {
-        return _underlying_type->is_value_compatible_with(*(other.underlying_type()));
-    }
 public:
-    virtual int32_t compare(bytes_view v1, bytes_view v2) const override {
-        return _underlying_type->compare(v2, v1);
-    }
-    virtual bool less(bytes_view v1, bytes_view v2) const override {
-        return _underlying_type->less(v2, v1);
-    }
-
-    virtual bool equal(bytes_view v1, bytes_view v2) const override {
-        return _underlying_type->equal(v1, v2);
-    }
-
-    virtual void validate(bytes_view v) const override {
-        _underlying_type->validate(v);
-    }
-
-    virtual void validate_collection_member(bytes_view v, const bytes& collection_name) const  override {
-        _underlying_type->validate_collection_member(v, collection_name);
-    }
-
-    virtual bool is_compatible_with(const abstract_type& previous) const override {
-        if (previous.is_reversed()) {
-            return _underlying_type->is_compatible_with(*previous.underlying_type());
-        }
-        return false;
-    }
-
-    virtual shared_ptr<const abstract_type> underlying_type() const override {
+    const data_type& underlying_type() const {
         return _underlying_type;
-    }
-
-    virtual bool is_byte_order_comparable() const override {
-        return _underlying_type->is_byte_order_comparable();
-    }
-    virtual bool is_byte_order_equal() const override {
-        return _underlying_type->is_byte_order_equal();
-    }
-    virtual size_t hash(bytes_view v) const override {
-        return _underlying_type->hash(v);
-    }
-    virtual bool is_reversed() const override { return true; }
-    virtual bool is_counter() const override {
-        return _underlying_type->is_counter();
-    }
-    virtual bool is_collection() const override {
-        return _underlying_type->is_collection();
-    }
-    virtual bool is_multi_cell() const override {
-        return _underlying_type->is_multi_cell();
-    }
-
-    virtual void serialize(const void* value, bytes::iterator& out) const override {
-        _underlying_type->serialize(value, out);
-    }
-    virtual size_t serialized_size(const void* value) const override {
-        return _underlying_type->serialized_size(value);
-    }
-    virtual data_value deserialize(bytes_view v) const override {
-        return _underlying_type->deserialize(v);
-    }
-
-    virtual sstring get_string(const bytes& b) const override {
-        return _underlying_type->get_string(b);
-    }
-    virtual sstring to_string(const bytes& b) const override {
-        return _underlying_type->to_string(b);
-    }
-    virtual sstring to_json_string(const bytes& b) const override {
-        return _underlying_type->to_json_string(b);
-    }
-    virtual bytes from_json_object(const Json::Value& value, cql_serialization_format sf) const override {
-        return _underlying_type->from_json_object(value, sf);
-    }
-    virtual bytes from_string(sstring_view s) const override {
-        return _underlying_type->from_string(s);
-    }
-
-    virtual ::shared_ptr<cql3::cql3_type> as_cql3_type() const override {
-        return _underlying_type->as_cql3_type();
-    }
-
-    virtual bool references_user_type(const sstring& keyspace, const bytes& name) const override {
-        return _underlying_type->references_user_type(keyspace, name);
-    }
-
-    virtual std::experimental::optional<data_type> update_user_type(const shared_ptr<const user_type_impl> updated) const override {
-        return _underlying_type->update_user_type(updated);
     }
 
     static shared_ptr<const reversed_type_impl> get_instance(data_type type) {
         return intern::get_instance(std::move(type));
     }
-
-protected:
-    virtual size_t native_value_size() const override;
-    virtual size_t native_value_alignment() const override;
-    virtual void native_value_copy(const void* from, void* to) const override;
-    virtual void native_value_move(void* from, void* to) const override;
-    virtual void native_value_destroy(void* object) const override;
-    virtual void* native_value_clone(const void* object) const override;
-    virtual void native_value_delete(void* object) const override;
-    virtual const std::type_info& native_typeid() const override;
 };
 using reversed_type = shared_ptr<const reversed_type_impl>;
 
-template <typename NativeType>
-using concrete_collection_type = concrete_type<NativeType, collection_type_impl>;
-
-class map_type_impl final : public concrete_collection_type<std::vector<std::pair<data_value, data_value>>> {
-    using map_type = shared_ptr<const map_type_impl>;
-    using intern = type_interning_helper<map_type_impl, data_type, data_type, bool>;
-    data_type _keys;
-    data_type _values;
-    data_type _key_value_pair_type;
-    bool _is_multi_cell;
-protected:
-    virtual sstring cql3_type_name() const override;
-public:
-    static shared_ptr<const map_type_impl> get_instance(data_type keys, data_type values, bool is_multi_cell);
-    map_type_impl(data_type keys, data_type values, bool is_multi_cell);
-    data_type get_keys_type() const { return _keys; }
-    data_type get_values_type() const { return _values; }
-    virtual data_type name_comparator() const override { return _keys; }
-    virtual data_type value_comparator() const override { return _values; }
-    virtual bool is_multi_cell() const override { return _is_multi_cell; }
-    virtual data_type freeze() const override;
-    virtual bool is_compatible_with_frozen(const collection_type_impl& previous) const override;
-    virtual bool is_value_compatible_with_frozen(const collection_type_impl& previous) const override;
-    virtual bool less(bytes_view o1, bytes_view o2) const override;
-    static int32_t compare_maps(data_type keys_comparator, data_type values_comparator,
-                        bytes_view o1, bytes_view o2);
-    virtual bool is_byte_order_comparable() const override { return false; }
-    virtual void serialize(const void* value, bytes::iterator& out) const override;
-    virtual void serialize(const void* value, bytes::iterator& out, cql_serialization_format sf) const override;
-    virtual size_t serialized_size(const void* value) const;
-    virtual data_value deserialize(bytes_view v) const override;
-    virtual data_value deserialize(bytes_view v, cql_serialization_format sf) const override;
-    virtual sstring to_string(const bytes& b) const override;
-    virtual sstring to_json_string(const bytes& b) const override;
-    virtual bytes from_json_object(const Json::Value& value, cql_serialization_format sf) const override;
-    virtual size_t hash(bytes_view v) const override;
-    virtual bytes from_string(sstring_view text) const override;
-    virtual std::vector<bytes> serialized_values(std::vector<atomic_cell> cells) const override;
-    static bytes serialize_partially_deserialized_form(const std::vector<std::pair<bytes_view, bytes_view>>& v,
-            cql_serialization_format sf);
-    virtual bytes to_value(mutation_view mut, cql_serialization_format sf) const override;
-    virtual bool references_user_type(const sstring& keyspace, const bytes& name) const override;
-    virtual std::experimental::optional<data_type> update_user_type(const shared_ptr<const user_type_impl> updated) const override;
-    virtual bool references_duration() const override;
-};
-
+class map_type_impl;
 using map_type = shared_ptr<const map_type_impl>;
 
-data_value make_map_value(data_type tuple_type, map_type_impl::native_type value);
-
-class set_type_impl final : public concrete_collection_type<std::vector<data_value>> {
-    using set_type = shared_ptr<const set_type_impl>;
-    using intern = type_interning_helper<set_type_impl, data_type, bool>;
-    data_type _elements;
-    bool _is_multi_cell;
-protected:
-    virtual sstring cql3_type_name() const override;
-public:
-    static set_type get_instance(data_type elements, bool is_multi_cell);
-    set_type_impl(data_type elements, bool is_multi_cell);
-    data_type get_elements_type() const { return _elements; }
-    virtual data_type name_comparator() const override { return _elements; }
-    virtual data_type value_comparator() const override;
-    virtual bool is_multi_cell() const override { return _is_multi_cell; }
-    virtual data_type freeze() const override;
-    virtual bool is_compatible_with_frozen(const collection_type_impl& previous) const override;
-    virtual bool is_value_compatible_with_frozen(const collection_type_impl& previous) const override;
-    virtual bool less(bytes_view o1, bytes_view o2) const override;
-    virtual bool is_byte_order_comparable() const override { return _elements->is_byte_order_comparable(); }
-    virtual void serialize(const void* value, bytes::iterator& out) const override;
-    virtual void serialize(const void* value, bytes::iterator& out, cql_serialization_format sf) const override;
-    virtual size_t serialized_size(const void* value) const override;
-    virtual data_value deserialize(bytes_view v) const override;
-    virtual data_value deserialize(bytes_view v, cql_serialization_format sf) const override;
-    virtual sstring to_string(const bytes& b) const override;
-    virtual sstring to_json_string(const bytes& b) const override;
-    virtual bytes from_json_object(const Json::Value& value, cql_serialization_format sf) const override;
-    virtual size_t hash(bytes_view v) const override;
-    virtual bytes from_string(sstring_view text) const override;
-    virtual std::vector<bytes> serialized_values(std::vector<atomic_cell> cells) const override;
-    virtual bytes to_value(mutation_view mut, cql_serialization_format sf) const override;
-    bytes serialize_partially_deserialized_form(
-            const std::vector<bytes_view>& v, cql_serialization_format sf) const;
-    virtual bool references_user_type(const sstring& keyspace, const bytes& name) const override;
-    virtual std::experimental::optional<data_type> update_user_type(const shared_ptr<const user_type_impl> updated) const override;
-    virtual bool references_duration() const override;
-};
-
+class set_type_impl;
 using set_type = shared_ptr<const set_type_impl>;
 
-data_value make_set_value(data_type tuple_type, set_type_impl::native_type value);
-
-class list_type_impl final : public concrete_collection_type<std::vector<data_value>> {
-    using list_type = shared_ptr<const list_type_impl>;
-    using intern = type_interning_helper<list_type_impl, data_type, bool>;
-    data_type _elements;
-    bool _is_multi_cell;
-protected:
-    virtual sstring cql3_type_name() const override;
-public:
-    static list_type get_instance(data_type elements, bool is_multi_cell);
-    list_type_impl(data_type elements, bool is_multi_cell);
-    data_type get_elements_type() const { return _elements; }
-    virtual data_type name_comparator() const override;
-    virtual data_type value_comparator() const override;
-    virtual bool is_multi_cell() const override { return _is_multi_cell; }
-    virtual data_type freeze() const override;
-    virtual bool is_compatible_with_frozen(const collection_type_impl& previous) const override;
-    virtual bool is_value_compatible_with_frozen(const collection_type_impl& previous) const override;
-    virtual bool less(bytes_view o1, bytes_view o2) const override;
-    // FIXME: origin doesn't override is_byte_order_comparable().  Why?
-    virtual void serialize(const void* value, bytes::iterator& out) const override;
-    virtual void serialize(const void* value, bytes::iterator& out, cql_serialization_format sf) const override;
-    virtual size_t serialized_size(const void* value) const override;
-    virtual data_value deserialize(bytes_view v) const override;
-    virtual data_value deserialize(bytes_view v, cql_serialization_format sf) const override;
-    virtual sstring to_string(const bytes& b) const override;
-    virtual sstring to_json_string(const bytes& b) const override;
-    virtual bytes from_json_object(const Json::Value& value, cql_serialization_format sf) const override;
-    virtual size_t hash(bytes_view v) const override;
-    virtual bytes from_string(sstring_view text) const override;
-    virtual std::vector<bytes> serialized_values(std::vector<atomic_cell> cells) const override;
-    virtual bytes to_value(mutation_view mut, cql_serialization_format sf) const override;
-    virtual bool references_user_type(const sstring& keyspace, const bytes& name) const override;
-    virtual std::experimental::optional<data_type> update_user_type(const shared_ptr<const user_type_impl> updated) const override;
-    virtual bool references_duration() const override;
-};
-
+class list_type_impl;
 using list_type = shared_ptr<const list_type_impl>;
-
-data_value make_list_value(data_type type, list_type_impl::native_type value);
 
 inline
 size_t hash_value(const shared_ptr<const abstract_type>& x) {
@@ -1284,7 +942,7 @@ shared_ptr<const abstract_type> data_type_for<utils::UUID>() {
 
 template <>
 inline
-shared_ptr<const abstract_type> data_type_for<db_clock::time_point>() {
+shared_ptr<const abstract_type> data_type_for<date_type_native_type>() {
     return date_type;
 }
 
@@ -1296,7 +954,7 @@ shared_ptr<const abstract_type> data_type_for<simple_date_native_type>() {
 
 template <>
 inline
-shared_ptr<const abstract_type> data_type_for<timestamp_native_type>() {
+shared_ptr<const abstract_type> data_type_for<db_clock::time_point>() {
     return timestamp_type;
 }
 
@@ -1388,7 +1046,7 @@ to_bytes_opt(bytes_view_opt bv) {
     if (bv) {
         return to_bytes(*bv);
     }
-    return std::experimental::nullopt;
+    return std::nullopt;
 }
 
 inline
@@ -1397,7 +1055,7 @@ as_bytes_view_opt(const bytes_opt& bv) {
     if (bv) {
         return bytes_view{*bv};
     }
-    return std::experimental::nullopt;
+    return std::nullopt;
 }
 
 // FIXME: make more explicit
@@ -1468,19 +1126,10 @@ typename Type::value_type deserialize_value(Type& t, bytes_view v) {
     return t.deserialize_value(v);
 }
 
-template<typename Type, typename Value>
-static inline
-bytes serialize_value(Type& t, const Value& value) {
-    bytes b(bytes::initialized_later(), t.serialized_size(value));
-    auto i = b.begin();
-    t.serialize_value(value, i);
-    return b;
-}
-
 template<typename T>
 T read_simple(bytes_view& v) {
     if (v.size() < sizeof(T)) {
-        throw_with_backtrace<marshal_exception>(sprint("read_simple - not enough bytes (expected %d, got %d)", sizeof(T), v.size()));
+        throw_with_backtrace<marshal_exception>(format("read_simple - not enough bytes (expected {:d}, got {:d})", sizeof(T), v.size()));
     }
     auto p = v.begin();
     v.remove_prefix(sizeof(T));
@@ -1490,7 +1139,7 @@ T read_simple(bytes_view& v) {
 template<typename T>
 T read_simple_exactly(bytes_view v) {
     if (v.size() != sizeof(T)) {
-        throw_with_backtrace<marshal_exception>(sprint("read_simple_exactly - size mismatch (expected %d, got %d)", sizeof(T), v.size()));
+        throw_with_backtrace<marshal_exception>(format("read_simple_exactly - size mismatch (expected {:d}, got {:d})", sizeof(T), v.size()));
     }
     auto p = v.begin();
     return net::ntoh(*reinterpret_cast<const net::packed<T>*>(p));
@@ -1500,7 +1149,7 @@ inline
 bytes_view
 read_simple_bytes(bytes_view& v, size_t n) {
     if (v.size() < n) {
-        throw_with_backtrace<marshal_exception>(sprint("read_simple_bytes - not enough bytes (requested %d, got %d)", n, v.size()));
+        throw_with_backtrace<marshal_exception>(format("read_simple_bytes - not enough bytes (requested {:d}, got {:d})", n, v.size()));
     }
     bytes_view ret(v.begin(), n);
     v.remove_prefix(n);
@@ -1508,12 +1157,12 @@ read_simple_bytes(bytes_view& v, size_t n) {
 }
 
 template<typename T>
-std::experimental::optional<T> read_simple_opt(bytes_view& v) {
+std::optional<T> read_simple_opt(bytes_view& v) {
     if (v.empty()) {
         return {};
     }
     if (v.size() != sizeof(T)) {
-        throw_with_backtrace<marshal_exception>(sprint("read_simple_opt - size mismatch (expected %d, got %d)", sizeof(T), v.size()));
+        throw_with_backtrace<marshal_exception>(format("read_simple_opt - size mismatch (expected {:d}, got {:d})", sizeof(T), v.size()));
     }
     auto p = v.begin();
     v.remove_prefix(sizeof(T));
@@ -1523,7 +1172,7 @@ std::experimental::optional<T> read_simple_opt(bytes_view& v) {
 inline sstring read_simple_short_string(bytes_view& v) {
     uint16_t len = read_simple<uint16_t>(v);
     if (v.size() < len) {
-        throw_with_backtrace<marshal_exception>(sprint("read_simple_short_string - not enough bytes (%d)", v.size()));
+        throw_with_backtrace<marshal_exception>(format("read_simple_short_string - not enough bytes ({:d})", v.size()));
     }
     sstring ret(sstring::initialized_later(), len);
     std::copy(v.begin(), v.begin() + len, ret.begin());
@@ -1537,201 +1186,18 @@ void write_collection_size(bytes::iterator& out, int size, cql_serialization_for
 void write_collection_value(bytes::iterator& out, cql_serialization_format sf, bytes_view val_bytes);
 void write_collection_value(bytes::iterator& out, cql_serialization_format sf, data_type type, const data_value& value);
 
-template <typename BytesViewIterator>
-bytes
-collection_type_impl::pack(BytesViewIterator start, BytesViewIterator finish, int elements, cql_serialization_format sf) {
-    size_t len = collection_size_len(sf);
-    size_t psz = collection_value_len(sf);
-    for (auto j = start; j != finish; j++) {
-        len += j->size() + psz;
-    }
-    bytes out(bytes::initialized_later(), len);
-    bytes::iterator i = out.begin();
-    write_collection_size(i, elements, sf);
-    while (start != finish) {
-        write_collection_value(i, sf, *start++);
-    }
-    return out;
-}
-
-struct tuple_deserializing_iterator : public std::iterator<std::input_iterator_tag, const bytes_view_opt> {
-    bytes_view _v;
-    bytes_view_opt _current;
-public:
-    struct end_tag {};
-    tuple_deserializing_iterator(bytes_view v) : _v(v) {
-        parse();
-    }
-    tuple_deserializing_iterator(end_tag, bytes_view v) : _v(v) {
-        _v.remove_prefix(_v.size());
-    }
-    static tuple_deserializing_iterator start(bytes_view v) {
-        return tuple_deserializing_iterator(v);
-    }
-    static tuple_deserializing_iterator finish(bytes_view v) {
-        return tuple_deserializing_iterator(end_tag(), v);
-    }
-    const bytes_view_opt& operator*() const {
-        return _current;
-    }
-    const bytes_view_opt* operator->() const {
-        return &_current;
-    }
-    tuple_deserializing_iterator& operator++() {
-        skip();
-        parse();
-        return *this;
-    }
-    void operator++(int) {
-        skip();
-        parse();
-    }
-    bool operator==(const tuple_deserializing_iterator& x) const {
-        return _v == x._v;
-    }
-    bool operator!=(const tuple_deserializing_iterator& x) const {
-        return !operator==(x);
-    }
-private:
-    void parse() {
-        _current = std::experimental::nullopt;
-        if (_v.empty()) {
-            return;
-        }
-        // we don't consume _v, otherwise operator==
-        // or the copy constructor immediately after
-        // parse() yields the wrong results.
-        auto tmp = _v;
-        auto s = read_simple<int32_t>(tmp);
-        if (s < 0) {
-            return;
-        }
-        _current = read_simple_bytes(tmp, s);
-    }
-    void skip() {
-        _v.remove_prefix(4 + (_current ? _current->size() : 0));
-    }
-};
-
-class tuple_type_impl : public concrete_type<std::vector<data_value>> {
-    using intern = type_interning_helper<tuple_type_impl, std::vector<data_type>>;
-protected:
-    std::vector<data_type> _types;
-    static boost::iterator_range<tuple_deserializing_iterator> make_range(bytes_view v) {
-        return { tuple_deserializing_iterator::start(v), tuple_deserializing_iterator::finish(v) };
-    }
-    tuple_type_impl(sstring name, std::vector<data_type> types);
-public:
-    tuple_type_impl(std::vector<data_type> types);
-    static shared_ptr<const tuple_type_impl> get_instance(std::vector<data_type> types);
-    data_type type(size_t i) const {
-        return _types[i];
-    }
-    size_t size() const {
-        return _types.size();
-    }
-    const std::vector<data_type>& all_types() const {
-        return _types;
-    }
-    virtual int32_t compare(bytes_view v1, bytes_view v2) const override;
-    virtual bool less(bytes_view v1, bytes_view v2) const override;
-    virtual size_t serialized_size(const void* value) const override;
-    virtual void serialize(const void* value, bytes::iterator& out) const override;
-    virtual data_value deserialize(bytes_view v) const override;
-    std::vector<bytes_view_opt> split(bytes_view v) const;
-    template <typename RangeOf_bytes_opt>  // also accepts bytes_view_opt
-    static bytes build_value(RangeOf_bytes_opt&& range) {
-        auto item_size = [] (auto&& v) { return 4 + (v ? v->size() : 0); };
-        auto size = boost::accumulate(range | boost::adaptors::transformed(item_size), 0);
-        auto ret = bytes(bytes::initialized_later(), size);
-        auto out = ret.begin();
-        auto put = [&out] (auto&& v) {
-            if (v) {
-                write(out, int32_t(v->size()));
-                out = std::copy(v->begin(), v->end(), out);
-            } else {
-                write(out, int32_t(-1));
-            }
-        };
-        boost::range::for_each(range, put);
-        return ret;
-    }
-    virtual size_t hash(bytes_view v) const override;
-    virtual bytes from_string(sstring_view s) const override;
-    virtual sstring to_string(const bytes& b) const override;
-    virtual sstring to_json_string(const bytes& b) const override;
-    virtual bytes from_json_object(const Json::Value& value, cql_serialization_format sf) const override;
-    virtual bool equals(const abstract_type& other) const override;
-    virtual bool is_compatible_with(const abstract_type& previous) const override;
-    virtual bool is_value_compatible_with_internal(const abstract_type& previous) const override;
-    virtual shared_ptr<cql3::cql3_type> as_cql3_type() const override;
-    virtual bool is_tuple() const override { return true; }
-    virtual bool references_user_type(const sstring& keyspace, const bytes& name) const override;
-    virtual std::experimental::optional<data_type> update_user_type(const shared_ptr<const user_type_impl> updated) const override;
-    virtual bool references_duration() const override;
-private:
-    bool check_compatibility(const abstract_type& previous, bool (abstract_type::*predicate)(const abstract_type&) const) const;
-    static sstring make_name(const std::vector<data_type>& types);
-};
-
-data_value make_tuple_value(data_type tuple_type, tuple_type_impl::native_type value);
-
-class user_type_impl : public tuple_type_impl {
-    using intern = type_interning_helper<user_type_impl, sstring, bytes, std::vector<bytes>, std::vector<data_type>>;
-public:
-    const sstring _keyspace;
-    const bytes _name;
-private:
-    std::vector<bytes> _field_names;
-    std::vector<sstring> _string_field_names;
-public:
-    using native_type = std::vector<data_value>;
-    user_type_impl(sstring keyspace, bytes name, std::vector<bytes> field_names, std::vector<data_type> field_types)
-            : tuple_type_impl(make_name(keyspace, name, field_names, field_types), field_types)
-            , _keyspace(keyspace)
-            , _name(name)
-            , _field_names(field_names) {
-        for (const auto& field_name : _field_names) {
-            _string_field_names.emplace_back(utf8_type->to_string(field_name));
-        }
-    }
-    static shared_ptr<const user_type_impl> get_instance(sstring keyspace, bytes name, std::vector<bytes> field_names, std::vector<data_type> field_types) {
-        return intern::get_instance(std::move(keyspace), std::move(name), std::move(field_names), std::move(field_types));
-    }
-    data_type field_type(size_t i) const { return type(i); }
-    const std::vector<data_type>& field_types() const { return _types; }
-    bytes_view field_name(size_t i) const { return _field_names[i]; }
-    sstring field_name_as_string(size_t i) const { return _string_field_names[i]; }
-    const std::vector<bytes>& field_names() const { return _field_names; }
-    sstring get_name_as_string() const;
-    virtual shared_ptr<cql3::cql3_type> as_cql3_type() const override;
-    virtual bool equals(const abstract_type& other) const override;
-    virtual bool is_user_type() const override { return true; }
-    virtual bool references_user_type(const sstring& keyspace, const bytes& name) const override;
-    virtual std::experimental::optional<data_type> update_user_type(const shared_ptr<const user_type_impl> updated) const override;
-private:
-    static sstring make_name(sstring keyspace, bytes name, std::vector<bytes> field_names, std::vector<data_type> field_types);
-};
-
-data_value make_user_value(data_type tuple_type, user_type_impl::native_type value);
-
 using user_type = shared_ptr<const user_type_impl>;
 using tuple_type = shared_ptr<const tuple_type_impl>;
 
 inline
-data_value::data_value(std::experimental::optional<bytes> v)
+data_value::data_value(std::optional<bytes> v)
         : data_value(v ? data_value(*v) : data_value::make_null(data_type_for<bytes>())) {
 }
 
 template <typename NativeType>
-data_value::data_value(std::experimental::optional<NativeType> v)
+data_value::data_value(std::optional<NativeType> v)
         : data_value(v ? data_value(*v) : data_value::make_null(data_type_for<NativeType>())) {
 }
-
-template <typename NativeType>
-data_value::data_value(const std::unordered_set<NativeType>& v)
-    : data_value(new set_type_impl::native_type(v.begin(), v.end()), set_type_impl::get_instance(data_type_for<NativeType>(), true))
-{}
 
 template<>
 struct appending_hash<data_type> {

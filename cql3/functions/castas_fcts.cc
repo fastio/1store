@@ -27,7 +27,7 @@ namespace functions {
 
 namespace {
 
-using bytes_opt = std::experimental::optional<bytes>;
+using bytes_opt = std::optional<bytes>;
 
 class castas_function_for : public cql3::functions::native_scalar_function {
     castas_fctn _func;
@@ -35,7 +35,7 @@ public:
     castas_function_for(data_type to_type,
                         data_type from_type,
                         castas_fctn func)
-            : native_scalar_function("castas" + to_type->as_cql3_type()->to_string(), to_type, {from_type})
+            : native_scalar_function("castas" + to_type->as_cql3_type().to_string(), to_type, {from_type})
             , _func(func) {
     }
     virtual bool is_pure() override {

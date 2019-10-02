@@ -42,6 +42,7 @@
 #include "streaming/stream_session.hh"
 #include "streaming/stream_manager.hh"
 #include "streaming/stream_reason.hh"
+#include "streaming/stream_mutation_fragments_cmd.hh"
 #include "mutation_reader.hh"
 #include "frozen_mutation.hh"
 #include "mutation.hh"
@@ -54,6 +55,7 @@
 #include <boost/icl/interval.hpp>
 #include <boost/icl/interval_set.hpp>
 #include "sstables/sstables.hh"
+#include "database.hh"
 
 namespace streaming {
 
@@ -104,6 +106,21 @@ struct send_info {
         , prs(to_partition_ranges(ranges))
         , reader(cf.make_streaming_reader(cf.schema(), prs)) {
     }
+    future<bool> has_relevant_range_on_this_shard() {
+        return do_with(false, [this] (bool& found_relevant_range) {
+            return do_for_each(ranges, [this, &found_relevant_range] (dht::token_range range) {
+                if (!found_relevant_range) {
+                    auto sharder = dht::selective_token_range_sharder(range, engine().cpu_id());
+                    auto range_shard = sharder.next();
+                    if (range_shard) {
+                        found_relevant_range = true;
+                    }
+                }
+            }).then([&found_relevant_range] {
+                return found_relevant_range;
+            });
+        });
+    }
     future<size_t> estimate_partitions() {
         return do_with(cf.get_sstables(), size_t(0), [this] (auto& sstables, size_t& partition_count) {
             return do_for_each(*sstables, [this, &partition_count] (auto& sst) {
@@ -121,7 +138,8 @@ future<stop_iteration> do_send_mutations(lw_shared_ptr<send_info> si, frozen_mut
     return get_local_stream_manager().mutation_send_limiter().wait().then([si, fragmented, fm = std::move(fm)] () mutable {
         sslog.debug("[Stream #{}] SEND STREAM_MUTATION to {}, cf_id={}", si->plan_id, si->id, si->cf_id);
         auto fm_size = fm.representation().size();
-        netw::get_local_messaging_service().send_stream_mutation(si->id, si->plan_id, std::move(fm), si->dst_cpu_id, fragmented, si->reason).then([si, fm_size] {
+        // Do it in the background.
+        (void)netw::get_local_messaging_service().send_stream_mutation(si->id, si->plan_id, std::move(fm), si->dst_cpu_id, fragmented, si->reason).then([si, fm_size] {
             sslog.debug("[Stream #{}] GOT STREAM_MUTATION Reply from {}", si->plan_id, si->id.addr);
             get_local_stream_manager().update_progress(si->plan_id, si->id.addr, progress_info::direction::OUT, fm_size);
             si->mutations_done.signal();
@@ -160,12 +178,12 @@ future<> send_mutations(lw_shared_ptr<send_info> si) {
 future<> send_mutation_fragments(lw_shared_ptr<send_info> si) {
   return si->estimate_partitions().then([si] (size_t estimated_partitions) {
     sslog.info("[Stream #{}] Start sending ks={}, cf={}, estimated_partitions={}, with new rpc streaming", si->plan_id, si->cf.schema()->ks_name(), si->cf.schema()->cf_name(), estimated_partitions);
-    return netw::get_local_messaging_service().make_sink_and_source_for_stream_mutation_fragments(si->reader.schema()->version(), si->plan_id, si->cf_id, estimated_partitions, si->reason, si->id).then([si] (rpc::sink<frozen_mutation_fragment> sink, rpc::source<int32_t> source) mutable {
+    return netw::get_local_messaging_service().make_sink_and_source_for_stream_mutation_fragments(si->reader.schema()->version(), si->plan_id, si->cf_id, estimated_partitions, si->reason, si->id).then([si] (rpc::sink<frozen_mutation_fragment, stream_mutation_fragments_cmd> sink, rpc::source<int32_t> source) mutable {
         auto got_error_from_peer = make_lw_shared<bool>(false);
 
         auto source_op = [source, got_error_from_peer, si] () mutable -> future<> {
             return repeat([source, got_error_from_peer, si] () mutable {
-                return source().then([source, got_error_from_peer, si] (stdx::optional<std::tuple<int32_t>> status_opt) mutable {
+                return source().then([source, got_error_from_peer, si] (std::optional<std::tuple<int32_t>> status_opt) mutable {
                     if (status_opt) {
                         auto status = std::get<0>(*status_opt);
                         *got_error_from_peer = status == -1;
@@ -183,17 +201,24 @@ future<> send_mutation_fragments(lw_shared_ptr<send_info> si) {
         }();
 
         auto sink_op = [sink, si, got_error_from_peer] () mutable -> future<> {
-            return do_with(std::move(sink), [si, got_error_from_peer] (rpc::sink<frozen_mutation_fragment>& sink) {
+            return do_with(std::move(sink), [si, got_error_from_peer] (rpc::sink<frozen_mutation_fragment, stream_mutation_fragments_cmd>& sink) {
                 return repeat([&sink, si, got_error_from_peer] () mutable {
                     return si->reader(db::no_timeout).then([&sink, si, s = si->reader.schema(), got_error_from_peer] (mutation_fragment_opt mf) mutable {
                         if (mf && !(*got_error_from_peer)) {
                             frozen_mutation_fragment fmf = freeze(*s, *mf);
                             auto size = fmf.representation().size();
                             streaming::get_local_stream_manager().update_progress(si->plan_id, si->id.addr, streaming::progress_info::direction::OUT, size);
-                            return sink(fmf).then([] { return stop_iteration::no; });
+                            return sink(fmf, stream_mutation_fragments_cmd::mutation_fragment_data).then([] { return stop_iteration::no; });
                         } else {
                             return make_ready_future<stop_iteration>(stop_iteration::yes);
                         }
+                    });
+                }).then([&sink] () mutable {
+                    return sink(frozen_mutation_fragment(bytes_ostream()), stream_mutation_fragments_cmd::end_of_stream);
+                }).handle_exception([&sink] (std::exception_ptr ep) mutable {
+                    // Notify the receiver the sender has failed
+                    return sink(frozen_mutation_fragment(bytes_ostream()), stream_mutation_fragments_cmd::error).then([ep = std::move(ep)] () mutable {
+                        return make_exception_future<>(std::move(ep));
                     });
                 }).finally([&sink] () mutable {
                     return sink.close();
@@ -203,7 +228,7 @@ future<> send_mutation_fragments(lw_shared_ptr<send_info> si) {
 
         return when_all_succeed(std::move(source_op), std::move(sink_op)).then([got_error_from_peer, si] {
             if (*got_error_from_peer) {
-                throw std::runtime_error(sprint("Peer failed to process mutation_fragment peer=%s, plan_id=%s, cf_id=%s", si->id.addr, si->plan_id, si->cf_id));
+                throw std::runtime_error(format("Peer failed to process mutation_fragment peer={}, plan_id={}, cf_id={}", si->id.addr, si->plan_id, si->cf_id));
             }
         });
     });
@@ -221,11 +246,18 @@ future<> stream_transfer_task::execute() {
     auto reason = session->get_reason();
     return session->get_db().invoke_on_all([plan_id, cf_id, id, dst_cpu_id, ranges=this->_ranges, streaming_with_rpc_stream, reason] (database& db) {
         auto si = make_lw_shared<send_info>(db, plan_id, cf_id, std::move(ranges), id, dst_cpu_id, reason);
-        if (streaming_with_rpc_stream) {
-            return send_mutation_fragments(std::move(si));
-        } else {
-            return send_mutations(std::move(si));
-        }
+        return si->has_relevant_range_on_this_shard().then([si, plan_id, cf_id, streaming_with_rpc_stream] (bool has_relevant_range_on_this_shard) {
+            if (!has_relevant_range_on_this_shard) {
+                sslog.debug("[Stream #{}] stream_transfer_task: cf_id={}: ignore ranges on shard={}",
+                        plan_id, cf_id, engine().cpu_id());
+                return make_ready_future<>();
+            }
+            if (streaming_with_rpc_stream) {
+                return send_mutation_fragments(std::move(si));
+            } else {
+                return send_mutations(std::move(si));
+            }
+        });
     }).then([this, plan_id, cf_id, id, streaming_with_rpc_stream] {
         sslog.debug("[Stream #{}] SEND STREAM_MUTATION_DONE to {}, cf_id={}", plan_id, id, cf_id);
         return session->ms().send_stream_mutation_done(id, plan_id, _ranges,
@@ -235,7 +267,6 @@ future<> stream_transfer_task::execute() {
         });
     }).then([this, id, plan_id, cf_id] {
         sslog.debug("[Stream #{}] GOT STREAM_MUTATION_DONE Reply from {}", plan_id, id.addr);
-        session->start_keep_alive_timer();
     }).handle_exception([this, plan_id, id] (auto ep){
         sslog.warn("[Stream #{}] stream_transfer_task: Fail to send to {}: {}", plan_id, id, ep);
         std::rethrow_exception(ep);

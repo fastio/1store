@@ -31,7 +31,6 @@
 #include <boost/iterator/transform_iterator.hpp>
 #include <boost/lambda/bind.hpp>
 #include "seastarx.hh"
-#include "stdx.hh"
 
 namespace bi = boost::intrusive;
 
@@ -71,7 +70,7 @@ private:
     private:
         loading_shared_values& _parent;
         key_type _key;
-        stdx::optional<value_type> _val;
+        std::optional<value_type> _val;
         shared_promise<> _loaded;
 
     public:
@@ -224,6 +223,7 @@ public:
                 e = i->shared_from_this();
                 // take a short cut if the value is ready
                 if (e->ready()) {
+                    Stats::inc_hits();
                     return make_ready_future<entry_ptr>(entry_ptr(std::move(e)));
                 }
                 f = e->loaded().get_shared_future();
@@ -234,7 +234,8 @@ public:
                 _set.insert(*e);
                 // get_shared_future() may throw, so make sure to call it before invoking the loader(key)
                 f = e->loaded().get_shared_future();
-                futurize_apply([&] { return loader(key); }).then_wrapped([e](future<value_type>&& val_fut) mutable {
+                // Future indirectly forwarded to `e`.
+                (void)futurize_apply([&] { return loader(key); }).then_wrapped([e](future<value_type>&& val_fut) mutable {
                     if (val_fut.failed()) {
                         e->loaded().set_exception(val_fut.get_exception());
                     } else {

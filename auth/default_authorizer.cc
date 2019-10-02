@@ -61,6 +61,7 @@ extern "C" {
 #include "cql3/untyped_result_set.hh"
 #include "exceptions/exceptions.hh"
 #include "log.hh"
+#include "database.hh"
 
 namespace auth {
 
@@ -94,11 +95,11 @@ default_authorizer::~default_authorizer() {
 static const sstring legacy_table_name{"permissions"};
 
 bool default_authorizer::legacy_metadata_exists() const {
-    return _qp.db().local().has_schema(meta::AUTH_KS, legacy_table_name);
+    return _qp.db().has_schema(meta::AUTH_KS, legacy_table_name);
 }
 
 future<bool> default_authorizer::any_granted() const {
-    static const sstring query = sprint("SELECT * FROM %s.%s LIMIT 1", meta::AUTH_KS, PERMISSIONS_CF);
+    static const sstring query = format("SELECT * FROM {}.{} LIMIT 1", meta::AUTH_KS, PERMISSIONS_CF);
 
     return _qp.process(
             query,
@@ -112,7 +113,7 @@ future<bool> default_authorizer::any_granted() const {
 
 future<> default_authorizer::migrate_legacy_metadata() const {
     alogger.info("Starting migration of legacy permissions metadata.");
-    static const sstring query = sprint("SELECT * FROM %s.%s", meta::AUTH_KS, legacy_table_name);
+    static const sstring query = format("SELECT * FROM {}.{}", meta::AUTH_KS, legacy_table_name);
 
     return _qp.process(
             query,
@@ -160,7 +161,7 @@ future<> default_authorizer::start() {
                 _migration_manager).then([this] {
             _finished = do_after_system_ready(_as, [this] {
                 return async([this] {
-                    wait_for_schema_agreement(_migration_manager, _qp.db().local(), _as).get0();
+                    wait_for_schema_agreement(_migration_manager, _qp.db(), _as).get0();
 
                     if (legacy_metadata_exists()) {
                         if (!any_granted().get0()) {
@@ -187,8 +188,7 @@ default_authorizer::authorize(const role_or_anonymous& maybe_role, const resourc
         return make_ready_future<permission_set>(permissions::NONE);
     }
 
-    static const sstring query = sprint(
-            "SELECT %s FROM %s.%s WHERE %s = ? AND %s = ?",
+    static const sstring query = format("SELECT {} FROM {}.{} WHERE {} = ? AND {} = ?",
             PERMISSIONS_NAME,
             meta::AUTH_KS,
             PERMISSIONS_CF,
@@ -210,13 +210,12 @@ default_authorizer::authorize(const role_or_anonymous& maybe_role, const resourc
 
 future<>
 default_authorizer::modify(
-        stdx::string_view role_name,
+        std::string_view role_name,
         permission_set set,
         const resource& resource,
-        stdx::string_view op) const {
+        std::string_view op) const {
     return do_with(
-            sprint(
-                    "UPDATE %s.%s SET %s = %s %s ? WHERE %s = ? AND %s = ?",
+            format("UPDATE {}.{} SET {} = {} {} ? WHERE {} = ? AND {} = ?",
                     meta::AUTH_KS,
                     PERMISSIONS_CF,
                     PERMISSIONS_NAME,
@@ -234,17 +233,16 @@ default_authorizer::modify(
 }
 
 
-future<> default_authorizer::grant(stdx::string_view role_name, permission_set set, const resource& resource) const {
+future<> default_authorizer::grant(std::string_view role_name, permission_set set, const resource& resource) const {
     return modify(role_name, std::move(set), resource, "+");
 }
 
-future<> default_authorizer::revoke(stdx::string_view role_name, permission_set set, const resource& resource) const {
+future<> default_authorizer::revoke(std::string_view role_name, permission_set set, const resource& resource) const {
     return modify(role_name, std::move(set), resource, "-");
 }
 
 future<std::vector<permission_details>> default_authorizer::list_all() const {
-    static const sstring query = sprint(
-            "SELECT %s, %s, %s FROM %s.%s",
+    static const sstring query = format("SELECT {}, {}, {} FROM {}.{}",
             ROLE_NAME,
             RESOURCE_NAME,
             PERMISSIONS_NAME,
@@ -272,9 +270,8 @@ future<std::vector<permission_details>> default_authorizer::list_all() const {
     });
 }
 
-future<> default_authorizer::revoke_all(stdx::string_view role_name) const {
-    static const sstring query = sprint(
-            "DELETE FROM %s.%s WHERE %s = ?",
+future<> default_authorizer::revoke_all(std::string_view role_name) const {
+    static const sstring query = format("DELETE FROM {}.{} WHERE {} = ?",
             meta::AUTH_KS,
             PERMISSIONS_CF,
             ROLE_NAME);
@@ -293,8 +290,7 @@ future<> default_authorizer::revoke_all(stdx::string_view role_name) const {
 }
 
 future<> default_authorizer::revoke_all(const resource& resource) const {
-    static const sstring query = sprint(
-            "SELECT %s FROM %s.%s WHERE %s = ? ALLOW FILTERING",
+    static const sstring query = format("SELECT {} FROM {}.{} WHERE {} = ? ALLOW FILTERING",
             ROLE_NAME,
             meta::AUTH_KS,
             PERMISSIONS_CF,
@@ -311,8 +307,7 @@ future<> default_authorizer::revoke_all(const resource& resource) const {
                     res->begin(),
                     res->end(),
                     [this, res, resource](const cql3::untyped_result_set::row& r) {
-                static const sstring query = sprint(
-                        "DELETE FROM %s.%s WHERE %s = ? AND %s = ?",
+                static const sstring query = format("DELETE FROM {}.{} WHERE {} = ? AND {} = ?",
                         meta::AUTH_KS,
                         PERMISSIONS_CF,
                         ROLE_NAME,

@@ -58,6 +58,8 @@
 #include "cql3/util.hh"
 #include "db/view/view.hh"
 #include "db/view/view_builder.hh"
+#include "db/system_keyspace_view_types.hh"
+#include "db/system_keyspace.hh"
 #include "frozen_mutation.hh"
 #include "gms/inet_address.hh"
 #include "keys.hh"
@@ -67,6 +69,7 @@
 #include "service/migration_manager.hh"
 #include "service/storage_service.hh"
 #include "view_info.hh"
+#include "view_update_checks.hh"
 
 using namespace std::chrono_literals;
 
@@ -80,11 +83,18 @@ view_info::view_info(const schema& schema, const raw_view_info& raw_view_info)
 cql3::statements::select_statement& view_info::select_statement() const {
     if (!_select_statement) {
         shared_ptr<cql3::statements::raw::select_statement> raw;
-        if (is_index()) {
-            // Token column is the first clustering column
-            auto token_column_it = boost::range::find_if(_schema.all_columns(), std::mem_fn(&column_definition::is_clustering_key));
-            auto real_columns = _schema.all_columns() | boost::adaptors::filtered([this, token_column_it](const column_definition& cdef) {
-                return std::addressof(cdef) != std::addressof(*token_column_it);
+        // FIXME(sarna): legacy code, should be removed after "computed_columns" feature is guaranteed
+        // to be available on every node. Then, we won't need to check if this view is backing a secondary index.
+        const column_definition* legacy_token_column = nullptr;
+        if (service::get_local_storage_service().db().local().find_column_family(base_id()).get_index_manager().is_index(_schema)) {
+           if (!_schema.clustering_key_columns().empty()) {
+               legacy_token_column = &_schema.clustering_key_columns().front();
+           }
+        }
+
+        if (legacy_token_column || boost::algorithm::any_of(_schema.all_columns(), std::mem_fn(&column_definition::is_computed))) {
+            auto real_columns = _schema.all_columns() | boost::adaptors::filtered([this, legacy_token_column] (const column_definition& cdef) {
+                return &cdef != legacy_token_column && !cdef.is_computed();
             });
             schema::columns_type columns = boost::copy_range<schema::columns_type>(std::move(real_columns));
             raw = cql3::util::build_select_statement(base_name(), where_clause(), include_all_columns(), columns);
@@ -125,7 +135,7 @@ const column_definition* view_info::view_column(const column_definition& base_de
     return _schema.get_column_definition(base_def.name());
 }
 
-stdx::optional<column_id> view_info::base_non_pk_column_in_view_pk() const {
+std::optional<column_id> view_info::base_non_pk_column_in_view_pk() const {
     return _base_non_pk_column_in_view_pk;
 }
 
@@ -137,12 +147,6 @@ void view_info::initialize_base_dependent_fields(const schema& base) {
             break;
         }
     }
-}
-
-bool view_info::is_index() const {
-    //TODO(sarna): result of this call can be cached instead of calling index_manager::is_index every time
-    column_family& base_cf = service::get_local_storage_service().db().local().find_column_family(base_id());
-    return base_cf.get_index_manager().is_index(view_ptr(_schema.shared_from_this()));
 }
 
 namespace db {
@@ -235,7 +239,7 @@ public:
         });
     }
 
-    void generate_update(const partition_key& base_key, const clustering_row& update, const stdx::optional<clustering_row>& existing, gc_clock::time_point now);
+    void generate_update(const partition_key& base_key, const clustering_row& update, const std::optional<clustering_row>& existing, gc_clock::time_point now);
 private:
     mutation_partition& partition_for(partition_key&& key) {
         auto it = _updates.find(key);
@@ -245,8 +249,8 @@ private:
         return _updates.emplace(std::move(key), mutation_partition(_view)).first->second;
     }
     row_marker compute_row_marker(const clustering_row& base_row) const;
-    dht::token token_for(const partition_key& base_key);
     deletable_row& get_view_row(const partition_key& base_key, const clustering_row& update);
+    bool can_skip_view_updates(const clustering_row& update, const clustering_row& existing) const;
     void create_entry(const partition_key& base_key, const clustering_row& update, gc_clock::time_point now);
     void delete_old_entry(const partition_key& base_key, const clustering_row& existing, const clustering_row& update, gc_clock::time_point now);
     void do_delete_old_entry(const partition_key& base_key, const clustering_row& existing, const clustering_row& update, gc_clock::time_point now);
@@ -293,20 +297,26 @@ row_marker view_updates::compute_row_marker(const clustering_row& base_row) cons
     return marker;
 }
 
-dht::token view_updates::token_for(const partition_key& base_key) {
-    return dht::global_partitioner().get_token(*_base, base_key);
-}
-
 deletable_row& view_updates::get_view_row(const partition_key& base_key, const clustering_row& update) {
     std::vector<bytes> linearized_values;
     auto get_value = boost::adaptors::transformed([&, this] (const column_definition& cdef) -> bytes_view {
         auto* base_col = _base->get_column_definition(cdef.name());
         if (!base_col) {
-            if (!_view_info.is_index()) {
-                throw std::logic_error(sprint("Column %s doesn't exist in base and this view is not backing a secondary index", cdef.name_as_text()));
+            bytes_opt computed_value;
+            if (!cdef.is_computed()) {
+                //FIXME(sarna): this legacy code is here for backward compatibility and should be removed
+                // once "computed_columns feature" is supported by every node
+                if (!service::get_local_storage_service().db().local().find_column_family(_base->id()).get_index_manager().is_index(*_base)) {
+                    throw std::logic_error(format("Column {} doesn't exist in base and this view is not backing a secondary index", cdef.name_as_text()));
+                }
+                computed_value = token_column_computation().compute_value(*_base, base_key, update);
+            } else {
+                computed_value = cdef.get_computation().compute_value(*_base, base_key, update);
             }
-            auto& partitioner = dht::global_partitioner();
-            return linearized_values.emplace_back(partitioner.token_to_bytes(token_for(base_key)));
+            if (!computed_value) {
+                throw std::logic_error(format("No value computed for primary key column {}", cdef.name()));
+            }
+            return linearized_values.emplace_back(*computed_value);
         }
         switch (base_col->kind) {
         case column_kind::partition_key:
@@ -435,7 +445,7 @@ void create_virtual_column(schema_builder& builder, const bytes& name, const dat
     if (!ctype) {
         // TODO: When #2201 is done, we also need to handle here
         // unfrozen UDTs.
-        throw exceptions::invalid_request_exception(sprint("Unsupported unselected multi-cell non-collection column %s for Materialized View", name));
+        throw exceptions::invalid_request_exception(format("Unsupported unselected multi-cell non-collection column {} for Materialized View", name));
     }
     if (ctype->is_list()) {
         // A list has ints as keys, and values (the list's items).
@@ -517,6 +527,77 @@ void view_updates::do_delete_old_entry(const partition_key& base_key, const clus
     r.apply(update.tomb());
 }
 
+/*
+ * Atomic cells have equal liveness if they're either both dead, or both non-expiring,
+ * or have exactly the same expiration. Comparing liveness is useful for view-virtual
+ * cells, as generating updates from them is not needed if their livenesses match.
+ */
+static bool atomic_cells_liveness_equal(atomic_cell_view left, atomic_cell_view right) {
+    if (left.is_live() != right.is_live()) {
+        return false;
+    }
+    if (left.is_live()) {
+        if (left.is_live_and_has_ttl() != right.is_live_and_has_ttl()) {
+            return false;
+        }
+        if (left.is_live_and_has_ttl() && left.expiry() != right.expiry()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool view_updates::can_skip_view_updates(const clustering_row& update, const clustering_row& existing) const {
+    const row& existing_row = existing.cells();
+    const row& updated_row = update.cells();
+
+    const bool base_has_nonexpiring_marker = update.marker().is_live() && !update.marker().is_expiring();
+    return boost::algorithm::all_of(_base->regular_columns(), [this, &updated_row, &existing_row, base_has_nonexpiring_marker] (const column_definition& cdef) {
+        const auto view_it = _view->columns_by_name().find(cdef.name());
+        const bool column_is_selected = view_it != _view->columns_by_name().end();
+
+        //TODO(sarna): Optimize collections case - currently they do not go under optimization
+        if (!cdef.is_atomic()) {
+            return false;
+        }
+
+        // We cannot skip if the value was created or deleted, unless we have a non-expiring marker
+        const auto* existing_cell = existing_row.find_cell(cdef.id);
+        const auto* updated_cell = updated_row.find_cell(cdef.id);
+        if (existing_cell == nullptr || updated_cell == nullptr) {
+            return existing_cell == updated_cell || (!column_is_selected && base_has_nonexpiring_marker);
+        }
+        atomic_cell_view existing_cell_view = existing_cell->as_atomic_cell(cdef);
+        atomic_cell_view updated_cell_view = updated_cell->as_atomic_cell(cdef);
+
+        // We cannot skip when a selected column is changed
+        if (column_is_selected) {
+            if (view_it->second->is_view_virtual()) {
+                return atomic_cells_liveness_equal(existing_cell_view, updated_cell_view);
+            }
+            return compare_atomic_cell_for_merge(existing_cell_view, updated_cell_view) == 0;
+        }
+
+        // With non-expiring row marker, liveness checks below are not relevant
+        if (base_has_nonexpiring_marker) {
+            return true;
+        }
+
+        if (existing_cell_view.is_live() != updated_cell_view.is_live()) {
+            return false;
+        }
+
+        // We cannot skip if the change updates TTL
+        const bool existing_has_ttl = existing_cell_view.is_live_and_has_ttl();
+        const bool updated_has_ttl = updated_cell_view.is_live_and_has_ttl();
+        if (existing_has_ttl || updated_has_ttl) {
+            return existing_has_ttl == updated_has_ttl && existing_cell_view.expiry() == updated_cell_view.expiry();
+        }
+
+        return true;
+    });
+}
+
 /**
  * Creates the updates to apply to the existing view entry given the base table row before
  * and after the update, assuming that the update hasn't changed to which view entry the
@@ -537,6 +618,10 @@ void view_updates::update_entry(const partition_key& base_key, const clustering_
         return;
     }
 
+    if (can_skip_view_updates(update, existing)) {
+        return;
+    }
+
     deletable_row& r = get_view_row(base_key, update);
     auto marker = compute_row_marker(update);
     r.apply(marker);
@@ -549,7 +634,7 @@ void view_updates::update_entry(const partition_key& base_key, const clustering_
 void view_updates::generate_update(
         const partition_key& base_key,
         const clustering_row& update,
-        const stdx::optional<clustering_row>& existing,
+        const std::optional<clustering_row>& existing,
         gc_clock::time_point now) {
     // Note that the base PK columns in update and existing are the same, since we're intrinsically dealing
     // with the same base row. So we have to check 3 things:
@@ -632,7 +717,7 @@ public:
     future<std::vector<frozen_mutation_and_schema>> build();
 
 private:
-    void generate_update(clustering_row&& update, stdx::optional<clustering_row>&& existing);
+    void generate_update(clustering_row&& update, std::optional<clustering_row>&& existing);
     future<stop_iteration> on_results();
 
     future<stop_iteration> advance_all() {
@@ -689,7 +774,7 @@ future<std::vector<frozen_mutation_and_schema>> view_update_builder::build() {
     });
 }
 
-void view_update_builder::generate_update(clustering_row&& update, stdx::optional<clustering_row>&& existing) {
+void view_update_builder::generate_update(clustering_row&& update, std::optional<clustering_row>&& existing) {
     // If we have no update at all, we shouldn't get there.
     if (update.empty()) {
         throw std::logic_error("Empty materialized view updated");
@@ -728,8 +813,8 @@ future<stop_iteration> view_update_builder::on_results() {
                 apply_tracked_tombstones(_update_tombstone_tracker, update);
                 auto tombstone = _existing_tombstone_tracker.current_tombstone();
                 auto existing = tombstone
-                              ? stdx::optional<clustering_row>(stdx::in_place, update.key(), row_tombstone(std::move(tombstone)), row_marker(), ::row())
-                              : stdx::nullopt;
+                              ? std::optional<clustering_row>(std::in_place, update.key(), row_tombstone(std::move(tombstone)), row_marker(), ::row())
+                              : std::nullopt;
                 generate_update(std::move(update), std::move(existing));
             }
             return advance_updates();
@@ -781,6 +866,7 @@ future<stop_iteration> view_update_builder::on_results() {
     // If we have updates and it's a range tombstone, it removes nothing pre-exisiting, so we can ignore it
     if (_update && !_update->is_end_of_partition()) {
         if (_update->is_clustering_row()) {
+            apply_tracked_tombstones(_update_tombstone_tracker, _update->as_mutable_clustering_row());
             generate_update(std::move(*_update).as_clustering_row(), { });
         }
         return advance_updates();
@@ -880,7 +966,7 @@ query::clustering_row_ranges calculate_affected_clustering_ranges(const schema& 
 //
 // If the assumption that the given base token belongs to this replica
 // does not hold, we return an empty optional.
-static stdx::optional<gms::inet_address>
+static std::optional<gms::inet_address>
 get_view_natural_endpoint(const sstring& keyspace_name,
         const dht::token& base_token, const dht::token& view_token) {
     auto &db = service::get_local_storage_service().db().local();
@@ -930,7 +1016,9 @@ future<> mutate_MV(
         const dht::token& base_token,
         std::vector<frozen_mutation_and_schema> view_updates,
         db::view::stats& stats,
-        db::timeout_semaphore_units pending_view_updates)
+        cf_stats& cf_stats,
+        db::timeout_semaphore_units pending_view_updates,
+        service::allow_hints allow_hints)
 {
     auto fs = std::make_unique<std::vector<future<>>>();
     fs->reserve(view_updates.size());
@@ -940,7 +1028,7 @@ future<> mutate_MV(
         auto& keyspace_name = mut.s->ks_name();
         auto paired_endpoint = get_view_natural_endpoint(keyspace_name, base_token, view_token);
         auto pending_endpoints = service::get_local_storage_service().get_token_metadata().pending_endpoints_for(view_token, keyspace_name);
-        auto maybe_account_failure = [&stats, units = pending_view_updates.split(mut.fm.representation().size())] (
+        auto maybe_account_failure = [&stats, &cf_stats, units = pending_view_updates.split(mut.fm.representation().size())] (
                 future<>&& f,
                 gms::inet_address target,
                 bool is_local,
@@ -948,6 +1036,8 @@ future<> mutate_MV(
             if (f.failed()) {
                 stats.view_updates_failed_local += is_local;
                 stats.view_updates_failed_remote += remotes;
+                cf_stats.total_view_updates_failed_local += is_local;
+                cf_stats.total_view_updates_failed_remote += remotes;
                 auto ep = f.get_exception();
                 vlogger.error("Error applying view update to {}: {}", target, ep);
                 return make_exception_future<>(std::move(ep));
@@ -966,6 +1056,8 @@ future<> mutate_MV(
 
             stats.view_updates_pushed_local += is_endpoint_local;
             stats.view_updates_pushed_remote += updates_pushed_remote;
+            cf_stats.total_view_updates_pushed_local += is_endpoint_local;
+            cf_stats.total_view_updates_pushed_remote += updates_pushed_remote;
 
             if (is_endpoint_local && pending_endpoints.empty()) {
                 // Note that we start here an asynchronous apply operation, and
@@ -996,7 +1088,9 @@ future<> mutate_MV(
                         std::move(mut),
                         *paired_endpoint,
                         std::move(pending_endpoints),
-                        db::write_type::VIEW, stats).then_wrapped(
+                        db::write_type::VIEW,
+                        stats,
+                        allow_hints).then_wrapped(
                                 [paired_endpoint,
                                  is_endpoint_local,
                                  updates_pushed_remote,
@@ -1016,13 +1110,15 @@ future<> mutate_MV(
             // send to any pending view endpoints though.
             auto updates_pushed_remote = pending_endpoints.size();
             stats.view_updates_pushed_remote += updates_pushed_remote;
+            cf_stats.total_view_updates_pushed_remote += updates_pushed_remote;
             auto target = pending_endpoints.back();
             pending_endpoints.pop_back();
             fs->push_back(service::get_local_storage_proxy().send_to_endpoint(
                     std::move(mut),
                     target,
                     std::move(pending_endpoints),
-                    db::write_type::VIEW).then_wrapped(
+                    db::write_type::VIEW,
+                    allow_hints).then_wrapped(
                             [target,
                              updates_pushed_remote,
                              maybe_account_failure = std::move(maybe_account_failure)] (future<>&& f) {
@@ -1054,7 +1150,8 @@ future<> view_builder::start() {
         calculate_shard_build_step(std::move(built), std::move(in_progress)).get();
         _mm.register_listener(this);
         _current_step = _base_to_build_step.begin();
-        _build_step.trigger();
+        // Waited on indirectly in stop().
+        (void)_build_step.trigger();
     });
     return make_ready_future<>();
 }
@@ -1067,6 +1164,10 @@ future<> view_builder::stop() {
         return _sem.wait().then([this] {
             _sem.broken();
             return _build_step.join();
+        }).handle_exception_type([] (const broken_semaphore&) {
+            // ignored
+        }).handle_exception_type([] (const semaphore_timed_out&) {
+            // ignored
         });
     });
 }
@@ -1080,7 +1181,7 @@ static query::partition_slice make_partition_slice(const schema& s) {
     return query::partition_slice(
             {query::full_clustering_range},
             { },
-            boost::copy_range<std::vector<column_id>>(s.regular_columns()
+            boost::copy_range<query::column_id_vector>(s.regular_columns()
                     | boost::adaptors::transformed(std::mem_fn(&column_definition::id))),
             std::move(opts));
 }
@@ -1145,7 +1246,7 @@ void view_builder::reshard(
             return v1->id() == v2->id();
         }
     };
-    std::unordered_map<view_ptr, stdx::optional<nonwrapping_range<dht::token>>, view_ptr_hash, view_ptr_equals> my_status;
+    std::unordered_map<view_ptr, std::optional<nonwrapping_range<dht::token>>, view_ptr_hash, view_ptr_equals> my_status;
     for (auto& shard_status : view_build_status_per_shard) {
         for (auto& [view, first_token, next_token] : shard_status ) {
             // We start from an open-ended range, which we'll try to restrict.
@@ -1154,7 +1255,7 @@ void view_builder::reshard(
                     nonwrapping_range<dht::token>::make_open_ended_both_sides()).first->second;
             if (!next_token || !my_range) {
                 // A previous shard made no progress, so for this view we'll start over.
-                my_range = stdx::nullopt;
+                my_range = std::nullopt;
                 continue;
             }
             if (first_token == *next_token) {
@@ -1243,7 +1344,8 @@ future<> view_builder::calculate_shard_build_step(
             if (built_views.find(view->id()) != built_views.end()) {
                 if (engine().cpu_id() == 0) {
                     auto f = _sys_dist_ks.finish_view_build(std::move(view_name.first), std::move(view_name.second)).then([view = std::move(view)] {
-                        system_keyspace::remove_view_build_progress_across_all_shards(view->cf_name(), view->ks_name());
+                        //FIXME: discarded future.
+                        (void)system_keyspace::remove_view_build_progress_across_all_shards(view->cf_name(), view->ks_name());
                     });
                     bookkeeping_ops->push_back(std::move(f));
                 }
@@ -1303,8 +1405,9 @@ future<> view_builder::calculate_shard_build_step(
     }
 
     auto f = seastar::when_all_succeed(bookkeeping_ops->begin(), bookkeeping_ops->end());
-    return f.handle_exception([bookkeeping_ops = std::move(bookkeeping_ops)] (std::exception_ptr ep) {
-        vlogger.error("Failed to update materialized view bookkeeping ({}), continuing anyway.", ep);
+    return f.handle_exception([this, bookkeeping_ops = std::move(bookkeeping_ops)] (std::exception_ptr ep) {
+        log_level severity = _as.abort_requested() ? log_level::warn : log_level::error;
+        vlogger.log(severity, "Failed to update materialized view bookkeeping ({}), continuing anyway.", ep);
     });
 }
 
@@ -1320,7 +1423,7 @@ future<> view_builder::add_new_view(view_ptr view, build_step& step) {
 static future<> flush_base(lw_shared_ptr<column_family> base, abort_source& as) {
     struct empty_state { };
     return exponential_backoff_retry::do_until_value(1s, 1min, as, [base = std::move(base)] {
-        return base->flush().then_wrapped([base] (future<> f) -> stdx::optional<empty_state> {
+        return base->flush().then_wrapped([base] (future<> f) -> std::optional<empty_state> {
             if (f.failed()) {
                 vlogger.error("Error flushing base table {}.{}: {}; retrying", base->schema()->ks_name(), base->schema()->cf_name(), f.get_exception());
                 return { };
@@ -1331,10 +1434,11 @@ static future<> flush_base(lw_shared_ptr<column_family> base, abort_source& as) 
 }
 
 void view_builder::on_create_view(const sstring& ks_name, const sstring& view_name) {
-    with_semaphore(_sem, 1, [ks_name, view_name, this] {
+    // Do it in the background, serialized.
+    (void)with_semaphore(_sem, 1, [ks_name, view_name, this] {
         auto view = view_ptr(_db.find_schema(ks_name, view_name));
         auto& step = get_or_create_build_step(view->view_info()->base_id());
-        return step.base->await_pending_writes().then([this, &step] {
+        return when_all(step.base->await_pending_writes(), step.base->await_pending_streams()).discard_result().then([this, &step] {
             return flush_base(step.base, _as);
         }).then([this, view, &step] () mutable {
             // This resets the build step to the current token. It may result in views currently
@@ -1346,14 +1450,16 @@ void view_builder::on_create_view(const sstring& ks_name, const sstring& view_na
                 if (f.failed()) {
                     vlogger.error("Error setting up view for building {}.{}: {}", view->ks_name(), view->cf_name(), f.get_exception());
                 }
-                _build_step.trigger();
+                // Waited on indirectly in stop().
+                (void)_build_step.trigger();
             });
         });
     }).handle_exception_type([] (no_such_column_family&) { });
 }
 
 void view_builder::on_update_view(const sstring& ks_name, const sstring& view_name, bool) {
-    with_semaphore(_sem, 1, [ks_name, view_name, this] {
+    // Do it in the background, serialized.
+    (void)with_semaphore(_sem, 1, [ks_name, view_name, this] {
         auto view = view_ptr(_db.find_schema(ks_name, view_name));
         auto step_it = _base_to_build_step.find(view->view_info()->base_id());
         if (step_it == _base_to_build_step.end()) {
@@ -1370,7 +1476,8 @@ void view_builder::on_update_view(const sstring& ks_name, const sstring& view_na
 
 void view_builder::on_drop_view(const sstring& ks_name, const sstring& view_name) {
     vlogger.info0("Stopping to build view {}.{}", ks_name, view_name);
-    with_semaphore(_sem, 1, [ks_name, view_name, this] {
+    // Do it in the background, serialized.
+    (void)with_semaphore(_sem, 1, [ks_name, view_name, this] {
         // The view is absent from the database at this point, so find it by brute force.
         ([&, this] {
             for (auto& [_, step] : _base_to_build_step) {
@@ -1413,6 +1520,7 @@ future<> view_builder::do_build_step() {
             } catch (const abort_requested_exception&) {
                 return;
             } catch (...) {
+                ++_current_step->second.base->cf_stats()->view_building_paused;
                 auto base = _current_step->second.base->schema();
                 vlogger.warn("Error executing build step for base {}.{}: {}", base->ks_name(), base->cf_name(), std::current_exception());
                 r.retry(_as).get();
@@ -1538,7 +1646,7 @@ public:
 
         _fragments_memory_usage += cr.memory_usage(*_step.base->schema());
         _fragments.push_back(std::move(cr));
-        if (_fragments_memory_usage > 1024*1024) {
+        if (_fragments_memory_usage > batch_memory_max) {
             // Although we have not yet completed the batch of base rows that
             // compact_for_query<> planned for us (view_builder::batchsize),
             // we've still collected enough rows to reach sizeable memory use,
@@ -1617,8 +1725,9 @@ void view_builder::execute(build_step& step, exponential_backoff_retry r) {
                     system_keyspace::update_view_build_progress(view->ks_name(), view->cf_name(), *next_token));
         }
     }
-    seastar::when_all_succeed(bookkeeping_ops.begin(), bookkeeping_ops.end()).handle_exception([] (std::exception_ptr ep) {
-        vlogger.error("Failed to update materialized view bookkeeping ({}), continuing anyway.", ep);
+    seastar::when_all_succeed(bookkeeping_ops.begin(), bookkeeping_ops.end()).handle_exception([this] (std::exception_ptr ep) {
+        log_level severity = _as.abort_requested() ? log_level::warn : log_level::error;
+        vlogger.log(severity, "Failed to update materialized view bookkeeping ({}), continuing anyway.", ep);
     }).get();
 }
 
@@ -1680,6 +1789,29 @@ update_backlog node_update_backlog::add_fetch(unsigned shard, update_backlog bac
         return new_max;
     }
     return std::max(backlog, _max.load(std::memory_order_relaxed));
+}
+
+future<bool> check_view_build_ongoing(db::system_distributed_keyspace& sys_dist_ks, const sstring& ks_name, const sstring& cf_name) {
+    return sys_dist_ks.view_status(ks_name, cf_name).then([] (std::unordered_map<utils::UUID, sstring>&& view_statuses) {
+        return boost::algorithm::any_of(view_statuses | boost::adaptors::map_values, [] (const sstring& view_status) {
+            return view_status == "STARTED";
+        });
+    });
+}
+
+future<bool> check_needs_view_update_path(db::system_distributed_keyspace& sys_dist_ks, const table& t, streaming::stream_reason reason) {
+    if (is_internal_keyspace(t.schema()->ks_name())) {
+        return make_ready_future<bool>(false);
+    }
+    if (reason == streaming::stream_reason::repair && !t.views().empty()) {
+        return make_ready_future<bool>(true);
+    }
+    return do_with(t.views(), [&sys_dist_ks] (auto& views) {
+        return map_reduce(views,
+                [&sys_dist_ks] (const view_ptr& view) { return check_view_build_ongoing(sys_dist_ks, view->ks_name(), view->cf_name()); },
+                false,
+                std::logical_or<bool>());
+    });
 }
 
 } // namespace view

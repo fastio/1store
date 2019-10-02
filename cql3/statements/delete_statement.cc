@@ -41,6 +41,7 @@
 
 #include "delete_statement.hh"
 #include "raw/delete_statement.hh"
+#include "database.hh"
 
 namespace cql3 {
 
@@ -87,13 +88,13 @@ delete_statement::prepare_internal(database& db, schema_ptr schema, shared_ptr<v
         auto&& id = deletion->affected_column()->prepare_column_identifier(schema);
         auto def = get_column_definition(schema, *id);
         if (!def) {
-            throw exceptions::invalid_request_exception(sprint("Unknown identifier %s", *id));
+            throw exceptions::invalid_request_exception(format("Unknown identifier {}", *id));
         }
 
         // For compact, we only have one value except the key, so the only form of DELETE that make sense is without a column
         // list. However, we support having the value name for coherence with the static/sparse case
         if (def->is_primary_key()) {
-            throw exceptions::invalid_request_exception(sprint("Invalid identifier %s for deletion (should not be a PRIMARY KEY part)", def->name_as_text()));
+            throw exceptions::invalid_request_exception(format("Invalid identifier {} for deletion (should not be a PRIMARY KEY part)", def->name_as_text()));
         }
 
         auto&& op = deletion->prepare(db, schema->ks_name(), *def);
@@ -102,9 +103,11 @@ delete_statement::prepare_internal(database& db, schema_ptr schema, shared_ptr<v
     }
 
     stmt->process_where_clause(db, _where_clause, std::move(bound_names));
-    if (!stmt->restrictions()->get_clustering_columns_restrictions()->has_bound(bound::START)
-            || !stmt->restrictions()->get_clustering_columns_restrictions()->has_bound(bound::END)) {
-        throw exceptions::invalid_request_exception("A range deletion operation needs to specify both bounds");
+    if (!db.supports_infinite_bound_range_deletions()) {
+        if (!stmt->restrictions()->get_clustering_columns_restrictions()->has_bound(bound::START)
+                || !stmt->restrictions()->get_clustering_columns_restrictions()->has_bound(bound::END)) {
+            throw exceptions::invalid_request_exception("A range deletion operation needs to specify both bounds for clusters without sstable mc format support");
+        }
     }
     if (!schema->is_compound() && stmt->restrictions()->get_clustering_columns_restrictions()->is_slice()) {
         throw exceptions::invalid_request_exception("Range deletions on \"compact storage\" schemas are not supported");

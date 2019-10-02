@@ -111,7 +111,7 @@ public:
         prefetch_data(schema_ptr schema);
     };
     // Note: value (mutation) only required to contain the rows we are interested in
-    using prefetched_rows_type = std::experimental::optional<prefetch_data>;
+    using prefetched_rows_type = std::optional<prefetch_data>;
 private:
     const gc_clock::duration _ttl;
     const prefetched_rows_type _prefetched; // For operation that require a read-before-write
@@ -133,7 +133,7 @@ public:
         // We use MIN_VALUE internally to mean the absence of of timestamp (in Selection, in sstable stats, ...), so exclude
         // it to avoid potential confusion.
         if (timestamp < api::min_timestamp || timestamp > api::max_timestamp) {
-            throw exceptions::invalid_request_exception(sprint("Out of bound timestamp, must be in [%d, %d]",
+            throw exceptions::invalid_request_exception(format("Out of bound timestamp, must be in [{:d}, {:d}]",
                     api::min_timestamp, api::max_timestamp));
         }
     }

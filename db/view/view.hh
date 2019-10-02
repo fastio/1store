@@ -28,11 +28,16 @@
 #include "schema.hh"
 #include "mutation_fragment.hh"
 #include "flat_mutation_reader.hh"
-#include "stdx.hh"
 
 #include <seastar/core/semaphore.hh>
 
 class frozen_mutation_and_schema;
+struct cf_stats;
+
+namespace service {
+struct allow_hints_tag;
+using allow_hints = bool_class<allow_hints_tag>;
+}
 
 namespace db {
 
@@ -110,7 +115,9 @@ future<> mutate_MV(
         const dht::token& base_token,
         std::vector<frozen_mutation_and_schema> view_updates,
         db::view::stats& stats,
-        db::timeout_semaphore_units pending_view_updates);
+        cf_stats& cf_stats,
+        db::timeout_semaphore_units pending_view_updates,
+        service::allow_hints allow_hints = service::allow_hints::yes);
 
 /**
  * create_virtual_column() adds a "virtual column" to a schema builder.

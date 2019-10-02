@@ -29,7 +29,55 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import yaml
+import psutil
+import sys
+from pathlib import Path
 
+def scriptsdir_p():
+    p = Path(sys.argv[0]).resolve()
+    if p.parent.name == 'libexec':
+        return p.parents[1]
+    return p.parent
+
+def scylladir_p():
+    p = scriptsdir_p()
+    return p.parent
+
+def is_nonroot():
+    return Path(scylladir_p() / 'SCYLLA-NONROOT-FILE').exists()
+
+def bindir_p():
+    if is_nonroot():
+        return scylladir_p() / 'bin'
+    else:
+        return Path('/usr/bin')
+
+def etcdir_p():
+    if is_nonroot():
+        return scylladir_p() / 'etc'
+    else:
+        return Path('/etc')
+
+def datadir_p():
+    if is_nonroot():
+        return scylladir_p()
+    else:
+        return Path('/var/lib/scylla')
+
+def scriptsdir():
+    return str(scriptsdir_p())
+
+def scylladir():
+    return str(scylladir_p())
+
+def bindir():
+    return str(bindir_p())
+
+def etcdir():
+    return str(etcdir_p())
+
+def datadir():
+    return str(datadir_p())
 
 def curl(url, byte=False):
     max_retries = 5
@@ -52,6 +100,7 @@ def curl(url, byte=False):
 
 class aws_instance:
     """Describe several aspects of the current AWS instance"""
+
     def __disk_name(self, dev):
         name = re.compile(r"(?:/dev/)?(?P<devname>[a-zA-Z]+)\d*")
         return name.search(dev).group("devname")
@@ -68,14 +117,24 @@ class aws_instance:
         dev = self.__instance_metadata('block-device-mapping/' + devname)
         return dev.replace("sd", "xvd")
 
+    def _non_root_nvmes(self):
+        nvme_re = re.compile(r"nvme\d+n\d+$")
+
+        root_dev_candidates = [ x for x in psutil.disk_partitions() if x.mountpoint == "/" ]
+        if len(root_dev_candidates) != 1:
+            raise Exception("found more than one disk mounted at root'".format(root_dev_candidates))
+
+        root_dev = root_dev_candidates[0].device
+        nvmes_present = list(filter(nvme_re.match, os.listdir("/dev")))
+        return {"root": [ root_dev ], "ephemeral": [ x for x in nvmes_present if not root_dev.startswith(os.path.join("/dev/", x)) ] }
+
     def __populate_disks(self):
         devmap = self.__instance_metadata("block-device-mapping")
         self._disks = {}
         devname = re.compile("^\D+")
-        nvme_re = re.compile(r"nvme\d+n\d+$")
-        nvmes_present = list(filter(nvme_re.match, os.listdir("/dev")))
-        if nvmes_present:
-            self._disks["ephemeral"] = nvmes_present
+        nvmes_present = self._non_root_nvmes()
+        for k,v in nvmes_present.items():
+            self._disks[k] = v
 
         for dev in devmap.splitlines():
             t = devname.match(dev).group()
@@ -108,7 +167,7 @@ class aws_instance:
         return self._type.split(".")[0]
 
     def is_supported_instance_class(self):
-        if self.instance_class() in ['i2', 'i3']:
+        if self.instance_class() in ['i2', 'i3', 'i3en']:
             return True
         return False
 
@@ -117,7 +176,7 @@ class aws_instance:
         instance_size = self.instance_size()
         if instance_class in ['c3', 'c4', 'd2', 'i2', 'r3']:
             return 'ixgbevf'
-        if instance_class in ['c5', 'c5d', 'f1', 'g3', 'h1', 'i3', 'm5', 'm5d', 'p2', 'p3', 'r4', 'x1']:
+        if instance_class in ['c5', 'c5d', 'f1', 'g3', 'h1', 'i3', 'i3en', 'm5', 'm5d', 'p2', 'p3', 'r4', 'x1']:
             return 'ena'
         if instance_class == 'm4':
             if instance_size == '16xlarge':
@@ -184,7 +243,7 @@ def _reopt(s):
 
 
 def is_developer_mode():
-    f = open("/etc/scylla.d/dev-mode.conf", "r")
+    f = open(etcdir() + "/scylla.d/dev-mode.conf", "r")
     pattern = re.compile(_nocomment + r".*developer-mode" + _scyllaeq + "(1|true)")
     return len([x for x in f if pattern.match(x)]) >= 1
 
@@ -193,8 +252,9 @@ class scylla_cpuinfo:
     """Class containing information about how Scylla sees CPUs in this machine.
     Information that can be probed include in which hyperthreads Scylla is configured
     to run, how many total threads exist in the system, etc"""
+
     def __parse_cpuset(self):
-        f = open("/etc/scylla.d/cpuset.conf", "r")
+        f = open(etcdir() + "/scylla.d/cpuset.conf", "r")
         pattern = re.compile(_nocomment + r"CPUSET=\s*\"" + _reopt(_cpuset) + _reopt(_smp) + "\s*\"")
         grp = [pattern.match(x) for x in f.readlines() if pattern.match(x)]
         if not grp:
@@ -261,15 +321,19 @@ class scylla_cpuinfo:
             return len(self._cpu_data["system"])
 
 
+# When a CLI tool is not installed, use relocatable CLI tool provided by Scylla
+scylla_env = os.environ.copy()
+scylla_env['PATH'] =  scylla_env['PATH'] + ':/opt/scylladb/bin'
+
 def run(cmd, shell=False, silent=False, exception=True):
     stdout = subprocess.DEVNULL if silent else None
     stderr = subprocess.DEVNULL if silent else None
     if not shell:
         cmd = shlex.split(cmd)
     if exception:
-        return subprocess.check_call(cmd, shell=shell, stdout=stdout, stderr=stderr)
+        return subprocess.check_call(cmd, shell=shell, stdout=stdout, stderr=stderr, env=scylla_env)
     else:
-        p = subprocess.Popen(cmd, shell=shell, stdout=stdout, stderr=stderr)
+        p = subprocess.Popen(cmd, shell=shell, stdout=stdout, stderr=stderr, env=scylla_env)
         return p.wait()
 
 
@@ -277,22 +341,30 @@ def out(cmd, shell=False, exception=True):
     if not shell:
         cmd = shlex.split(cmd)
     if exception:
-        return subprocess.check_output(cmd, shell=shell).strip().decode('utf-8')
+        return subprocess.check_output(cmd, shell=shell, env=scylla_env).strip().decode('utf-8')
     else:
-        p = subprocess.Popen(cmd, shell=shell, stdout=subprocess.PIPE)
+        p = subprocess.Popen(cmd, shell=shell, stdout=subprocess.PIPE, env=scylla_env)
         return p.communicate()[0].strip().decode('utf-8')
 
 
+def parse_os_release_line(line):
+    id, data = line.split('=', 1)
+    val = shlex.split(data)[0]
+    return (id, val.split(' ') if id == 'ID' or id == 'ID_LIKE' else val)
+
+os_release = dict([parse_os_release_line(x) for x in open('/etc/os-release').read().splitlines() if re.match(r'\w+=', x) ])
+
 def is_debian_variant():
-    return os.path.exists('/etc/debian_version')
+    d = os_release['ID_LIKE'] if 'ID_LIKE' in os_release else os_release['ID']
+    return ('debian' in d)
 
 
 def is_redhat_variant():
-    return os.path.exists('/etc/redhat-release')
-
+    d = os_release['ID_LIKE'] if 'ID_LIKE' in os_release else os_release['ID']
+    return ('rhel' in d) or ('fedora' in d) or ('ol') in d
 
 def is_gentoo_variant():
-    return os.path.exists('/etc/gentoo-release')
+    return ('gentoo' in os_release['ID'])
 
 
 def is_ec2():
@@ -348,6 +420,10 @@ def rmtree(path):
     else:
         os.remove(path)
 
+def current_umask():
+    current = os.umask(0)
+    os.umask(current)
+    return current
 
 def dist_name():
     return platform.dist()[0]
@@ -380,10 +456,11 @@ def colorprint(msg, **kwargs):
 
 def get_mode_cpuset(nic, mode):
     try:
-        mode_cpu_mask = out('/usr/lib/scylla/perftune.py --tune net --nic "{nic}" --mode "{mode}" --get-cpu-mask'.format(nic=nic, mode=mode))
+        mode_cpu_mask = out('/opt/scylladb/scripts/perftune.py --tune net --nic {} --mode {} --get-cpu-mask-quiet'.format(nic, mode))
         return hex2list(mode_cpu_mask)
     except subprocess.CalledProcessError:
         return '-1'
+
 
 def get_scylla_dirs():
     """
@@ -391,7 +468,7 @@ def get_scylla_dirs():
     Verifies that mandatory parameters are set.
     """
     scylla_yaml_name = '/etc/scylla/scylla.yaml'
-    y = yaml.load(open(scylla_yaml_name))
+    y = yaml.safe_load(open(scylla_yaml_name))
 
     # Check that mandatory fields are set
     if 'data_file_directories' not in y or \
@@ -413,9 +490,11 @@ def get_scylla_dirs():
 
     return [d for d in dirs if d is not None]
 
+
 def perftune_base_command():
     disk_tune_param = "--tune disks " + " ".join("--dir {}".format(d) for d in get_scylla_dirs())
-    return '/usr/lib/scylla/perftune.py {}'.format(disk_tune_param)
+    return '/opt/scylladb/scripts/perftune.py {}'.format(disk_tune_param)
+
 
 def get_cur_cpuset():
     cfg = sysconfig_parser('/etc/scylla.d/cpuset.conf')
@@ -443,15 +522,19 @@ def create_perftune_conf(nic='eth0'):
     if os.path.exists('/etc/scylla.d/perftune.yaml'):
         return
     mode = get_tune_mode(nic)
-    yaml = out('/usr/lib/scylla/perftune.py --tune net --nic "{nic}" --mode {mode} --dump-options-file'.format(nic=nic, mode=mode))
+    yaml = out('/opt/scylladb/scripts/perftune.py --tune net --nic "{nic}" --mode {mode} --dump-options-file'.format(nic=nic, mode=mode))
     with open('/etc/scylla.d/perftune.yaml', 'w') as f:
         f.write(yaml)
 
 
 def is_valid_nic(nic):
+    if len(nic) == 0:
+        return False
     return os.path.exists('/sys/class/net/{}'.format(nic))
 
 # Remove this when we do not support SET_NIC configuration value anymore
+
+
 def get_set_nic_and_disks_config_value(cfg):
     """
     Get the SET_NIC_AND_DISKS configuration value.
@@ -467,9 +550,10 @@ def get_set_nic_and_disks_config_value(cfg):
 
     try:
         return cfg.get('SET_NIC_AND_DISKS')
-    except:
+    except Exception:
         # For backwards compatibility
         return cfg.get('SET_NIC')
+
 
 class SystemdException(Exception):
     pass
@@ -477,36 +561,39 @@ class SystemdException(Exception):
 
 class systemd_unit:
     def __init__(self, unit):
+        if is_nonroot():
+            self.ctlparam = '--user'
+        else:
+            self.ctlparam = ''
         try:
-            run('systemctl cat {}'.format(unit), silent=True)
+            run('systemctl {} cat {}'.format(self.ctlparam, unit), silent=True)
         except subprocess.CalledProcessError:
             raise SystemdException('unit {} not found'.format(unit))
         self._unit = unit
 
     def start(self):
-        return run('systemctl start {}'.format(self._unit))
+        return run('systemctl {} start {}'.format(self.ctlparam, self._unit))
 
     def stop(self):
-        return run('systemctl stop {}'.format(self._unit))
-        return subprocess.check_call(['systemctl', 'stop', self._unit])
+        return run('systemctl {} stop {}'.format(self.ctlparam, self._unit))
 
     def restart(self):
-        return run('systemctl restart {}'.format(self._unit))
+        return run('systemctl {} restart {}'.format(self.ctlparam, self._unit))
 
     def enable(self):
-        return run('systemctl enable {}'.format(self._unit))
+        return run('systemctl {} enable {}'.format(self.ctlparam, self._unit))
 
     def disable(self):
-        return run('systemctl disable {}'.format(self._unit))
+        return run('systemctl {} disable {}'.format(self.ctlparam, self._unit))
 
     def is_active(self):
-        return out('systemctl is-active {}'.format(self._unit), exception=False)
+        return out('systemctl {} is-active {}'.format(self.ctlparam, self._unit), exception=False)
 
     def mask(self):
-        return run('systemctl mask {}'.format(self._unit))
+        return run('systemctl {} mask {}'.format(self.ctlparam, self._unit))
 
     def unmask(self):
-        return run('systemctl unmask {}'.format(self._unit))
+        return run('systemctl {} unmask {}'.format(self.ctlparam, self._unit))
 
 
 class sysconfig_parser:

@@ -45,6 +45,7 @@
 #include "cql3/lists.hh"
 #include "cql3/maps.hh"
 #include "cql3/sets.hh"
+#include "types/list.hh"
 
 namespace cql3 {
 
@@ -71,11 +72,11 @@ abstract_marker::raw::raw(int32_t bind_index)
     if (receiver_type == nullptr) {
         return ::make_shared<constants::marker>(_bind_index, receiver);
     }
-    if (&receiver_type->_kind == &collection_type_impl::kind::list) {
+    if (receiver_type->get_kind() == abstract_type::kind::list) {
         return ::make_shared<lists::marker>(_bind_index, receiver);
-    } else if (&receiver_type->_kind == &collection_type_impl::kind::set) {
+    } else if (receiver_type->get_kind() == abstract_type::kind::set) {
         return ::make_shared<sets::marker>(_bind_index, receiver);
-    } else if (&receiver_type->_kind == &collection_type_impl::kind::map) {
+    } else if (receiver_type->get_kind() == abstract_type::kind::map) {
         return ::make_shared<maps::marker>(_bind_index, receiver);
     }
     assert(0);

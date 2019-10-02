@@ -55,6 +55,9 @@
 
 namespace cql3 {
 
+class cql_config;
+extern const cql_config default_cql_config;
+
 /**
  * Options for a query.
  */
@@ -66,20 +69,21 @@ public:
 
         const int32_t page_size;
         const ::shared_ptr<service::pager::paging_state> state;
-        const std::experimental::optional<db::consistency_level> serial_consistency;
+        const std::optional<db::consistency_level> serial_consistency;
         const api::timestamp_type timestamp;
     };
 private:
+    const cql_config& _cql_config;
     const db::consistency_level _consistency;
     const timeout_config& _timeout_config;
-    const std::experimental::optional<std::vector<sstring_view>> _names;
+    const std::optional<std::vector<sstring_view>> _names;
     std::vector<cql3::raw_value> _values;
     std::vector<cql3::raw_value_view> _value_views;
     mutable bytes_ostream _temporaries;
     const bool _skip_metadata;
     const specific_options _options;
     cql_serialization_format _cql_serialization_format;
-    std::experimental::optional<std::vector<query_options>> _batch_options;
+    std::optional<std::vector<query_options>> _batch_options;
 
 private:
     /**
@@ -102,26 +106,29 @@ private:
 
 public:
     query_options(query_options&&) = default;
-    query_options(const query_options&) = delete;
+    explicit query_options(const query_options&) = default;
 
-    explicit query_options(db::consistency_level consistency,
+    explicit query_options(const cql_config& cfg,
+                           db::consistency_level consistency,
                            const timeout_config& timeouts,
-                           std::experimental::optional<std::vector<sstring_view>> names,
+                           std::optional<std::vector<sstring_view>> names,
                            std::vector<cql3::raw_value> values,
                            bool skip_metadata,
                            specific_options options,
                            cql_serialization_format sf);
-    explicit query_options(db::consistency_level consistency,
+    explicit query_options(const cql_config& cfg,
+                           db::consistency_level consistency,
                            const timeout_config& timeouts,
-                           std::experimental::optional<std::vector<sstring_view>> names,
+                           std::optional<std::vector<sstring_view>> names,
                            std::vector<cql3::raw_value> values,
                            std::vector<cql3::raw_value_view> value_views,
                            bool skip_metadata,
                            specific_options options,
                            cql_serialization_format sf);
-    explicit query_options(db::consistency_level consistency,
+    explicit query_options(const cql_config& cfg,
+                           db::consistency_level consistency,
                            const timeout_config& timeouts,
-                           std::experimental::optional<std::vector<sstring_view>> names,
+                           std::optional<std::vector<sstring_view>> names,
                            std::vector<cql3::raw_value_view> value_views,
                            bool skip_metadata,
                            specific_options options,
@@ -155,6 +162,7 @@ public:
     explicit query_options(db::consistency_level, const timeout_config& timeouts,
             std::vector<cql3::raw_value> values, specific_options options = specific_options::DEFAULT);
     explicit query_options(std::unique_ptr<query_options>, ::shared_ptr<service::pager::paging_state> paging_state);
+    explicit query_options(std::unique_ptr<query_options>, ::shared_ptr<service::pager::paging_state> paging_state, int32_t page_size);
 
     const timeout_config& get_timeout_config() const { return _timeout_config; }
 
@@ -187,7 +195,7 @@ public:
     }
 
     /**  Serial consistency for conditional updates. */
-    std::experimental::optional<db::consistency_level> get_serial_consistency() const {
+    std::optional<db::consistency_level> get_serial_consistency() const {
         return get_specific_options().serial_consistency;
     }
 
@@ -222,8 +230,12 @@ public:
     }
 
 
-    const std::experimental::optional<std::vector<sstring_view>>& get_names() const noexcept {
+    const std::optional<std::vector<sstring_view>>& get_names() const noexcept {
         return _names;
+    }
+
+    const cql_config& get_cql_config() const {
+        return _cql_config;
     }
 
     void prepare(const std::vector<::shared_ptr<column_specification>>& specs);
@@ -243,7 +255,7 @@ query_options::query_options(query_options&& o, std::vector<OneMutationDataRange
     std::vector<query_options> tmp;
     tmp.reserve(values_ranges.size());
     std::transform(values_ranges.begin(), values_ranges.end(), std::back_inserter(tmp), [this](auto& values_range) {
-        return query_options(_consistency, _timeout_config, {}, std::move(values_range), _skip_metadata, _options, _cql_serialization_format);
+        return query_options(_cql_config, _consistency, _timeout_config, {}, std::move(values_range), _skip_metadata, _options, _cql_serialization_format);
     });
     _batch_options = std::move(tmp);
 }

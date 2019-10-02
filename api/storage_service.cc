@@ -22,19 +22,26 @@
 #include "storage_service.hh"
 #include "api/api-doc/storage_service.json.hh"
 #include "db/config.hh"
+#include <optional>
+#include <time.h>
 #include <boost/range/adaptor/map.hpp>
 #include <boost/range/adaptor/filtered.hpp>
-#include <service/storage_service.hh>
-#include <db/commitlog/commitlog.hh>
-#include <gms/gossiper.hh>
-#include <db/system_keyspace.hh>
-#include "http/exception.hh"
+#include "service/storage_service.hh"
+#include "db/commitlog/commitlog.hh"
+#include "gms/gossiper.hh"
+#include "db/system_keyspace.hh"
+#include "seastar/http/exception.hh"
 #include "repair/repair.hh"
 #include "locator/snitch_base.hh"
 #include "column_family.hh"
 #include "log.hh"
 #include "release.hh"
 #include "sstables/compaction_manager.hh"
+#include "sstables/sstables.hh"
+#include "database.hh"
+#include "db/extensions.hh"
+
+sstables::sstable::version_types get_highest_supported_format();
 
 namespace api {
 
@@ -47,7 +54,6 @@ static sstring validate_keyspace(http_context& ctx, const parameters& param) {
     }
     throw bad_param_exception("Keyspace " + param["keyspace"] + " Does not exist");
 }
-
 
 static std::vector<ss::token_range> describe_ring(const sstring& keyspace) {
     std::vector<ss::token_range> res;
@@ -72,6 +78,19 @@ static std::vector<ss::token_range> describe_ring(const sstring& keyspace) {
 }
 
 void set_storage_service(http_context& ctx, routes& r) {
+    using ks_cf_func = std::function<future<json::json_return_type>(std::unique_ptr<request>, sstring, std::vector<sstring>)>;
+
+    auto wrap_ks_cf = [&ctx](ks_cf_func f) {
+        return [&ctx, f = std::move(f)](std::unique_ptr<request> req) {
+            auto keyspace = validate_keyspace(ctx, req->param);
+            auto column_families = split_cf(req->get_query_param("cf"));
+            if (column_families.empty()) {
+                column_families = map_keys(ctx.db.local().find_keyspace(keyspace).metadata().get()->cf_meta_data());
+            }
+            return f(std::move(req), std::move(keyspace), std::move(column_families));
+        };
+    };
+
     ss::local_hostid.set(r, [](std::unique_ptr<request> req) {
         return db::system_keyspace::get_local_host_id().then([](const utils::UUID& id) {
             return make_ready_future<json::json_return_type>(id.to_sstring());
@@ -299,24 +318,44 @@ void set_storage_service(http_context& ctx, routes& r) {
         });
     });
 
-    ss::scrub.set(r, [&ctx](std::unique_ptr<request> req) {
-        //TBD
-        unimplemented();
-        auto keyspace = validate_keyspace(ctx, req->param);
-        auto column_family = req->get_query_param("cf");
-        auto disable_snapshot = req->get_query_param("disable_snapshot");
+    ss::scrub.set(r, wrap_ks_cf([&ctx](std::unique_ptr<request> req, sstring keyspace, std::vector<sstring> column_families) {
+        // TODO: respect this
         auto skip_corrupted = req->get_query_param("skip_corrupted");
-        return make_ready_future<json::json_return_type>(json_void());
-    });
 
-    ss::upgrade_sstables.set(r, [&ctx](std::unique_ptr<request> req) {
-        //TBD
-        unimplemented();
-        auto keyspace = validate_keyspace(ctx, req->param);
-        auto column_family = req->get_query_param("cf");
-        auto exclude_current_version = req->get_query_param("exclude_current_version");
-        return make_ready_future<json::json_return_type>(json_void());
-    });
+        auto f = make_ready_future<>();
+        if (!req_param<bool>(*req, "disable_snapshot", false)) {
+            auto tag = format("pre-scrub-{:d}", db_clock::now().time_since_epoch().count());
+            f = parallel_for_each(column_families, [keyspace, tag](sstring cf) {
+                return service::get_local_storage_service().take_column_family_snapshot(keyspace, cf, tag);
+            });
+        }
+
+        return f.then([&ctx, keyspace, column_families] {
+            return ctx.db.invoke_on_all([=] (database& db) {
+                return do_for_each(column_families, [=, &db](sstring cfname) {
+                    auto& cm = db.get_compaction_manager();
+                    auto& cf = db.find_column_family(keyspace, cfname);
+                    return cm.perform_sstable_scrub(&cf);
+                });
+            });
+        }).then([]{
+            return make_ready_future<json::json_return_type>(0);
+        });
+    }));
+
+    ss::upgrade_sstables.set(r, wrap_ks_cf([&ctx](std::unique_ptr<request> req, sstring keyspace, std::vector<sstring> column_families) {
+        bool exclude_current_version = req_param<bool>(*req, "exclude_current_version", false);
+
+        return ctx.db.invoke_on_all([=] (database& db) {
+            return do_for_each(column_families, [=, &db](sstring cfname) {
+                auto& cm = db.get_compaction_manager();
+                auto& cf = db.find_column_family(keyspace, cfname);
+                return cm.perform_sstable_upgrade(&cf, exclude_current_version);
+            });
+        }).then([]{
+            return make_ready_future<json::json_return_type>(0);
+        });
+    }));
 
     ss::force_keyspace_flush.set(r, [&ctx](std::unique_ptr<request> req) {
         auto keyspace = validate_keyspace(ctx, req->param);
@@ -454,7 +493,7 @@ void set_storage_service(http_context& ctx, routes& r) {
         return service::get_storage_service().map_reduce(adder<service::storage_service::drain_progress>(), [] (auto& ss) {
             return ss.get_drain_progress();
         }).then([] (auto&& progress) {
-            auto progress_str = sprint("Drained %s/%s ColumnFamilies", progress.remaining_cfs, progress.total_cfs);
+            auto progress_str = format("Drained {}/{} ColumnFamilies", progress.remaining_cfs, progress.total_cfs);
             return make_ready_future<json::json_return_type>(std::move(progress_str));
         });
     });
@@ -665,7 +704,11 @@ void set_storage_service(http_context& ctx, routes& r) {
         auto coordinator = std::hash<sstring>()(cf) % smp::count;
         return service::get_storage_service().invoke_on(coordinator, [ks = std::move(ks), cf = std::move(cf)] (service::storage_service& s) {
             return s.load_new_sstables(ks, cf);
-        }).then([] {
+        }).then_wrapped([] (auto&& f) {
+            if (f.failed()) {
+                auto msg = fmt::format("Failed to load new sstables: {}", f.get_exception());
+                return make_exception_future<json::json_return_type>(httpd::server_error_exception(msg));
+            }
             return make_ready_future<json::json_return_type>(json_void());
         });
     });
@@ -699,7 +742,7 @@ void set_storage_service(http_context& ctx, routes& r) {
             } catch (std::out_of_range& e) {
                 throw httpd::bad_param_exception(e.what());
             } catch (std::invalid_argument&){
-                throw httpd::bad_param_exception(sprint("Bad format in a probability value: \"%s\"", probability.c_str()));
+                throw httpd::bad_param_exception(format("Bad format in a probability value: \"{}\"", probability.c_str()));
             }
         });
     });
@@ -735,7 +778,7 @@ void set_storage_service(http_context& ctx, routes& r) {
                 return make_ready_future<json::json_return_type>(json_void());
             });
         } catch (...) {
-            throw httpd::bad_param_exception(sprint("Bad format value: "));
+            throw httpd::bad_param_exception(format("Bad format value: "));
         }
     });
 
@@ -859,6 +902,133 @@ void set_storage_service(http_context& ctx, routes& r) {
             return make_ready_future<json::json_return_type>(map_to_key_value(std::move(status), res));
         });
     });
+
+    ss::sstable_info.set(r, [&ctx] (std::unique_ptr<request> req) {
+        auto ks = api::req_param<sstring>(*req, "keyspace", {}).value;
+        auto cf = api::req_param<sstring>(*req, "cf", {}).value;
+
+        // The size of this vector is bound by ks::cf. I.e. it is as most Nks + Ncf long
+        // which is not small, but not huge either. 
+        using table_sstables_list = std::vector<ss::table_sstables>;
+
+        return do_with(table_sstables_list{}, [ks, cf, &ctx](table_sstables_list& dst) {
+            return service::get_local_storage_service().db().map_reduce([&dst](table_sstables_list&& res) {
+                for (auto&& t : res) {
+                    auto i = std::find_if(dst.begin(), dst.end(), [&t](const ss::table_sstables& t2) {
+                        return t.keyspace() == t2.keyspace() && t.table() == t2.table();
+                    });
+                    if (i == dst.end()) {
+                        dst.emplace_back(std::move(t));
+                        continue;
+                    }
+                    auto& ssd = i->sstables; 
+                    for (auto&& sd : t.sstables._elements) {
+                        auto j = std::find_if(ssd._elements.begin(), ssd._elements.end(), [&sd](const ss::sstable& s) {
+                            return s.generation() == sd.generation();
+                        });
+                        if (j == ssd._elements.end()) {
+                            i->sstables.push(std::move(sd));
+                        }
+                    }
+                }
+            }, [ks, cf](const database& db) {
+                // see above
+                table_sstables_list res;
+
+                auto& ext = db.get_config().extensions();
+
+                for (auto& t : db.get_column_families() | boost::adaptors::map_values) {
+                    auto& schema = t->schema();
+                    if ((ks.empty() || ks == schema->ks_name()) && (cf.empty() || cf == schema->cf_name())) {
+                        // at most Nsstables long
+                        ss::table_sstables tst;
+                        tst.keyspace = schema->ks_name();
+                        tst.table = schema->cf_name();
+
+                        for (auto sstable : *t->get_sstables_including_compacted_undeleted()) {
+                            auto ts = db_clock::to_time_t(sstable->data_file_write_time());
+                            ::tm t;
+                            ::gmtime_r(&ts, &t);
+
+                            ss::sstable info;
+
+                            info.timestamp = t;
+                            info.generation = sstable->generation();
+                            info.level = sstable->get_sstable_level();
+                            info.size = sstable->bytes_on_disk();
+                            info.data_size = sstable->ondisk_data_size();
+                            info.index_size = sstable->index_size();
+                            info.filter_size = sstable->filter_size();
+                            info.version = sstable->get_version();
+
+                            if (sstable->has_component(sstables::component_type::CompressionInfo)) {
+                                auto& c = sstable->get_compression();
+                                auto cp = sstables::get_sstable_compressor(c);
+
+                                ss::named_maps nm;
+                                nm.group = "compression_parameters";
+                                for (auto& p : cp->options()) {
+                                    ss::mapper e;
+                                    e.key = p.first;
+                                    e.value = p.second;
+                                    nm.attributes.push(std::move(e));
+                                }
+                                if (!cp->options().count(compression_parameters::SSTABLE_COMPRESSION)) {
+                                    ss::mapper e;
+                                    e.key = compression_parameters::SSTABLE_COMPRESSION;
+                                    e.value = cp->name();
+                                    nm.attributes.push(std::move(e));
+                                }
+                                info.extended_properties.push(std::move(nm));
+                            }
+
+                            sstables::file_io_extension::attr_value_map map;
+
+                            for (auto* ep : ext.sstable_file_io_extensions()) {
+                                map.merge(ep->get_attributes(*sstable));
+                            }
+
+                            for (auto& p : map) {
+                                struct {
+                                    const sstring& key; 
+                                    ss::sstable& info;
+                                    void operator()(const std::map<sstring, sstring>& map) const {
+                                        ss::named_maps nm;
+                                        nm.group = key;
+                                        for (auto& p : map) {
+                                            ss::mapper e;
+                                            e.key = p.first;
+                                            e.value = p.second;
+                                            nm.attributes.push(std::move(e));
+                                        }
+                                        info.extended_properties.push(std::move(nm));
+                                    }
+                                    void operator()(const sstring& value) const {
+                                        ss::mapper e;
+                                        e.key = key;
+                                        e.value = value;
+                                        info.properties.push(std::move(e));                                        
+                                    }
+                                } v{p.first, info};
+
+                                std::visit(v, p.second);
+                            }
+
+                            tst.sstables.push(std::move(info));
+                        }
+                        res.emplace_back(std::move(tst));
+                    }
+                }
+                std::sort(res.begin(), res.end(), [](const ss::table_sstables& t1, const ss::table_sstables& t2) {
+                    return t1.keyspace() < t2.keyspace() || (t1.keyspace() == t2.keyspace() && t1.table() < t2.table());
+                });
+                return res;
+            }).then([&dst] {
+                return make_ready_future<json::json_return_type>(stream_object(dst));
+            });
+        });
+    });
+
 }
 
 }

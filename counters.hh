@@ -26,8 +26,6 @@
 #include "atomic_cell_or_collection.hh"
 #include "types.hh"
 
-#include "stdx.hh"
-
 class mutation;
 
 class mutation;
@@ -311,7 +309,8 @@ class basic_counter_cell_view {
 protected:
     using linearized_value_view = std::conditional_t<is_mutable == mutable_view::no,
                                                      bytes_view, bytes_mutable_view>;
-    using pointer_type = typename linearized_value_view::pointer;
+    using pointer_type = std::conditional_t<is_mutable == mutable_view::no,
+                                            bytes_view::const_pointer, bytes_mutable_view::pointer>;
     basic_atomic_cell_view<is_mutable> _cell;
     linearized_value_view _value;
 private:
@@ -385,7 +384,7 @@ public:
         });
     }
 
-    stdx::optional<counter_shard_view> get_shard(const counter_id& id) const {
+    std::optional<counter_shard_view> get_shard(const counter_id& id) const {
         auto it = boost::range::find_if(shards(), [&id] (counter_shard_view csv) {
             return csv.id() == id;
         });
@@ -395,7 +394,7 @@ public:
         return *it;
     }
 
-    stdx::optional<counter_shard_view> local_shard() const {
+    std::optional<counter_shard_view> local_shard() const {
         // TODO: consider caching local shard position
         return get_shard(counter_id::local());
     }
@@ -424,7 +423,7 @@ struct counter_cell_view : basic_counter_cell_view<mutable_view::no> {
 
     // Computes a counter cell containing minimal amount of data which, when
     // applied to 'b' returns the same cell as 'a' and 'b' applied together.
-    static stdx::optional<atomic_cell> difference(atomic_cell_view a, atomic_cell_view b);
+    static std::optional<atomic_cell> difference(atomic_cell_view a, atomic_cell_view b);
 
     friend std::ostream& operator<<(std::ostream& os, counter_cell_view ccv);
 };

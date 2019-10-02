@@ -41,7 +41,7 @@
 #include "locator/abstract_replication_strategy.hh"
 #include "exceptions/exceptions.hh"
 
-#include <experimental/optional>
+#include <optional>
 #include <set>
 
 namespace locator {
@@ -76,21 +76,7 @@ protected:
 
     virtual void validate_options() const override;
 
-    virtual std::experimental::optional<std::set<sstring>> recognized_options() const override;
-
-private:
-    bool has_sufficient_replicas(
-        const sstring& dc,
-        std::unordered_map<sstring,
-                           std::unordered_set<inet_address>>& dc_replicas,
-        std::unordered_map<sstring,
-                           std::unordered_set<inet_address>>& all_endpoints) const;
-
-    bool has_sufficient_replicas(
-        std::unordered_map<sstring,
-                           std::unordered_set<inet_address>>& dc_replicas,
-        std::unordered_map<sstring,
-                           std::unordered_set<inet_address>>& all_endpoints) const;
+    virtual std::optional<std::set<sstring>> recognized_options() const override;
 
 private:
     // map: data centers -> replication factor

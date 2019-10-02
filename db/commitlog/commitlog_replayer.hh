@@ -42,14 +42,10 @@
 #pragma once
 
 #include <memory>
-#include <core/future.hh>
-#include <core/sharded.hh>
+#include <seastar/core/future.hh>
+#include <seastar/core/sharded.hh>
 
 class database;
-
-namespace cql3 {
-    class query_processor;
-}
 
 namespace db {
 
@@ -60,13 +56,13 @@ public:
     commitlog_replayer(commitlog_replayer&&) noexcept;
     ~commitlog_replayer();
 
-    static future<commitlog_replayer> create_replayer(seastar::sharded<cql3::query_processor>&);
+    static future<commitlog_replayer> create_replayer(seastar::sharded<database>&);
 
     future<> recover(std::vector<sstring> files, sstring fname_prefix);
     future<> recover(sstring file, sstring fname_prefix);
 
 private:
-    commitlog_replayer(seastar::sharded<cql3::query_processor>&);
+    commitlog_replayer(seastar::sharded<database>&);
 
     class impl;
     std::unique_ptr<impl> _impl;

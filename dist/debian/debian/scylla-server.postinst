@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 set -e
 
@@ -24,10 +24,16 @@ if [ "$1" = configure ]; then
 fi
 
 ln -sfT /etc/scylla /var/lib/scylla/conf
+if [ -d /usr/lib/scylla ]; then
+    mv /usr/lib/scylla /usr/lib/scylla.old
+fi
+ln -sfT /opt/scylladb/scripts /usr/lib/scylla
 
 grep -v api_ui_dir /etc/scylla/scylla.yaml | grep -v api_doc_dir > /tmp/scylla.yaml
-echo "api_ui_dir: /usr/lib/scylla/swagger-ui/dist/" >> /tmp/scylla.yaml
-echo "api_doc_dir: /usr/lib/scylla/api/api-doc/" >> /tmp/scylla.yaml
+echo "api_ui_dir: /opt/scylladb/swagger-ui/dist/" >> /tmp/scylla.yaml
+echo "api_doc_dir: /opt/scylladb/api/api-doc/" >> /tmp/scylla.yaml
 mv /tmp/scylla.yaml /etc/scylla/scylla.yaml
+
+/opt/scylladb/scripts/scylla_post_install.sh
 
 #DEBHELPER#

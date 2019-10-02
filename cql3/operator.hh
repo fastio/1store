@@ -43,7 +43,7 @@
 
 #include <cstddef>
 #include <iosfwd>
-#include "core/sstring.hh"
+#include <seastar/core/sstring.hh>
 #include "seastarx.hh"
 
 namespace cql3 {
@@ -60,6 +60,7 @@ public:
     static const operator_type CONTAINS_KEY;
     static const operator_type NEQ;
     static const operator_type IS_NOT;
+    static const operator_type LIKE;
 private:
     int32_t _b;
     const operator_type& _reverse;

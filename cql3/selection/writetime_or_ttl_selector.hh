@@ -64,7 +64,7 @@ public:
             }
 
             virtual sstring column_name() override {
-                return sprint("%s(%s)", _is_writetime ? "writetime" : "ttl", _column_name);
+                return format("{}({})", _is_writetime ? "writetime" : "ttl", _column_name);
             }
 
             virtual data_type get_return_type() override {
@@ -94,7 +94,7 @@ public:
                 auto i = _current->begin();
                 serialize_int64(i, ts);
             } else {
-                _current = std::experimental::nullopt;
+                _current = std::nullopt;
             }
         } else {
             int ttl = rs.ttl_of(_idx);
@@ -103,7 +103,7 @@ public:
                 auto i = _current->begin();
                 serialize_int32(i, ttl);
             } else {
-                _current = std::experimental::nullopt;
+                _current = std::nullopt;
             }
         }
     }
@@ -113,7 +113,7 @@ public:
     }
 
     virtual void reset() override {
-        _current = std::experimental::nullopt;
+        _current = std::nullopt;
     }
 
     virtual data_type get_type() override {

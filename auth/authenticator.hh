@@ -41,7 +41,7 @@
 
 #pragma once
 
-#include <experimental/string_view>
+#include <string_view>
 #include <memory>
 #include <set>
 #include <stdexcept>
@@ -55,10 +55,10 @@
 
 #include "auth/authentication_options.hh"
 #include "auth/resource.hh"
+#include "auth/sasl_challenge.hh"
 #include "bytes.hh"
 #include "enum_set.hh"
 #include "exceptions/exceptions.hh"
-#include "stdx.hh"
 
 namespace db {
     class config;
@@ -122,7 +122,7 @@ public:
     ///
     /// The options provided must be a subset of `supported_options()`.
     ///
-    virtual future<> create(stdx::string_view role_name, const authentication_options& options) const = 0;
+    virtual future<> create(std::string_view role_name, const authentication_options& options) const = 0;
 
     ///
     /// Alter the authentication record of an existing user.
@@ -131,38 +131,24 @@ public:
     ///
     /// Callers must ensure that the specification of `alterable_options()` is adhered to.
     ///
-    virtual future<> alter(stdx::string_view role_name, const authentication_options& options) const = 0;
+    virtual future<> alter(std::string_view role_name, const authentication_options& options) const = 0;
 
     ///
     /// Delete the authentication record for a user. This will disallow the user from logging in.
     ///
-    virtual future<> drop(stdx::string_view role_name) const = 0;
+    virtual future<> drop(std::string_view role_name) const = 0;
 
     ///
     /// Query for custom options (those corresponding to \ref authentication_options::options).
     ///
     /// If no options are set the result is an empty container.
     ///
-    virtual future<custom_options> query_custom_options(stdx::string_view role_name) const = 0;
+    virtual future<custom_options> query_custom_options(std::string_view role_name) const = 0;
 
     ///
     /// System resources used internally as part of the implementation. These are made inaccessible to users.
     ///
     virtual const resource_set& protected_resources() const = 0;
-
-    ///
-    /// A stateful SASL challenge which supports many authentication schemes (depending on the implementation).
-    ///
-    class sasl_challenge {
-    public:
-        virtual ~sasl_challenge() = default;
-
-        virtual bytes evaluate_response(bytes_view client_response) = 0;
-
-        virtual bool is_complete() const = 0;
-
-        virtual future<authenticated_user> get_authenticated_user() const = 0;
-    };
 
     virtual ::shared_ptr<sasl_challenge> new_sasl_challenge() const = 0;
 };

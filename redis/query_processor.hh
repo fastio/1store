@@ -1,4 +1,8 @@
 /*
+ * Copyright (C) 2019 pengjian.uestc @ gmail.com
+ */
+
+/*
  * This file is part of Scylla.
  *
  * Scylla is free software: you can redistribute it and/or modify
@@ -15,36 +19,35 @@
  * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/*
- * Modified by pengjian.uestc at gmail.com
- */
-
 #pragma once
 
-#include <experimental/string_view>
-#include <unordered_map>
-
 #include <seastar/core/distributed.hh>
-#include <seastar/core/metrics_registration.hh>
 #include <seastar/core/shared_ptr.hh>
+#include <seastar/core/gate.hh>
+#include <seastar/core/metrics_registration.hh>
 
-#include "exceptions/exceptions.hh"
-#include "log.hh"
-#include "service/migration_manager.hh"
-#include "service/query_state.hh"
-#include "transport/messages/result_message.hh"
 
-class timeout_config;
+using namespace seastar;
+
+class database;
+class service_permit;
+
+namespace service {
+class storage_proxy;
+}
 
 namespace redis {
 
+class redis_options;
 struct request;
 struct reply;
 class redis_message;
+
 class query_processor {
     service::storage_proxy& _proxy;
     distributed<database>& _db;
     seastar::metrics::metric_groups _metrics;
+    seastar::gate _pending_command_gate;
 public:
     query_processor(service::storage_proxy& proxy, distributed<database>& db);
 
@@ -58,19 +61,9 @@ public:
         return _proxy;
     }
 
-    future<redis_message> process(request&&, service::client_state&, const timeout_config& config);
+    future<redis_message> process(request&&, redis_options&, service_permit);
 
     future<> stop();
 };
-
-extern distributed<query_processor> _the_query_processor;
-
-inline distributed<query_processor>& get_query_processor() {
-    return _the_query_processor;
-}
-
-inline query_processor& get_local_query_processor() {
-    return _the_query_processor.local();
-}
 
 }

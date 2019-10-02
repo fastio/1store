@@ -47,9 +47,9 @@
 #include "database.hh"
 #include "utils/fb_utilities.hh"
 #include "streaming/stream_plan.hh"
-#include "core/sleep.hh"
+#include <seastar/core/sleep.hh>
 #include "service/storage_service.hh"
-#include "core/thread.hh"
+#include <seastar/core/thread.hh>
 #include "cql3/query_processor.hh"
 #include "streaming/stream_state.hh"
 #include "streaming/stream_session_state.hh"
@@ -58,48 +58,19 @@
 #include "service/priority_manager.hh"
 #include "query-request.hh"
 #include "schema_registry.hh"
-#include "multishard_writer.hh"
+#include "mutation_writer/multishard_writer.hh"
 #include "sstables/sstables.hh"
 #include "db/system_keyspace.hh"
+#include "db/view/view_update_checks.hh"
 #include <boost/algorithm/cxx11/any_of.hpp>
 #include <boost/range/adaptor/map.hpp>
+#include "../db/view/view_update_generator.hh"
+#include "mutation_source_metadata.hh"
+#include "streaming/stream_mutation_fragments_cmd.hh"
 
 namespace streaming {
 
 logging::logger sslog("stream_session");
-
-/*
- * This reader takes a get_next_fragment generator that produces mutation_fragment_opt which is returned by
- * generating_reader.
- *
- */
-class generating_reader final : public flat_mutation_reader::impl {
-    std::function<future<mutation_fragment_opt> ()> _get_next_fragment;
-public:
-    generating_reader(schema_ptr s, std::function<future<mutation_fragment_opt> ()> get_next_fragment)
-        : impl(std::move(s)), _get_next_fragment(std::move(get_next_fragment))
-    { }
-    virtual future<> fill_buffer(db::timeout_clock::time_point) override {
-        return do_until([this] { return is_end_of_stream() || is_buffer_full(); }, [this] {
-            return _get_next_fragment().then([this] (mutation_fragment_opt mopt) {
-                if (!mopt) {
-                    _end_of_stream = true;
-                } else {
-                    push_mutation_fragment(std::move(*mopt));
-                }
-            });
-        });
-    }
-    virtual void next_partition() override {
-        throw std::bad_function_call();
-    }
-    virtual future<> fast_forward_to(const dht::partition_range&, db::timeout_clock::time_point) override {
-        throw std::bad_function_call();
-    }
-    virtual future<> fast_forward_to(position_range, db::timeout_clock::time_point) override {
-        throw std::bad_function_call();
-    }
-};
 
 static auto get_stream_result_future(utils::UUID plan_id) {
     auto& sm = get_local_stream_manager();
@@ -110,7 +81,7 @@ static auto get_stream_result_future(utils::UUID plan_id) {
     return f;
 }
 
-static auto get_session(utils::UUID plan_id, gms::inet_address from, const char* verb, std::experimental::optional<utils::UUID> cf_id = {}) {
+static auto get_session(utils::UUID plan_id, gms::inet_address from, const char* verb, std::optional<utils::UUID> cf_id = {}) {
     if (cf_id) {
         sslog.debug("[Stream #{}] GOT {} from {}: cf_id={}", plan_id, verb, from, *cf_id);
     } else {
@@ -118,40 +89,17 @@ static auto get_session(utils::UUID plan_id, gms::inet_address from, const char*
     }
     auto sr = get_stream_result_future(plan_id);
     if (!sr) {
-        auto err = sprint("[Stream #%s] GOT %s from %s: Can not find stream_manager", plan_id, verb, from);
+        auto err = format("[Stream #{}] GOT {} from {}: Can not find stream_manager", plan_id, verb, from);
         sslog.debug(err.c_str());
         throw std::runtime_error(err);
     }
     auto coordinator = sr->get_coordinator();
     if (!coordinator) {
-        auto err = sprint("[Stream #%s] GOT %s from %s: Can not find coordinator", plan_id, verb, from);
+        auto err = format("[Stream #{}] GOT {} from {}: Can not find coordinator", plan_id, verb, from);
         sslog.debug(err.c_str());
         throw std::runtime_error(err);
     }
     return coordinator->get_or_create_session(from);
-}
-
-static future<bool> check_view_build_ongoing(db::system_distributed_keyspace& sys_dist_ks, const sstring& ks_name, const sstring& cf_name) {
-    return sys_dist_ks.view_status(ks_name, cf_name).then([] (std::unordered_map<utils::UUID, sstring>&& view_statuses) {
-        return boost::algorithm::any_of(view_statuses | boost::adaptors::map_values, [] (const sstring& view_status) {
-            return view_status == "STARTED";
-        });
-    });
-}
-
-static future<bool> check_needs_view_update_path(db::system_distributed_keyspace& sys_dist_ks, const table& t, stream_reason reason) {
-    if (is_internal_keyspace(t.schema()->ks_name())) {
-        return make_ready_future<bool>(false);
-    }
-    if (reason == stream_reason::repair && !t.views().empty()) {
-        return make_ready_future<bool>(true);
-    }
-    return do_with(t.views(), [&sys_dist_ks] (auto& views) {
-        return map_reduce(views,
-                [&sys_dist_ks] (const view_ptr& view) { return check_view_build_ongoing(sys_dist_ks, view->ks_name(), view->cf_name()); },
-                false,
-                std::logical_or<bool>());
-    });
 }
 
 void stream_session::init_messaging_service_handler() {
@@ -214,54 +162,95 @@ void stream_session::init_messaging_service_handler() {
             });
         });
     });
-    ms().register_stream_mutation_fragments([] (const rpc::client_info& cinfo, UUID plan_id, UUID schema_id, UUID cf_id, uint64_t estimated_partitions, rpc::optional<stream_reason> reason_opt, rpc::source<frozen_mutation_fragment> source) {
+    ms().register_stream_mutation_fragments([] (const rpc::client_info& cinfo, UUID plan_id, UUID schema_id, UUID cf_id, uint64_t estimated_partitions, rpc::optional<stream_reason> reason_opt, rpc::source<frozen_mutation_fragment, rpc::optional<stream_mutation_fragments_cmd>> source) {
         auto from = netw::messaging_service::get_source(cinfo);
         auto reason = reason_opt ? *reason_opt: stream_reason::unspecified;
         sslog.trace("Got stream_mutation_fragments from {} reason {}", from, int(reason));
-        return with_scheduling_group(service::get_local_storage_service().db().local().get_streaming_scheduling_group(), [from, estimated_partitions, plan_id, schema_id, cf_id, source, reason] () mutable {
-                return service::get_schema_for_write(schema_id, from).then([from, estimated_partitions, plan_id, schema_id, cf_id, source, reason] (schema_ptr s) mutable {
+        table& cf = service::get_local_storage_service().db().local().find_column_family(cf_id);
+        if (!_sys_dist_ks->local_is_initialized() || !_view_update_generator->local_is_initialized()) {
+            return make_exception_future<rpc::sink<int>>(std::runtime_error(format("Node {} is not fully initialized for streaming, try again later",
+                    utils::fb_utilities::get_broadcast_address())));
+        }
+        return with_scheduling_group(service::get_local_storage_service().db().local().get_streaming_scheduling_group(), [from, estimated_partitions, plan_id, schema_id, &cf, source, reason] () mutable {
+                return service::get_schema_for_write(schema_id, from).then([from, estimated_partitions, plan_id, schema_id, &cf, source, reason] (schema_ptr s) mutable {
                     auto sink = ms().make_sink_for_stream_mutation_fragments(source);
-                    auto get_next_mutation_fragment = [source, plan_id, from, s] () mutable {
-                        return source().then([plan_id, from, s] (stdx::optional<std::tuple<frozen_mutation_fragment>> fmf_opt) mutable {
-                            if (fmf_opt) {
-                                frozen_mutation_fragment& fmf = std::get<0>(fmf_opt.value());
+                    struct stream_mutation_fragments_cmd_status {
+                        bool got_cmd = false;
+                        bool got_end_of_stream = false;
+                    };
+                    auto cmd_status = make_lw_shared<stream_mutation_fragments_cmd_status>();
+                    auto get_next_mutation_fragment = [source, plan_id, from, s, cmd_status] () mutable {
+                        return source().then([plan_id, from, s, cmd_status] (std::optional<std::tuple<frozen_mutation_fragment, rpc::optional<stream_mutation_fragments_cmd>>> opt) mutable {
+                            if (opt) {
+                                auto cmd = std::get<1>(*opt);
+                                if (cmd) {
+                                    cmd_status->got_cmd = true;
+                                    switch (*cmd) {
+                                    case stream_mutation_fragments_cmd::mutation_fragment_data:
+                                        break;
+                                    case stream_mutation_fragments_cmd::error:
+                                        return make_exception_future<mutation_fragment_opt>(std::runtime_error("Sender failed"));
+                                    case stream_mutation_fragments_cmd::end_of_stream:
+                                        cmd_status->got_end_of_stream = true;
+                                        return make_ready_future<mutation_fragment_opt>();
+                                    default:
+                                        return make_exception_future<mutation_fragment_opt>(std::runtime_error("Sender sent wrong cmd"));
+                                    }
+                                }
+                                frozen_mutation_fragment& fmf = std::get<0>(*opt);
                                 auto sz = fmf.representation().size();
                                 auto mf = fmf.unfreeze(*s);
                                 streaming::get_local_stream_manager().update_progress(plan_id, from.addr, progress_info::direction::IN, sz);
                                 return make_ready_future<mutation_fragment_opt>(std::move(mf));
                             } else {
+                                // If the sender has sent stream_mutation_fragments_cmd it means it is
+                                // a node that understands the new protocol. It must send end_of_stream
+                                // before close the stream.
+                                if (cmd_status->got_cmd && !cmd_status->got_end_of_stream) {
+                                    return make_exception_future<mutation_fragment_opt>(std::runtime_error("Sender did not sent end_of_stream"));
+                                }
                                 return make_ready_future<mutation_fragment_opt>();
                             }
                         });
                     };
-                    distribute_reader_and_consume_on_shards(s, dht::global_partitioner(),
-                        make_flat_mutation_reader<generating_reader>(s, std::move(get_next_mutation_fragment)),
-                        [cf_id, plan_id, estimated_partitions, reason] (flat_mutation_reader reader) {
-                            auto& cf = service::get_local_storage_service().db().local().find_column_family(cf_id);
+                    //FIXME: discarded future.
+                    (void)mutation_writer::distribute_reader_and_consume_on_shards(s, dht::global_partitioner(),
+                        make_generating_reader(s, std::move(get_next_mutation_fragment)),
+                        [plan_id, estimated_partitions, reason] (flat_mutation_reader reader) {
+                            auto& cf = get_local_db().find_column_family(reader.schema());
+                            return db::view::check_needs_view_update_path(_sys_dist_ks->local(), cf, reason).then([cf = cf.shared_from_this(), estimated_partitions, reader = std::move(reader)] (bool use_view_update_path) mutable {
+                                //FIXME: for better estimations this should be transmitted from remote
+                                auto metadata = mutation_source_metadata{};
+                                auto& cs = cf->get_compaction_strategy();
+                                const auto adjusted_estimated_partitions = cs.adjust_partition_estimate(metadata, estimated_partitions);
+                                auto consumer = cf->get_compaction_strategy().make_interposer_consumer(metadata,
+                                        [cf = std::move(cf), adjusted_estimated_partitions, use_view_update_path] (flat_mutation_reader reader) {
+                                    sstables::shared_sstable sst = use_view_update_path ? cf->make_streaming_staging_sstable() : cf->make_streaming_sstable_for_write();
+                                    schema_ptr s = reader.schema();
+                                    auto& pc = service::get_local_streaming_write_priority();
 
-                            return check_needs_view_update_path(_sys_dist_ks->local(), cf, reason).then([cf = cf.shared_from_this(), estimated_partitions, reader = std::move(reader)] (bool use_view_update_path) mutable {
-                                sstables::shared_sstable sst = use_view_update_path ? cf->make_streaming_staging_sstable() : cf->make_streaming_sstable_for_write();
-                                schema_ptr s = reader.schema();
-                                sstables::sstable_writer_config sst_cfg;
-                                sst_cfg.large_partition_handler = cf->get_large_partition_handler();
-                                auto& pc = service::get_local_streaming_write_priority();
-                                return sst->write_components(std::move(reader), std::max(1ul, estimated_partitions), s, sst_cfg, {}, pc).then([sst] {
-                                    return sst->open_data();
-                                }).then([cf, sst] {
-                                    return cf->add_sstable_and_update_cache(sst);
-                                }).then([cf, s, sst, use_view_update_path]() mutable -> future<> {
-                                    if (!use_view_update_path) {
-                                        return make_ready_future<>();
-                                    }
-                                    return _view_update_generator->local().register_staging_sstable(sst, std::move(cf));
+                                    return sst->write_components(std::move(reader), std::max(1ul, adjusted_estimated_partitions), s,
+                                                                 sstables::sstable_writer_config{}, encoding_stats{}, pc).then([sst] {
+                                        return sst->open_data();
+                                    }).then([cf, sst] {
+                                        return cf->add_sstable_and_update_cache(sst);
+                                    }).then([cf, s, sst, use_view_update_path]() mutable -> future<> {
+                                        if (!use_view_update_path) {
+                                            return make_ready_future<>();
+                                        }
+                                        return _view_update_generator->local().register_staging_sstable(sst, std::move(cf));
+                                    });
                                 });
+                                return consumer(std::move(reader));
                             });
-                        }
+                        },
+                        cf.stream_in_progress()
                     ).then_wrapped([s, plan_id, from, sink, estimated_partitions] (future<uint64_t> f) mutable {
                         int32_t status = 0;
                         uint64_t received_partitions = 0;
                         if (f.failed()) {
-                            f.ignore_ready_future();
+                            sslog.error("[Stream #{}] Failed to handle STREAM_MUTATION_FRAGMENTS (receive and distribute phase) for ks={}, cf={}, peer={}: {}",
+                                    plan_id, s->ks_name(), s->cf_name(), from.addr, f.get_exception());
                             status = -1;
                         } else {
                             received_partitions = f.get0();
@@ -274,7 +263,8 @@ void stream_session::init_messaging_service_handler() {
                             return sink.close();
                         });
                     }).handle_exception([s, plan_id, from, sink] (std::exception_ptr ep) {
-                        sslog.error("[Stream #{}] Failed to handle STREAM_MUTATION_FRAGMENTS for ks={}, cf={}, peer={}: {}", plan_id, s->ks_name(), s->cf_name(), from.addr, ep);
+                        sslog.error("[Stream #{}] Failed to handle STREAM_MUTATION_FRAGMENTS (respond phase) for ks={}, cf={}, peer={}: {}",
+                                plan_id, s->ks_name(), s->cf_name(), from.addr, ep);
                     });
                     return make_ready_future<rpc::sink<int>>(sink);
                 });
@@ -329,7 +319,7 @@ void stream_session::init_messaging_service_handler() {
 
 distributed<database>* stream_session::_db;
 distributed<db::system_distributed_keyspace>* stream_session::_sys_dist_ks;
-distributed<db::view::view_update_from_staging_generator>* stream_session::_view_update_generator;
+distributed<db::view::view_update_generator>* stream_session::_view_update_generator;
 
 stream_session::stream_session() = default;
 
@@ -340,7 +330,7 @@ stream_session::stream_session(inet_address peer_)
 
 stream_session::~stream_session() = default;
 
-future<> stream_session::init_streaming_service(distributed<database>& db, distributed<db::system_distributed_keyspace>& sys_dist_ks, distributed<db::view::view_update_from_staging_generator>& view_update_generator) {
+future<> stream_session::init_streaming_service(distributed<database>& db, distributed<db::system_distributed_keyspace>& sys_dist_ks, distributed<db::view::view_update_generator>& view_update_generator) {
     _db = &db;
     _sys_dist_ks = &sys_dist_ks;
     _view_update_generator = &view_update_generator;
@@ -429,7 +419,7 @@ future<prepare_message> stream_session::prepare(std::vector<stream_request> requ
             try {
                 db.find_column_family(ks, cf);
             } catch (no_such_column_family&) {
-                auto err = sprint("[Stream #{}] prepare requested ks={} cf={} does not exist", ks, cf);
+                auto err = format("[Stream #{{}}] prepare requested ks={{}} cf={{}} does not exist", ks, cf);
                 sslog.warn(err.c_str());
                 throw std::runtime_error(err);
             }
@@ -443,7 +433,7 @@ future<prepare_message> stream_session::prepare(std::vector<stream_request> requ
         try {
             db.find_column_family(cf_id);
         } catch (no_such_column_family&) {
-            auto err = sprint("[Stream #{}] prepare cf_id=%s does not exist", plan_id, cf_id);
+            auto err = format("[Stream #{{}}] prepare cf_id={} does not exist", plan_id, cf_id);
             sslog.warn(err.c_str());
             throw std::runtime_error(err);
         }
@@ -521,7 +511,8 @@ void stream_session::send_failed_complete_message() {
     sslog.debug("[Stream #{}] SEND COMPLETE_MESSAGE to {}", plan_id, id);
     auto session = shared_from_this();
     bool failed = true;
-    this->ms().send_complete_message(id, plan_id, this->dst_cpu_id, failed).then([session, id, plan_id] {
+    //FIXME: discarded future.
+    (void)this->ms().send_complete_message(id, plan_id, this->dst_cpu_id, failed).then([session, id, plan_id] {
         sslog.debug("[Stream #{}] GOT COMPLETE_MESSAGE Reply from {}", plan_id, id.addr);
     }).handle_exception([session, id, plan_id] (auto ep) {
         sslog.debug("[Stream #{}] COMPLETE_MESSAGE for {} has failed: {}", plan_id, id.addr, ep);
@@ -549,7 +540,8 @@ void stream_session::start_streaming_files() {
     if (!_transfers.empty()) {
         set_state(stream_session_state::STREAMING);
     }
-    do_for_each(_transfers.begin(), _transfers.end(), [this] (auto& item) {
+    //FIXME: discarded future.
+    (void)do_for_each(_transfers.begin(), _transfers.end(), [this] (auto& item) {
         sslog.debug("[Stream #{}] Start to send cf_id={}", this->plan_id(), item.first);
         return item.second.execute();
     }).then([this] {
@@ -631,7 +623,8 @@ void stream_session::close_session(stream_session_state final_state) {
             for (auto& x : _receivers) {
                 stream_receive_task& task = x.second;
                 sslog.debug("[Stream #{}] close_session session={}, state={}, abort stream_receive_task cf_id={}", plan_id(), this, final_state, task.cf_id);
-                receiving_failed(x.first);
+                //FIXME: discarded future.
+                (void)receiving_failed(x.first);
                 task.abort();
             }
             send_failed_complete_message();
@@ -644,8 +637,7 @@ void stream_session::close_session(stream_session_state final_state) {
             _stream_result->handle_session_complete(shared_from_this());
         }
 
-        sslog.debug("[Stream #{}] close_session session={}, state={}, cancel keep_alive timer", plan_id(), this, final_state);
-        _keep_alive.cancel();
+        sslog.debug("[Stream #{}] close_session session={}, state={}", plan_id(), this, final_state);
     }
 }
 
@@ -661,7 +653,8 @@ void stream_session::start() {
     } else {
         sslog.debug("[Stream #{}] Starting streaming to {} through {}", plan_id(), peer, connecting);
     }
-    on_initialization_complete().handle_exception([this] (auto ep) {
+    //FIXME: discarded future.
+    (void)on_initialization_complete().handle_exception([this] (auto ep) {
         this->on_error();
     });
 }
@@ -672,41 +665,6 @@ bool stream_session::is_initialized() const {
 
 void stream_session::init(shared_ptr<stream_result_future> stream_result_) {
     _stream_result = stream_result_;
-    _keep_alive.set_callback([this] {
-        auto plan_id = this->plan_id();
-        auto peer = this->peer;
-        get_local_stream_manager().get_progress_on_all_shards(plan_id, peer).then([this, peer, plan_id] (stream_bytes sbytes) {
-            if (this->_is_aborted) {
-                sslog.info("[Stream #{}] The session {} is closed, keep alive timer will do nothing", plan_id, this);
-                return;
-            }
-            auto now = lowres_clock::now();
-            sslog.debug("[Stream #{}] keep alive timer callback sbytes old: tx={}, rx={} new: tx={} rx={}",
-                    plan_id, this->_last_stream_bytes.bytes_sent, this->_last_stream_bytes.bytes_received,
-                    sbytes.bytes_sent, sbytes.bytes_received);
-            if (sbytes.bytes_sent > this->_last_stream_bytes.bytes_sent ||
-                sbytes.bytes_received > this->_last_stream_bytes.bytes_received) {
-                sslog.debug("[Stream #{}] The session {} made progress with peer {}", plan_id, this, peer);
-                // Progress has been made
-                this->_last_stream_bytes = sbytes;
-                this->_last_stream_progress = now;
-                this->start_keep_alive_timer();
-            } else if (now - this->_last_stream_progress >= this->_keep_alive_timeout) {
-                // Timeout
-                sslog.info("[Stream #{}] The session {} is idle for {} seconds, the peer {} is probably gone, close it",
-                        plan_id, this, this->_keep_alive_timeout.count(), peer);
-                this->on_error();
-            } else {
-                // Start the timer to check again
-                sslog.info("[Stream #{}] The session {} made no progress with peer {}", plan_id, this, peer);
-                this->start_keep_alive_timer();
-            }
-        }).handle_exception([plan_id, peer, session = this->shared_from_this()] (auto ep) {
-           sslog.info("[Stream #{}] keep alive timer callback fails with peer {}: {}", plan_id, peer, ep);
-        });
-    });
-    _last_stream_progress = lowres_clock::now();
-    start_keep_alive_timer();
 }
 
 utils::UUID stream_session::plan_id() {

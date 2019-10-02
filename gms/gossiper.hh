@@ -39,12 +39,13 @@
 #pragma once
 
 #include "unimplemented.hh"
-#include "core/distributed.hh"
-#include "core/shared_ptr.hh"
-#include "core/print.hh"
+#include <seastar/core/distributed.hh>
+#include <seastar/core/shared_ptr.hh>
+#include <seastar/core/print.hh>
 #include "utils/UUID.hh"
 #include "utils/fb_utilities.hh"
 #include "gms/i_failure_detection_event_listener.hh"
+#include "gms/failure_detector.hh"
 #include "gms/versioned_value.hh"
 #include "gms/application_state.hh"
 #include "gms/endpoint_state.hh"
@@ -53,12 +54,16 @@
 #include "utils/in.hh"
 #include "message/messaging_service_fwd.hh"
 #include <boost/algorithm/string.hpp>
-#include <experimental/optional>
+#include <optional>
 #include <algorithm>
 #include <chrono>
 #include <set>
 #include <seastar/core/condition-variable.hh>
 #include <seastar/core/metrics_registration.hh>
+
+namespace db {
+class config;
+}
 
 namespace gms {
 
@@ -68,7 +73,8 @@ class gossip_digest_ack2;
 class gossip_digest;
 class inet_address;
 class i_endpoint_state_change_subscriber;
-class i_failure_detector;
+
+class feature_service;
 
 struct bind_messaging_port_tag {};
 using bind_messaging_port = bool_class<bind_messaging_port_tag>;
@@ -88,6 +94,7 @@ using bind_messaging_port = bool_class<bind_messaging_port_tag>;
 class gossiper : public i_failure_detection_event_listener, public seastar::async_sharded_service<gossiper>, public seastar::peering_sharded_service<gossiper> {
 public:
     using clk = seastar::lowres_system_clock;
+    using ignore_features_of_local_node = bool_class<class ignore_features_of_local_node_tag>;
 private:
     using messaging_verb = netw::messaging_verb;
     using messaging_service = netw::messaging_service;
@@ -157,7 +164,7 @@ public:
     static constexpr int64_t MAX_GENERATION_DIFFERENCE = 86400 * 365;
     std::chrono::milliseconds fat_client_timeout;
 
-    static std::chrono::milliseconds quarantine_delay();
+    std::chrono::milliseconds quarantine_delay();
 private:
 
     std::default_random_engine _random_engine{std::random_device{}()};
@@ -236,7 +243,7 @@ private:
     // The value must be kept alive until completes and not change.
     future<> replicate(inet_address, application_state key, const versioned_value& value);
 public:
-    gossiper();
+    explicit gossiper(feature_service& features, db::config& cfg);
 
     void set_last_processed_message_at();
     void set_last_processed_message_at(clk::time_point tp);
@@ -414,7 +421,7 @@ public:
     const versioned_value* get_application_state_ptr(inet_address endpoint, application_state appstate) const;
 
     // Use with caution, copies might be expensive (see #764)
-    stdx::optional<endpoint_state> get_endpoint_state_for_endpoint(inet_address ep) const;
+    std::optional<endpoint_state> get_endpoint_state_for_endpoint(inet_address ep) const;
 
     // removes ALL endpoint states; should only be called after shadow gossip
     future<> reset_endpoint_state_map();
@@ -425,7 +432,7 @@ public:
 
     utils::UUID get_host_id(inet_address endpoint);
 
-    std::experimental::optional<endpoint_state> get_state_for_version_bigger_than(inet_address for_endpoint, int version);
+    std::optional<endpoint_state> get_state_for_version_bigger_than(inet_address for_endpoint, int version);
 
     /**
      * determine which endpoint started up earlier
@@ -559,37 +566,40 @@ public:
     future<> wait_for_gossip_to_settle();
     future<> wait_for_range_setup();
 private:
-    future<> wait_for_gossip(std::chrono::milliseconds, stdx::optional<int32_t> = {});
+    future<> wait_for_gossip(std::chrono::milliseconds, std::optional<int32_t> = {});
 
     uint64_t _nr_run = 0;
     uint64_t _msg_processing = 0;
     bool _ms_registered = false;
     bool _gossiped_to_seed = false;
+    bool _gossip_settled = false;
 
     class msg_proc_guard;
 private:
     condition_variable _features_condvar;
-    std::unordered_map<sstring, std::vector<feature*>> _registered_features;
+    feature_service& _feature_service;
+    db::config& _cfg;
+    failure_detector _fd;
     friend class feature;
     // Get features supported by a particular node
     std::set<sstring> get_supported_features(inet_address endpoint) const;
     // Get features supported by all the nodes this node knows about
-    std::set<sstring> get_supported_features() const;
-    // Get features supported by all the nodes listed in the address/feature map
-    static std::set<sstring> get_supported_features(std::unordered_map<gms::inet_address, sstring> peer_features_string);
-    // Wait for features are available on all nodes this node knows about
-    future<> wait_for_feature_on_all_node(std::set<sstring> features);
-    // Wait for features are available on a particular node
-    future<> wait_for_feature_on_node(std::set<sstring> features, inet_address endpoint);
+    std::set<sstring> get_supported_features(const std::unordered_map<gms::inet_address, sstring>& loaded_peer_features, ignore_features_of_local_node ignore_local_node) const;
 public:
-    void check_knows_remote_features(sstring local_features_string) const;
-    void check_knows_remote_features(sstring local_features_string, std::unordered_map<inet_address, sstring> peer_features_string) const;
+    void check_knows_remote_features(sstring local_features_string, const std::unordered_map<inet_address, sstring>& loaded_peer_features) const;
     void maybe_enable_features();
 private:
-    void register_feature(feature* f);
-    void unregister_feature(feature* f);
-private:
     seastar::metrics::metric_groups _metrics;
+    gms::versioned_value::factory _value_factory;
+public:
+    void append_endpoint_state(std::stringstream& ss, const endpoint_state& state);
+public:
+    sstring get_all_endpoint_states();
+    std::map<sstring, sstring> get_simple_states();
+    int get_down_endpoint_count();
+    int get_up_endpoint_count();
+    sstring get_endpoint_state(sstring address);
+    failure_detector& fd() { return _fd; }
 };
 
 extern distributed<gossiper> _the_gossiper;
@@ -603,5 +613,54 @@ inline distributed<gossiper>& get_gossiper() {
 }
 
 future<> stop_gossiping();
+
+inline future<sstring> get_all_endpoint_states() {
+    return smp::submit_to(0, [] {
+        return get_local_gossiper().get_all_endpoint_states();
+    });
+}
+
+inline future<sstring> get_endpoint_state(sstring address) {
+    return smp::submit_to(0, [address] {
+        return get_local_gossiper().get_endpoint_state(address);
+    });
+}
+
+inline future<std::map<sstring, sstring>> get_simple_states() {
+    return smp::submit_to(0, [] {
+        return get_local_gossiper().get_simple_states();
+    });
+}
+
+inline future<int> get_down_endpoint_count() {
+    return smp::submit_to(0, [] {
+        return get_local_gossiper().get_down_endpoint_count();
+    });
+}
+
+inline future<int> get_up_endpoint_count() {
+    return smp::submit_to(0, [] {
+        return get_local_gossiper().get_up_endpoint_count();
+    });
+}
+
+inline future<> set_phi_convict_threshold(double phi) {
+    return smp::submit_to(0, [phi] {
+        get_local_gossiper().fd().set_phi_convict_threshold(phi);
+    });
+}
+
+inline future<double> get_phi_convict_threshold() {
+    return smp::submit_to(0, [] {
+        return get_local_gossiper().fd().get_phi_convict_threshold();
+    });
+}
+
+inline future<std::map<inet_address, arrival_window>> get_arrival_samples() {
+    return smp::submit_to(0, [] {
+        return get_local_gossiper().fd().arrival_samples();
+    });
+}
+
 
 } // namespace gms

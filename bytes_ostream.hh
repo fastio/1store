@@ -24,9 +24,9 @@
 #include <boost/range/iterator_range.hpp>
 
 #include "bytes.hh"
-#include "core/unaligned.hh"
+#include <seastar/core/unaligned.hh>
 #include "hashing.hh"
-#include "seastar/core/simple-stream.hh"
+#include <seastar/core/simple-stream.hh>
 /**
  * Utility for writing data into a buffer when its final size is not known up front.
  *
@@ -419,16 +419,6 @@ public:
             _size = 0;
             _current = _begin.get();
             _begin->next.reset();
-        }
-    }
-};
-
-template<>
-struct appending_hash<bytes_ostream> {
-    template<typename Hasher>
-    void operator()(Hasher& h, const bytes_ostream& b) const {
-        for (auto&& frag : b.fragments()) {
-            feed_hash(h, frag);
         }
     }
 };

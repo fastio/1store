@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include <experimental/string_view>
+#include <string_view>
 #include <memory>
 #include <optional>
 
@@ -35,14 +35,9 @@
 #include "auth/permissions_cache.hh"
 #include "auth/role_manager.hh"
 #include "seastarx.hh"
-#include "stdx.hh"
 
 namespace cql3 {
 class query_processor;
-}
-
-namespace db {
-class config;
 }
 
 namespace service {
@@ -55,8 +50,6 @@ namespace auth {
 class role_or_anonymous;
 
 struct service_config final {
-    static service_config from_db_config(const db::config&);
-
     sstring authorizer_java_name;
     sstring authenticator_java_name;
     sstring role_manager_java_name;
@@ -141,13 +134,13 @@ public:
     ///
     /// \returns an exceptional future with \ref nonexistant_role if the role does not exist.
     ///
-    future<bool> has_superuser(stdx::string_view role_name) const;
+    future<bool> has_superuser(std::string_view role_name) const;
 
     ///
     /// Return the set of all roles granted to the given role, including itself and roles granted through other roles.
     ///
     /// \returns an exceptional future with \ref nonexistent_role if the role does not exist.
-    future<role_set> get_roles(stdx::string_view role_name) const;
+    future<role_set> get_roles(std::string_view role_name) const;
 
     future<bool> exists(const resource&) const;
 
@@ -197,7 +190,7 @@ bool is_protected(const service&, const resource&) noexcept;
 ///
 future<> create_role(
         const service&,
-        stdx::string_view name,
+        std::string_view name,
         const role_config&,
         const authentication_options&);
 
@@ -210,7 +203,7 @@ future<> create_role(
 ///
 future<> alter_role(
         const service&,
-        stdx::string_view name,
+        std::string_view name,
         const role_config_update&,
         const authentication_options&);
 
@@ -219,20 +212,20 @@ future<> alter_role(
 ///
 /// \returns an exceptional future with \ref nonexistant_role if the named role does not exist.
 ///
-future<> drop_role(const service&, stdx::string_view name);
+future<> drop_role(const service&, std::string_view name);
 
 ///
 /// Check if `grantee` has been granted the named role.
 ///
 /// \returns an exceptional future with \ref nonexistent_role if `grantee` or `name` do not exist.
 ///
-future<bool> has_role(const service&, stdx::string_view grantee, stdx::string_view name);
+future<bool> has_role(const service&, std::string_view grantee, std::string_view name);
 ///
 /// Check if the authenticated user has been granted the named role.
 ///
 /// \returns an exceptional future with \ref nonexistent_role if the user or `name` do not exist.
 ///
-future<bool> has_role(const service&, const authenticated_user&, stdx::string_view name);
+future<bool> has_role(const service&, const authenticated_user&, std::string_view name);
 
 ///
 /// \returns an exceptional future with \ref nonexistent_role if the named role does not exist.
@@ -242,7 +235,7 @@ future<bool> has_role(const service&, const authenticated_user&, stdx::string_vi
 ///
 future<> grant_permissions(
         const service&,
-        stdx::string_view role_name,
+        std::string_view role_name,
         permission_set,
         const resource&);
 
@@ -254,7 +247,7 @@ future<> grant_permissions(
 /// \returns an exceptional future with \ref unsupported_authorization_operation if granting permissions is not
 /// supported.
 ///
-future<> grant_applicable_permissions(const service&, stdx::string_view role_name, const resource&);
+future<> grant_applicable_permissions(const service&, std::string_view role_name, const resource&);
 future<> grant_applicable_permissions(const service&, const authenticated_user&, const resource&);
 
 ///
@@ -265,7 +258,7 @@ future<> grant_applicable_permissions(const service&, const authenticated_user&,
 ///
 future<> revoke_permissions(
         const service&,
-        stdx::string_view role_name,
+        std::string_view role_name,
         permission_set,
         const resource&);
 
@@ -290,7 +283,7 @@ using recursive_permissions = bool_class<struct recursive_permissions_tag>;
 future<std::vector<permission_details>> list_filtered_permissions(
         const service&,
         permission_set,
-        std::optional<stdx::string_view> role_name,
+        std::optional<std::string_view> role_name,
         const std::optional<std::pair<resource, recursive_permissions>>& resource_filter);
 
 }

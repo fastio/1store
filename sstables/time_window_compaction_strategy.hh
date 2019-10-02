@@ -46,6 +46,7 @@
 #include "size_tiered_compaction_strategy.hh"
 #include "timestamp.hh"
 #include "exceptions/exceptions.hh"
+#include "sstables/sstables.hh"
 #include <boost/range/algorithm/partial_sort.hpp>
 #include <boost/range/adaptors.hpp>
 
@@ -59,7 +60,7 @@ class time_window_backlog_tracker;
 
 class time_window_compaction_strategy_options {
 public:
-    static constexpr std::chrono::seconds DEFAULT_COMPACTION_WINDOW_UNIT(int window_size) { return window_size * 86400s; }
+    static constexpr std::chrono::seconds DEFAULT_COMPACTION_WINDOW_UNIT = 86400s;
     static constexpr int DEFAULT_COMPACTION_WINDOW_SIZE = 1;
     static constexpr std::chrono::seconds DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS() { return 600s; }
 
@@ -79,12 +80,13 @@ private:
         { "MILLISECONDS", timestamp_resolutions::millisecond },
     };
 
-    std::chrono::seconds sstable_window_size = DEFAULT_COMPACTION_WINDOW_UNIT(DEFAULT_COMPACTION_WINDOW_SIZE);
+    std::chrono::seconds sstable_window_size = DEFAULT_COMPACTION_WINDOW_UNIT * DEFAULT_COMPACTION_WINDOW_SIZE;
     db_clock::duration expired_sstable_check_frequency = DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS();
     timestamp_resolutions timestamp_resolution = timestamp_resolutions::microsecond;
 public:
     time_window_compaction_strategy_options(const std::map<sstring, sstring>& options) {
-        std::chrono::seconds window_unit;
+        std::chrono::seconds window_unit = DEFAULT_COMPACTION_WINDOW_UNIT;
+        int window_size = DEFAULT_COMPACTION_WINDOW_SIZE;
 
         auto it = options.find(COMPACTION_WINDOW_UNIT_KEY);
         if (it != options.end()) {
@@ -98,11 +100,13 @@ public:
         it = options.find(COMPACTION_WINDOW_SIZE_KEY);
         if (it != options.end()) {
             try {
-                sstable_window_size = std::stoi(it->second) * window_unit;
+                window_size = std::stoi(it->second);
             } catch (const std::exception& e) {
                 throw exceptions::syntax_exception(sstring("Invalid integer value ") + it->second + " for " + COMPACTION_WINDOW_SIZE_KEY);
             }
         }
+
+        sstable_window_size = window_size * window_unit;
 
         it = options.find(EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_KEY);
         if (it != options.end()) {
@@ -138,6 +142,12 @@ class time_window_compaction_strategy : public compaction_strategy_impl {
     timestamp_type _highest_window_seen;
     size_tiered_compaction_strategy_options _stcs_options;
     compaction_backlog_tracker _backlog_tracker;
+public:
+    // The maximum amount of buckets we segregate data into when writing into sstables.
+    // To prevent an explosion in the number of sstables we cap it.
+    // Better co-locate some windows into the same sstables than OOM.
+    static const uint64_t max_data_segregation_window_count = 100;
+
 public:
     time_window_compaction_strategy(const std::map<sstring, sstring>& options);
     virtual compaction_descriptor get_sstables_for_compaction(column_family& cf, std::vector<shared_sstable> candidates) override {
@@ -290,6 +300,11 @@ public:
         bucket.resize(n);
         return bucket;
     }
+
+    static int64_t
+    get_window_for(const time_window_compaction_strategy_options& options, api::timestamp_type ts) {
+        return get_window_lower_bound(options.sstable_window_size, to_timestamp_type(options.timestamp_resolution, ts));
+    }
 private:
     void update_estimated_compaction_by_tasks(std::map<timestamp_type, std::vector<shared_sstable>>& tasks, int min_threshold) {
         int64_t n = 0;
@@ -322,6 +337,10 @@ public:
     virtual compaction_backlog_tracker& get_backlog_tracker() override {
         return _backlog_tracker;
     }
+
+    virtual uint64_t adjust_partition_estimate(const mutation_source_metadata& ms_meta, uint64_t partition_estimate) override;
+
+    virtual reader_consumer make_interposer_consumer(const mutation_source_metadata& ms_meta, reader_consumer end_consumer) override;
 };
 
 }

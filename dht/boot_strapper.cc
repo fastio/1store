@@ -41,6 +41,8 @@
 #include "dht/range_streamer.hh"
 #include "gms/failure_detector.hh"
 #include "log.hh"
+#include "db/config.hh"
+#include "database.hh"
 
 static logging::logger blogger("boot_strapper");
 
@@ -49,8 +51,8 @@ namespace dht {
 future<> boot_strapper::bootstrap() {
     blogger.debug("Beginning bootstrap process: sorted_tokens={}", _token_metadata.sorted_tokens());
 
-    auto streamer = make_lw_shared<range_streamer>(_db, _token_metadata, _tokens, _address, "Bootstrap", streaming::stream_reason::bootstrap);
-    streamer->add_source_filter(std::make_unique<range_streamer::failure_detector_source_filter>(gms::get_local_failure_detector()));
+    auto streamer = make_lw_shared<range_streamer>(_db, _token_metadata, _abort_source, _tokens, _address, "Bootstrap", streaming::stream_reason::bootstrap);
+    streamer->add_source_filter(std::make_unique<range_streamer::failure_detector_source_filter>(gms::get_local_gossiper().get_unreachable_members()));
     auto keyspaces = make_lw_shared<std::vector<sstring>>(_db.local().get_non_system_keyspaces());
     return do_for_each(*keyspaces, [this, keyspaces, streamer] (sstring& keyspace_name) {
         auto& ks = _db.local().find_keyspace(keyspace_name);
@@ -59,6 +61,7 @@ future<> boot_strapper::bootstrap() {
         blogger.debug("Will stream keyspace={}, ranges={}", keyspace_name, ranges);
         return streamer->add_ranges(keyspace_name, ranges);
     }).then([this, streamer] {
+        _abort_source.check();
         return streamer->stream_async().then([streamer] () {
             service::get_local_storage_service().finish_bootstrapping();
         }).handle_exception([streamer] (std::exception_ptr eptr) {
@@ -78,7 +81,7 @@ std::unordered_set<token> boot_strapper::get_bootstrap_tokens(token_metadata met
         for (auto& token_string : initial_tokens) {
             auto token = dht::global_partitioner().from_sstring(token_string);
             if (metadata.get_endpoint(token)) {
-                throw std::runtime_error(sprint("Bootstrapping to existing token %s is not allowed (decommission/removenode the old node first).", token_string));
+                throw std::runtime_error(format("Bootstrapping to existing token {} is not allowed (decommission/removenode the old node first).", token_string));
             }
             tokens.insert(token);
         }

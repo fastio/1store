@@ -23,21 +23,35 @@
 #include <seastar/core/sstring.hh>
 #include <seastar/core/future.hh>
 #include <seastar/core/distributed.hh>
+#include <seastar/core/abort_source.hh>
 #include "auth/service.hh"
-#include "db/config.hh"
 #include "db/system_distributed_keyspace.hh"
-#include "database.hh"
+#include "database_fwd.hh"
 #include "log.hh"
+#include "seastarx.hh"
 
 namespace db {
 class extensions;
+class seed_provider_type;
+namespace view {
+class view_update_generator;
+}
+}
+
+namespace gms {
+class feature_service;
+class gossiper;
 }
 
 extern logging::logger startlog;
 
 class bad_configuration_error : public std::exception {};
 
-void init_storage_service(distributed<database>& db, sharded<auth::service>&, sharded<db::system_distributed_keyspace>&);
+void init_storage_service(sharded<abort_source>& abort_sources,
+        distributed<database>& db, sharded<gms::gossiper>& gossiper, sharded<auth::service>& auth_service,
+        sharded<cql3::cql_config>& cql_config,
+        sharded<db::system_distributed_keyspace>& sys_dist_ks,
+        sharded<db::view::view_update_generator>& view_update_generator, sharded<gms::feature_service>& feature_service);
 
 struct init_scheduling_config {
     scheduling_group streaming;
@@ -45,7 +59,10 @@ struct init_scheduling_config {
     scheduling_group gossip;
 };
 
-void init_ms_fd_gossiper(sstring listen_address
+void init_ms_fd_gossiper(sharded<gms::gossiper>& gossiper
+                , sharded<gms::feature_service>& features
+                , db::config& cfg
+                , sstring listen_address
                 , uint16_t storage_port
                 , uint16_t ssl_storage_port
                 , bool tcp_nodelay_inter_dc

@@ -21,8 +21,8 @@
 
 #pragma once
 
-#include "core/sstring.hh"
-#include "core/print.hh"
+#include <seastar/core/sstring.hh>
+#include <seastar/core/print.hh>
 
 #include <json/json.h>
 
@@ -73,13 +73,24 @@ inline Json::Value to_json_value(const sstring& raw) {
     std::unique_ptr<Json::CharReader> reader(rbuilder.newCharReader());
     bool result = reader->parse(raw.begin(), raw.end(), &root, NULL);
     if (!result) {
-        throw std::runtime_error(sprint("Failed to parse JSON: %s", raw));
+        throw std::runtime_error(format("Failed to parse JSON: {}", raw));
     }
 #else
     Json::Reader reader;
     reader.parse(std::string{raw}, root);
 #endif
     return root;
+}
+
+inline bool to_json_value(const sstring& raw, Json::Value& root) {
+#if defined(JSONCPP_VERSION_HEXA) && (JSONCPP_VERSION_HEXA >= 0x010400) // >= 1.4.0
+    Json::CharReaderBuilder rbuilder;
+    std::unique_ptr<Json::CharReader> reader(rbuilder.newCharReader());
+    return reader->parse(raw.begin(), raw.end(), &root, NULL);
+#else
+    Json::Reader reader;
+    return reader.parse(std::string{raw}, root);
+#endif
 }
 
 template<typename Map>

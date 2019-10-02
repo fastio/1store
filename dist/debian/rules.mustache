@@ -2,29 +2,34 @@
 
 export PYBUILD_DISABLE=1
 jobs := $(shell echo $$DEB_BUILD_OPTIONS | sed -r "s/.*parallel=([0-9]+).*/-j\1/")
+{{#housekeeping}}
+install_arg := --housekeeping
+{{/housekeeping}}
+{{^housekeeping}}
+install_arg :=
+{{/housekeeping}}
 
 override_dh_auto_configure:
-	./configure.py --with=scylla --with=iotune --enable-dpdk --mode=release --static-thrift --static-boost --static-yaml-cpp --compiler=/opt/scylladb/bin/g++-7 --c-compiler=/opt/scylladb/bin/gcc-7 --cflags="-I/opt/scylladb/include -L/opt/scylladb/lib/x86-linux-gnu/" --ldflags="-Wl,-rpath=/opt/scylladb/lib"
 
 override_dh_auto_build:
-	PATH="/opt/scylladb/bin:$$PATH" ninja $(jobs)
 
 override_dh_auto_clean:
-	rm -rf build/release seastar/build
-	rm -rf Cql.tokens
-	rm -rf build.ninja seastar/build.ninja
+
+override_dh_auto_install:
+	dh_auto_install
+	./install.sh --root "$(CURDIR)/debian/{{product}}-conf" $(install_arg) --sysconfdir "/etc/default" --pkg "conf"
+	./install.sh --root "$(CURDIR)/debian/{{product}}-kernel-conf" $(install_arg) --sysconfdir "/etc/default" --pkg "kernel-conf"
+	./install.sh --root "$(CURDIR)/debian/{{product}}-server" $(install_arg) --sysconfdir "/etc/default" --pkg "server"
+{{#housekeeping}}
+	# XXX: since housekeeping.cfg is mistakenly belongs to different package
+	# in .rpm/.deb, we need this workaround to make package upgradable
+	mv $(CURDIR)/debian/{{product}}-conf/etc/scylla.d/housekeeping.cfg $(CURDIR)/debian/{{product}}-server/etc/scylla.d/housekeeping.cfg
+	rm -rf $(CURDIR)/debian/{{product}}-conf/etc/scylla.d
+{{/housekeeping}}
+	# don't use default sysconfig file, use Debian version
+	cp dist/debian/sysconfig/scylla-housekeeping $(CURDIR)/debian/{{product}}-server/etc/default/
 
 override_dh_installinit:
-{{#trusty}}
-{{#scylla}}
-	dh_installinit --no-start --upstart-only
-{{/scylla}}
-{{^scylla}}
-	dh_installinit --no-start --name scylla-server --upstart-only
-{{/scylla}}
-	dh_installinit --no-start --name scylla-housekeeping --upstart-only
-{{/trusty}}
-{{^trusty}}
 {{#scylla}}
 	dh_installinit --no-start
 {{/scylla}}
@@ -35,13 +40,21 @@ override_dh_installinit:
 	dh_installinit --no-start --name scylla-housekeeping-restart
 	dh_installinit --no-start --name scylla-fstrim
 	dh_installinit --no-start --name node-exporter
-{{/trusty}}
-{{#trusty}}
-override_dh_installcron:
-	dh_installcron
-{{/trusty}}
 
 override_dh_strip:
-	dh_strip --dbg-package={{product}}-server-dbg
+	# The binaries (ethtool...patchelf) don't pass dh_strip after going through patchelf. Since they are
+	# already stripped, nothing is lost if we exclude them, so that's what we do.
+	dh_strip -Xlibprotobuf.so.15 -Xld.so -Xethtool -Xgawk -Xgzip -Xhwloc-calc -Xhwloc-distrib -Xifconfig -Xlscpu -Xnetstat -Xpatchelf --dbg-package={{product}}-server-dbg
+
+override_dh_makeshlibs:
+
+override_dh_shlibdeps:
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod 755 $(CURDIR)/debian/{{product}}-server/opt/scylladb/libreloc/ld.so
+
+override_dh_strip_nondeterminism:
+
 %:
-	dh $@ --with-python3 --buildsystem=pybuild
+	dh $@

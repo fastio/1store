@@ -22,17 +22,17 @@
 # of tokens assuming they have equal hardware capability.
 #
 # If you already have a cluster with 1 token per node, and wish to migrate to 
-# multiple tokens per node, see http://wiki.apache.org/cassandra/Operations
+# multiple tokens per node, see http://cassandra.apache.org/doc/latest/operating
 num_tokens: 256
 
 # Directory where Scylla should store data on disk.
-# If not set, the default directory is $CASSANDRA_HOME/data/data.
+# If not set, the default directory is /var/lib/scylla/data.
 data_file_directories:
     - /var/lib/scylla/data
 
 # commit log.  when running on magnetic HDD, this should be a
 # separate spindle than the data directories.
-# If not set, the default directory is $CASSANDRA_HOME/data/commitlog.
+# If not set, the default directory is /var/lib/scylla/commitlog.
 commitlog_directory: /var/lib/scylla/commitlog
 
 # commitlog_sync may be either "periodic" or "batch."
@@ -65,7 +65,7 @@ commitlog_sync_period_in_ms: 10000
 commitlog_segment_size_in_mb: 32
 
 # seed_provider class_name is saved for future use.
-# seeds address are mandatory!
+# seeds address(es) are mandatory!
 seed_provider:
     # Addresses of hosts that are deemed contact points. 
     # Scylla nodes use this list of hosts to find each other and learn
@@ -246,7 +246,7 @@ batch_size_fail_threshold_in_kb: 50
 # The directory where hints files are stored for materialized-view updates
 # view_hints_directory: /var/lib/scylla/view_hints
 
-# See http://wiki.apache.org/cassandra/HintedHandoff
+# See https://docs.scylladb.com/architecture/anti-entropy/hinted-handoff
 # May either be "true" or "false" to enable globally, or contain a list
 # of data centers to enable per-datacenter.
 # hinted_handoff_enabled: DC1,DC2
@@ -392,7 +392,7 @@ partitioner: org.apache.cassandra.dht.Murmur3Partitioner
 # memory_allocator: NativeAllocator
 
 # saved caches
-# If not set, the default directory is $CASSANDRA_HOME/data/saved_caches.
+# If not set, the default directory is /var/lib/scylla/saved_caches.
 # saved_caches_directory: /var/lib/scylla/saved_caches
 
 
@@ -538,7 +538,7 @@ commitlog_total_space_in_mb: -1
 # /proc/sys/net/core/wmem_max
 # /proc/sys/net/core/rmem_max
 # /proc/sys/net/ipv4/tcp_wmem
-# /proc/sys/net/ipv4/tcp_wmem
+# /proc/sys/net/ipv4/tcp_rmem
 # and: man tcp
 # internode_send_buff_size_in_bytes:
 # internode_recv_buff_size_in_bytes:
@@ -612,8 +612,17 @@ commitlog_total_space_in_mb: -1
 # of compaction, including validation compaction.
 # compaction_throughput_mb_per_sec: 16
 
-# Log a warning when compacting partitions larger than this value
-# compaction_large_partition_warning_threshold_mb: 100
+# Log a warning when writing partitions larger than this value
+# compaction_large_partition_warning_threshold_mb: 1000
+
+# Log a warning when writing rows larger than this value
+# compaction_large_row_warning_threshold_mb: 10
+
+# Log a warning when writing cells larger than this value
+# compaction_large_cell_warning_threshold_mb: 1
+
+# Log a warning when row number is larger than this value
+# compaction_rows_count_warning_threshold: 100000
 
 # When compacting, the replacement sstable(s) can be opened before they
 # are completely written, and used in place of the prior sstables for

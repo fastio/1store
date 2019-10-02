@@ -45,7 +45,7 @@
 #include "cql3/restrictions/single_column_restriction.hh"
 #include "statements/request_validations.hh"
 
-#include "core/shared_ptr.hh"
+#include <seastar/core/shared_ptr.hh>
 #include "to_string.hh"
 
 #include "cql3/relation.hh"
@@ -136,14 +136,14 @@ protected:
     virtual sstring to_string() const override {
         auto entity_as_string = _entity->to_cql_string();
         if (_map_key) {
-            entity_as_string = sprint("%s[%s]", std::move(entity_as_string), _map_key->to_string());
+            entity_as_string = format("{}[{}]", std::move(entity_as_string), _map_key->to_string());
         }
 
         if (is_IN()) {
-            return sprint("%s IN (%s)", entity_as_string, join(", ", _in_values));
+            return format("{} IN ({})", entity_as_string, join(", ", _in_values));
         }
 
-        return sprint("%s %s %s", entity_as_string, _relation_type, _value->to_string());
+        return format("{} {} {}", entity_as_string, _relation_type, _value->to_string());
     }
 
 protected:
@@ -183,6 +183,9 @@ protected:
         return ::make_shared<restrictions::single_column_restriction::contains>(column_def, std::move(term), is_key);
     }
 
+    virtual ::shared_ptr<restrictions::restriction> new_LIKE_restriction(
+            database& db, schema_ptr schema, ::shared_ptr<variable_specifications> bound_names) override;
+
     virtual ::shared_ptr<relation> maybe_rename_identifier(const column_identifier::raw& from, column_identifier::raw to) override {
         return *_entity == from
             ? ::make_shared(single_column_relation(
@@ -211,11 +214,6 @@ private:
 
     bool is_map_entry_equality() const {
         return _map_key && is_EQ();
-    }
-
-private:
-    bool can_have_only_one_value() {
-        return is_EQ() || (is_IN() && _in_values.size() == 1);
     }
 };
 

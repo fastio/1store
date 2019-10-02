@@ -25,15 +25,14 @@
 #include "db/view/view_builder.hh"
 #include "db/system_keyspace.hh"
 
-#include "tests/test-utils.hh"
+#include <seastar/testing/test_case.hh>
 #include "tests/cql_test_env.hh"
 #include "tests/cql_assertions.hh"
 #include "schema_builder.hh"
 #include "service/priority_manager.hh"
+#include "test_services.hh"
 
 using namespace std::literals::chrono_literals;
-
-static db::nop_large_partition_handler nop_lp_handler;
 
 schema_ptr test_table_schema() {
     static thread_local auto s = [] {
@@ -62,7 +61,7 @@ SEASTAR_TEST_CASE(test_builder_with_large_partition) {
         e.execute_cql("create table cf (p int, c int, v int, primary key (p, c))").get();
 
         for (auto i = 0; i < 1024; ++i) {
-            e.execute_cql(sprint("insert into cf (p, c, v) values (0, %d, 0)", i)).get();
+            e.execute_cql(format("insert into cf (p, c, v) values (0, {:d}, 0)", i)).get();
         }
 
         auto f = e.local_view_builder().wait_until_built("ks", "vcf");
@@ -122,7 +121,7 @@ SEASTAR_TEST_CASE(test_builder_with_multiple_partitions) {
         e.execute_cql("create table cf (p int, c int, v int, primary key (p, c))").get();
 
         for (auto i = 0; i < 1024; ++i) {
-            e.execute_cql(sprint("insert into cf (p, c, v) values (%d, %d, 0)", i % 5, i)).get();
+            e.execute_cql(format("insert into cf (p, c, v) values ({:d}, {:d}, 0)", i % 5, i)).get();
         }
 
         auto f = e.local_view_builder().wait_until_built("ks", "vcf");
@@ -146,7 +145,7 @@ SEASTAR_TEST_CASE(test_builder_with_multiple_partitions_of_batch_size_rows) {
         e.execute_cql("create table cf (p int, c int, v int, primary key (p, c))").get();
 
         for (auto i = 0; i < 1024; ++i) {
-            e.execute_cql(sprint("insert into cf (p, c, v) values (%d, %d, 0)", i % db::view::view_builder::batch_size, i)).get();
+            e.execute_cql(format("insert into cf (p, c, v) values ({:d}, {:d}, 0)", i % db::view::view_builder::batch_size, i)).get();
         }
 
         auto f = e.local_view_builder().wait_until_built("ks", "vcf");
@@ -170,7 +169,7 @@ SEASTAR_TEST_CASE(test_builder_view_added_during_ongoing_build) {
         e.execute_cql("create table cf (p int, c int, v int, primary key (p, c))").get();
 
         for (auto i = 0; i < 5000; ++i) {
-            e.execute_cql(sprint("insert into cf (p, c, v) values (0, %d, 0)", i)).get();
+            e.execute_cql(format("insert into cf (p, c, v) values (0, {:d}, 0)", i)).get();
         }
 
         auto f1 = e.local_view_builder().wait_until_built("ks", "vcf1");
@@ -228,7 +227,7 @@ SEASTAR_TEST_CASE(test_builder_across_tokens_with_large_partitions) {
         auto make_key = [&] (auto) { return to_hex(random_bytes(128, gen));  };
         for (auto&& k : boost::irange(0, 4) | boost::adaptors::transformed(make_key)) {
             for (auto i = 0; i < 1000; ++i) {
-                e.execute_cql(sprint("insert into cf (p, c, v) values (0x%s, %d, 0)", k, i)).get();
+                e.execute_cql(format("insert into cf (p, c, v) values (0x{}, {:d}, 0)", k, i)).get();
             }
         }
 
@@ -270,7 +269,7 @@ SEASTAR_TEST_CASE(test_builder_across_tokens_with_small_partitions) {
         auto make_key = [&] (auto) { return to_hex(random_bytes(128, gen));  };
         for (auto&& k : boost::irange(0, 1000) | boost::adaptors::transformed(make_key)) {
             for (auto i = 0; i < 4; ++i) {
-                e.execute_cql(sprint("insert into cf (p, c, v) values (0x%s, %d, 0)", k, i)).get();
+                e.execute_cql(format("insert into cf (p, c, v) values (0x{}, {:d}, 0)", k, i)).get();
             }
         }
 
@@ -308,7 +307,7 @@ SEASTAR_TEST_CASE(test_builder_with_tombstones) {
         e.execute_cql("create table cf (p int, c1 int, c2 int, v int, primary key (p, c1, c2))").get();
 
         for (auto i = 0; i < 100; ++i) {
-            e.execute_cql(sprint("insert into cf (p, c1, c2, v) values (0, %d, %d, 1)", i % 2, i)).get();
+            e.execute_cql(format("insert into cf (p, c1, c2, v) values (0, {:d}, {:d}, 1)", i % 2, i)).get();
         }
 
         e.execute_cql("delete from cf where p = 0 and c1 = 0").get();
@@ -348,7 +347,7 @@ SEASTAR_TEST_CASE(test_builder_with_concurrent_writes) {
         auto k = keys.begin();
         for (; k != half; ++k) {
             for (size_t i = 0; i < rows_per_partition; ++i) {
-                e.execute_cql(sprint("insert into cf (p, c, v) values (0x%s, %d, 0)", *k, i)).get();
+                e.execute_cql(format("insert into cf (p, c, v) values (0x{}, {:d}, 0)", *k, i)).get();
             }
         }
 
@@ -359,7 +358,7 @@ SEASTAR_TEST_CASE(test_builder_with_concurrent_writes) {
 
         for (; k != keys.end(); ++k) {
             for (size_t i = 0; i < rows_per_partition; ++i) {
-                e.execute_cql(sprint("insert into cf (p, c, v) values (0x%s, %d, 0)", *k, i)).get();
+                e.execute_cql(format("insert into cf (p, c, v) values (0x{}, {:d}, 0)", *k, i)).get();
             }
         }
 
@@ -380,7 +379,7 @@ SEASTAR_TEST_CASE(test_builder_with_concurrent_drop) {
         auto make_key = [&] (auto) { return to_hex(random_bytes(128, gen));  };
         for (auto&& k : boost::irange(0, 1000) | boost::adaptors::transformed(make_key)) {
             for (auto i = 0; i < 5; ++i) {
-                e.execute_cql(sprint("insert into cf (p, c, v) values (0x%s, %d, 0)", k, i)).get();
+                e.execute_cql(format("insert into cf (p, c, v) values (0x{}, {:d}, 0)", k, i)).get();
             }
         }
 
@@ -426,7 +425,6 @@ SEASTAR_TEST_CASE(test_view_update_generator) {
 
         auto sst = t->make_streaming_staging_sstable();
         sstables::sstable_writer_config sst_cfg;
-        sst_cfg.large_partition_handler = &nop_lp_handler;
         auto& pc = service::get_local_streaming_write_priority();
         sst->write_components(flat_mutation_reader_from_mutations({m}), 1ul, s, sst_cfg, {}, pc).get();
         sst->open_data().get();

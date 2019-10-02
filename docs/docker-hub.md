@@ -43,6 +43,35 @@ cqlsh>
 $ docker run --name some-scylla2  --hostname some-scylla2 -d scylladb/scylla --seeds="$(docker inspect --format='{{ .NetworkSettings.IPAddress }}' some-scylla)"
 ```
 
+### Make a cluster with Docker Compose
+
+First, create a `docker-compose.yml` file with the following contents:
+
+```yaml
+version: '3'
+
+services:
+  some-scylla:
+    image: scylladb/scylla
+    container_name: some-scylla
+
+  some-scylla2:
+    image: scylladb/scylla
+    container_name: some-scylla2
+    command: --seeds=some-scylla
+
+  some-scylla3:
+    image: scylladb/scylla
+    container_name: some-scylla3
+    command: --seeds=some-scylla
+```
+
+Then, launch the 3-node cluster as follows:
+
+```
+docker-compose up -d
+```
+
 ## Check `scylla` logs
 
 ```console
@@ -106,7 +135,7 @@ $ docker run --name some-scylla -d scylladb/scylla --seeds 192.168.0.100,192.168
 
 ### `--listen-address ADDR`
 
-The `--listen-address` command line option configures the IP address the Scylla instance listens for client connections.
+The `--listen-address` command line option configures the IP address the Scylla instance listens on for connections from other Scylla nodes.
 
 For example, to configure Scylla to use listen address `10.0.0.5`:
 
@@ -115,6 +144,24 @@ $ docker run --name some-scylla -d scylladb/scylla --listen-address 10.0.0.5
 ```
 
 **Since: 1.4**
+
+### `--alternator-address ADDR`
+
+The `--alternator-address` command line option configures the Alternator API listen address. The default value is the same as `--listen-address`.
+
+**Since: 3.2**
+
+### `--alternator-port PORT`
+
+The `--alternator-port` command line option configures the Alternator API listen port. The Alternator API is disabled by default. You need to specify the port to enable it.
+
+For example, to configure Scylla to listen to Alternator API at port `8000`:
+
+```console
+$ docker run --name some-scylla -d scylladb/scylla --alternator-port 8000
+```
+
+**Since: 3.2**
 
 ### `--broadcast-address ADDR`
 

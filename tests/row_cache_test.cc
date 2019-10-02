@@ -26,7 +26,7 @@
 #include <seastar/util/alloc_failure_injector.hh>
 #include <boost/algorithm/cxx11/any_of.hpp>
 
-#include "tests/test-utils.hh"
+#include <seastar/testing/test_case.hh>
 #include "tests/mutation_assertions.hh"
 #include "tests/flat_mutation_reader_assertions.hh"
 #include "tests/mutation_source_test.hh"
@@ -34,7 +34,7 @@
 #include "schema_builder.hh"
 #include "simple_schema.hh"
 #include "row_cache.hh"
-#include "core/thread.hh"
+#include <seastar/core/thread.hh>
 #include "memtable.hh"
 #include "partition_slice_builder.hh"
 #include "tests/memtable_snapshot_source.hh"
@@ -62,7 +62,7 @@ static
 mutation make_new_mutation(schema_ptr s, partition_key key) {
     mutation m(s, key);
     static thread_local int next_value = 1;
-    m.set_clustered_cell(clustering_key::make_empty(), "v", data_value(to_bytes(sprint("v%d", next_value++))), next_timestamp++);
+    m.set_clustered_cell(clustering_key::make_empty(), "v", data_value(to_bytes(format("v{:d}", next_value++))), next_timestamp++);
     return m;
 }
 
@@ -85,7 +85,7 @@ mutation make_new_large_mutation(schema_ptr s, partition_key key) {
 static
 partition_key new_key(schema_ptr s) {
     static thread_local int next = 0;
-    return partition_key::from_single_value(*s, to_bytes(sprint("key%d", next++)));
+    return partition_key::from_single_value(*s, to_bytes(format("key{:d}", next++)));
 }
 
 static
@@ -95,12 +95,12 @@ mutation make_new_mutation(schema_ptr s) {
 
 static inline
 mutation make_new_large_mutation(schema_ptr s, int key) {
-    return make_new_large_mutation(s, partition_key::from_single_value(*s, to_bytes(sprint("key%d", key))));
+    return make_new_large_mutation(s, partition_key::from_single_value(*s, to_bytes(format("key{:d}", key))));
 }
 
 static inline
 mutation make_new_mutation(schema_ptr s, int key) {
-    return make_new_mutation(s, partition_key::from_single_value(*s, to_bytes(sprint("key%d", key))));
+    return make_new_mutation(s, partition_key::from_single_value(*s, to_bytes(format("key{:d}", key))));
 }
 
 snapshot_source make_decorated_snapshot_source(snapshot_source src, std::function<mutation_source(mutation_source)> decorator) {
@@ -322,7 +322,7 @@ SEASTAR_TEST_CASE(test_cache_delegates_to_underlying_only_once_range_open) {
 
 // partitions must be sorted by decorated key
 static void require_no_token_duplicates(const std::vector<mutation>& partitions) {
-    std::experimental::optional<dht::token> last_token;
+    std::optional<dht::token> last_token;
     for (auto&& p : partitions) {
         const dht::decorated_key& key = p.decorated_key();
         if (last_token && key.token() == *last_token) {
@@ -350,7 +350,7 @@ SEASTAR_TEST_CASE(test_cache_delegates_to_underlying_only_once_multiple_mutation
         std::vector<mutation> partitions;
         for (int i = 0; i < partition_count; ++i) {
             partitions.emplace_back(
-                make_partition_mutation(to_bytes(sprint("key_%d", i))));
+                make_partition_mutation(to_bytes(format("key_{:d}", i))));
         }
 
         std::sort(partitions.begin(), partitions.end(), mutation_decorated_key_less_comparator());
@@ -620,6 +620,66 @@ SEASTAR_TEST_CASE(test_single_key_queries_after_population_in_reverse_order) {
     });
 }
 
+// Reproducer for https://github.com/scylladb/scylla/issues/4236
+SEASTAR_TEST_CASE(test_partition_range_population_with_concurrent_memtable_flushes) {
+    return seastar::async([] {
+        auto s = make_schema();
+
+        std::vector<mutation> mutations = make_ring(s, 3);
+
+        auto mt = make_lw_shared<memtable>(s);
+        for (auto&& m : mutations) {
+            mt->apply(m);
+        }
+
+        cache_tracker tracker;
+        row_cache cache(s, snapshot_source_from_snapshot(mt->as_data_source()), tracker);
+
+        bool cancel_updater = false;
+        auto updater = repeat([&] {
+            if (cancel_updater) {
+                return make_ready_future<stop_iteration>(stop_iteration::yes);
+            }
+            return later().then([&] {
+                auto mt = make_lw_shared<memtable>(s);
+                return cache.update([]{}, *mt).then([mt] {
+                    return stop_iteration::no;
+                });
+            });
+        });
+
+        {
+            auto pr = dht::partition_range::make_singular(query::ring_position(mutations[1].decorated_key()));
+            assert_that(cache.make_reader(s, pr))
+                .produces(mutations[1])
+                .produces_end_of_stream();
+        }
+
+        {
+            auto pr = dht::partition_range::make_ending_with(
+                {query::ring_position(mutations[2].decorated_key()), true});
+            assert_that(cache.make_reader(s, pr))
+                .produces(mutations[0])
+                .produces(mutations[1])
+                .produces(mutations[2])
+                .produces_end_of_stream();
+        }
+
+        cache.invalidate([]{}).get();
+
+        {
+            assert_that(cache.make_reader(s, query::full_partition_range))
+                .produces(mutations[0])
+                .produces(mutations[1])
+                .produces(mutations[2])
+                .produces_end_of_stream();
+        }
+
+        cancel_updater = true;
+        updater.get();
+    });
+}
+
 SEASTAR_TEST_CASE(test_row_cache_conforms_to_mutation_source) {
     return seastar::async([] {
         cache_tracker tracker;
@@ -789,7 +849,7 @@ SEASTAR_TEST_CASE(test_eviction) {
     });
 }
 
-#ifndef DEFAULT_ALLOCATOR // Depends on eviction, which is absent with the std allocator
+#ifndef SEASTAR_DEFAULT_ALLOCATOR // Depends on eviction, which is absent with the std allocator
 
 SEASTAR_TEST_CASE(test_eviction_from_invalidated) {
     return seastar::async([] {
@@ -874,7 +934,7 @@ void test_sliced_read_row_presence(flat_mutation_reader reader, schema_ptr s, st
             expected.pop_front();
             auto& cr = mfopt->as_clustering_row();
             if (!ck_eq(cr.key(), ck)) {
-                BOOST_FAIL(sprint("Expected %s, but got %s", ck, cr.key()));
+                BOOST_FAIL(format("Expected {}, but got {}", ck, cr.key()));
             }
         }
     }
@@ -1114,7 +1174,8 @@ public:
 
             auto f1 = p1.get_future();
 
-            p2.get_future().then([p1 = std::move(p1), p3 = std::move(_p)] () mutable {
+            // Intentional, the future is waited on indirectly.
+            (void)p2.get_future().then([p1 = std::move(p1), p3 = std::move(_p)] () mutable {
                 p1.set_value();
                 p3.set_value();
             });
@@ -1481,7 +1542,7 @@ SEASTAR_TEST_CASE(test_mvcc) {
 
             auto m12 = m1 + m2;
 
-            stdx::optional<flat_mutation_reader> mt1_reader_opt;
+            std::optional<flat_mutation_reader> mt1_reader_opt;
             if (with_active_memtable_reader) {
                 mt1_reader_opt = mt1->make_flat_reader(s);
                 mt1_reader_opt->set_max_buffer_size(1);
@@ -2211,7 +2272,7 @@ SEASTAR_TEST_CASE(test_exception_safety_of_update_from_memtable) {
 
             populate_range(cache, population_range);
             auto rd1_v1 = assert_that(make_reader(population_range));
-            stdx::optional<flat_mutation_reader> snap;
+            std::optional<flat_mutation_reader> snap;
 
             try {
                 auto mt = make_lw_shared<memtable>(cache.schema());
@@ -2565,7 +2626,7 @@ static void check_continuous(row_cache& cache, const dht::partition_range& pr, c
     auto s1 = cache.get_cache_tracker().get_stats();
     if (s0.reads_with_misses != s1.reads_with_misses) {
         std::cerr << cache << "\n";
-        BOOST_FAIL(sprint("Got cache miss while reading range %s", r));
+        BOOST_FAIL(format("Got cache miss while reading range {}", r));
     }
 }
 
@@ -2599,7 +2660,7 @@ SEASTAR_TEST_CASE(test_random_row_population) {
             auto rd = cache.make_reader(s.schema(), pr, slice ? *slice : s.schema()->full_slice());
             rd.set_max_buffer_size(1);
             rd.fill_buffer(db::no_timeout).get();
-            return std::move(rd);
+            return rd;
         };
 
         std::vector<query::clustering_range> ranges;
@@ -2662,7 +2723,7 @@ SEASTAR_TEST_CASE(test_no_misses_when_read_is_repeated) {
 
         for (auto n_ranges : {1, 2, 4}) {
             auto ranges = gen.make_random_ranges(n_ranges);
-            BOOST_TEST_MESSAGE(sprint("Reading {}", ranges));
+            BOOST_TEST_MESSAGE(format("Reading {{}}", ranges));
 
             populate_range(cache, pr, ranges);
             check_continuous(cache, pr, ranges);
@@ -2671,7 +2732,7 @@ SEASTAR_TEST_CASE(test_no_misses_when_read_is_repeated) {
             auto s2 = tracker.get_stats();
 
             if (s1.reads_with_misses != s2.reads_with_misses) {
-                BOOST_FAIL(sprint("Got cache miss when repeating read of %s on %s", ranges, m1));
+                BOOST_FAIL(format("Got cache miss when repeating read of {} on {}", ranges, m1));
             }
         }
     });
@@ -2714,7 +2775,7 @@ SEASTAR_TEST_CASE(test_continuity_is_populated_when_read_overlaps_with_older_ver
             auto rd = cache.make_reader(s.schema(), pr);
             rd.set_max_buffer_size(1);
             rd.fill_buffer(db::no_timeout).get();
-            return std::move(rd);
+            return rd;
         };
 
         {
@@ -2784,7 +2845,7 @@ SEASTAR_TEST_CASE(test_continuity_is_populated_when_read_overlaps_with_older_ver
             check_continuous(cache, pr, query::full_clustering_range);
 
             assert_that(cache.make_reader(s.schema(), pr))
-                .produces_compacted(m1 + m2 + m3 + m4)
+                .produces_compacted(m1 + m2 + m3 + m4, gc_clock::now())
                 .produces_end_of_stream();
         }
     });
@@ -2842,7 +2903,7 @@ SEASTAR_TEST_CASE(test_continuity_population_with_multicolumn_clustering_key) {
             auto rd = cache.make_reader(s, pr, slice ? *slice : s->full_slice());
             rd.set_max_buffer_size(1);
             rd.fill_buffer(db::no_timeout).get();
-            return std::move(rd);
+            return rd;
         };
 
         {
@@ -2867,14 +2928,14 @@ SEASTAR_TEST_CASE(test_continuity_population_with_multicolumn_clustering_key) {
                 .produces_end_of_stream();
 
             assert_that(cache.make_reader(s, pr))
-                .produces_compacted(m1 + m2)
+                .produces_compacted(m1 + m2, gc_clock::now())
                 .produces_end_of_stream();
 
             auto slice34 = partition_slice_builder(*s)
                 .with_range(range_3_4)
                 .build();
             assert_that(cache.make_reader(s, pr, slice34))
-                .produces_compacted(m34)
+                .produces_compacted(m34, gc_clock::now())
                 .produces_end_of_stream();
         }
     });
@@ -2919,7 +2980,7 @@ SEASTAR_TEST_CASE(test_continuity_is_populated_for_single_row_reads) {
         check_continuous(cache, pr, query::clustering_range::make_singular(s.make_ckey(7)));
 
         assert_that(cache.make_reader(s.schema()))
-            .produces_compacted(m1)
+            .produces_compacted(m1, gc_clock::now())
             .produces_end_of_stream();
     });
 }
@@ -2949,7 +3010,7 @@ SEASTAR_TEST_CASE(test_concurrent_setting_of_continuity_on_read_upper_bound) {
             auto rd = cache.make_reader(s.schema(), pr, slice ? *slice : s.schema()->full_slice());
             rd.set_max_buffer_size(1);
             rd.fill_buffer(db::no_timeout).get();
-            return std::move(rd);
+            return rd;
         };
 
         {
@@ -3013,7 +3074,7 @@ SEASTAR_TEST_CASE(test_tombstone_merging_of_overlapping_tombstones_in_many_versi
             auto rd = cache.make_reader(s.schema());
             rd.set_max_buffer_size(1);
             rd.fill_buffer(db::no_timeout).get();
-            return std::move(rd);
+            return rd;
         };
 
         apply(cache, underlying, m1);
@@ -3051,7 +3112,7 @@ SEASTAR_TEST_CASE(test_concurrent_reads_and_eviction) {
             auto rd = cache.make_reader(s, pr, slice);
             rd.set_max_buffer_size(3);
             rd.fill_buffer(db::no_timeout).get();
-            return std::move(rd);
+            return rd;
         };
 
         const int n_readers = 3;
@@ -3093,7 +3154,7 @@ SEASTAR_TEST_CASE(test_concurrent_reads_and_eviction) {
                         }
                         return m2 == actual;
                     })) {
-                        BOOST_FAIL(sprint("Mutation read doesn't match any expected version, slice: %s, read: %s\nexpected: [%s]",
+                        BOOST_FAIL(format("Mutation read doesn't match any expected version, slice: {}, read: {}\nexpected: [{}]",
                             slice, actual, ::join(",\n", possible_versions)));
                     }
                 }

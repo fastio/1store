@@ -22,9 +22,20 @@ Scylla depends on the system package manager for its development dependencies.
 
 Running `./install-dependencies.sh` (as root) installs the appropriate packages based on your Linux distribution.
 
+On Ubuntu and Debian based Linux distributions, some packages
+required to build Scylla are missing in the official upstream:
+
+- libthrift-dev and libthrift
+- antlr3-c++-dev
+
+Try running ```sudo ./scripts/scylla_current_repo``` to add Scylla upstream,
+and get the missing packages from it.
+
 ### Build system
 
-**Note**: Compiling Scylla requires, conservatively, 2 GB of memory per native thread, and up to 3 GB per native thread while linking.
+**Note**: Compiling Scylla requires, conservatively, 2 GB of memory per native
+thread, and up to 3 GB per native thread while linking. GCC >= 8.1.1. is
+required.
 
 Scylla is built with [Ninja](https://ninja-build.org/), a low-level rule-based system. A Python script, `configure.py`, generates a Ninja file (`build.ninja`) based on configuration options.
 
@@ -43,9 +54,7 @@ The full suite of options for project configuration is available via
 $ ./configure.py --help
 ```
 
-The most important options are:
-
-- `--mode={release,debug,all}`: Debug mode enables [AddressSanitizer](https://github.com/google/sanitizers/wiki/AddressSanitizer) and allows for debugging with tools like GDB. Debugging builds are generally slower and generate much larger object files than release builds.
+The most important option is:
 
 - `--{enable,disable}-dpdk`: [DPDK](http://dpdk.org/) is a set of libraries and drivers for fast packet processing. During development, it's not necessary to enable support even if it is supported by your platform.
 
@@ -55,6 +64,30 @@ To save time -- for instance, to avoid compiling all unit tests -- you can also 
 
 ```bash
 $ ninja-build build/release/tests/schema_change_test
+$ ninja-build build/release/service/storage_proxy.o
+```
+
+You can also specify a single mode. For example
+
+```bash
+$ ninja-build release
+```
+
+Will build everytihng in release mode. The valid modes are
+
+* Debug: Enables [AddressSanitizer](https://github.com/google/sanitizers/wiki/AddressSanitizer)
+  and other sanity checks. It has no optimizations, which allows for debugging with tools like
+  GDB. Debugging builds are generally slower and generate much larger object files than release builds.
+* Release: Fewer checks and more optimizations. It still has debug info.
+* Dev: No optimizations or debug info. The objective is to compile and link as fast as possible.
+  This is useful for the first iterations of a patch.
+
+
+Note that by default unit tests binaries are stripped so they can't be used with gdb or seastar-addr2line.
+To include debug information in the unit test binary, build the test binary with a `_g` suffix. For example,
+
+```bash
+$ ninja-build build/release/tests/schema_change_test_g
 ```
 
 ### Unit testing
@@ -83,7 +116,7 @@ The `-c1 -m1G` arguments limit this Seastar-based test to a single system thread
 
 ### Preparing patches
 
-All changes to Scylla are submitted as patches to the public mailing list. Once a patch is approved by one of the maintainers of the project, it is committed to the maintainers' copy of the repository at https://github.com/scylladb/scylla.
+All changes to Scylla are submitted as patches to the public [mailing list](mailto:scylladb-dev@googlegroups.com). Once a patch is approved by one of the maintainers of the project, it is committed to the maintainers' copy of the repository at https://github.com/scylladb/scylla.
 
 Detailed instructions for formatting patches for the mailing list and advice on preparing good patches are available at the [ScyllaDB website](http://docs.scylladb.com/contribute/). There are also some guidelines that can help you make the patch review process smoother:
 
@@ -111,6 +144,8 @@ In v3:
 The usual is "Tests: unit (release)", although running debug tests is encouraged.
 
 5. When answering review comments, prefer inline quotes as they make it easier to track the conversation across multiple e-mails.
+
+6. The Linux kernel's [Submitting Patches](https://www.kernel.org/doc/html/v4.19/process/submitting-patches.html) document offers excellent advice on how to prepare patches and patchsets for review. Since the Scylla development process is derived from the kernel's, almost all of the advice there is directly applicable.
 
 ### Finding a person to review and merge your patches
 
@@ -162,6 +197,29 @@ On a development machine, one might run Scylla as
 
 ```bash
 $ SCYLLA_HOME=$HOME/scylla build/release/scylla --overprovisioned --developer-mode=yes
+```
+
+To interact with scylla it is recommended to build our versions of
+cqlsh and nodetool. They are available at
+https://github.com/scylladb/scylla-tools-java and can be built with
+
+```bash
+$ sudo ./install-dependencies.sh
+$ ant jar
+```
+
+cqlsh should work out of the box, but nodetool depends on a running
+scylla-jmx (https://github.com/scylladb/scylla-jmx). It can be build
+with
+
+```bash
+$ mvn package
+```
+
+and must be started with
+
+```bash
+$ ./scripts/scylla-jmx
 ```
 
 ### Branches and tags
@@ -254,7 +312,7 @@ In this example, `10.0.0.2` will be sent up to 16 jobs and the local machine wil
 
 When a compilation is in progress, the status of jobs on all remote machines can be visualized in the terminal with `distccmon-text` or graphically as a GTK application with `distccmon-gnome`.
 
-One thing to keep in mind is that linking object files happens on the coordinating machine, which can be a bottleneck. See the next section speeding up this process.
+One thing to keep in mind is that linking object files happens on the coordinating machine, which can be a bottleneck. See the next sections speeding up this process.
 
 ### Using the `gold` linker
 
@@ -263,6 +321,24 @@ Linking Scylla can be slow. The gold linker can replace GNU ld and often speeds 
 ```bash
 $ sudo alternatives --config ld
 ```
+
+### Using split dwarf
+
+With debug info enabled, most of the link time is spent copying and
+relocating it. It is possible to leave most of the debug info out of
+the link by writing it to a side .dwo file. This is done by passing
+`-gsplit-dwarf` to gcc.
+
+Unfortunately just `-gsplit-dwarf` would slow down `gdb` startup. To
+avoid that the gold linker can be told to create an index with
+`--gdb-index`.
+
+More info at https://gcc.gnu.org/wiki/DebugFission.
+
+Both options can be enable by passing `--split-dwarf` to configure.py.
+
+Note that distcc is *not* compatible with it, but icecream
+(https://github.com/icecc/icecream) is.
 
 ### Testing changes in Seastar with Scylla
 
@@ -277,3 +353,8 @@ $ git remote add local /home/tsmith/src/seastar
 $ git remote update
 $ git checkout -t local/my_local_seastar_branch
 ```
+
+### Core dump debugging
+
+Slides:
+2018.11.20: https://www.slideshare.net/tomekgrabiec/scylla-core-dump-debugging-tools

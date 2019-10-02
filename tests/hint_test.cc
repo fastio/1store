@@ -28,16 +28,16 @@
 #include <unordered_set>
 
 #include "tests/test_services.hh"
-#include "tests/test-utils.hh"
+#include <seastar/testing/test_case.hh>
 
 #include "tests/mutation_source_test.hh"
 #include "tests/mutation_assertions.hh"
 
-#include "core/future-util.hh"
-#include "core/do_with.hh"
-#include "core/scollectd_api.hh"
-#include "core/file.hh"
-#include "core/reactor.hh"
+#include <seastar/core/future-util.hh>
+#include <seastar/core/do_with.hh>
+#include <seastar/core/scollectd_api.hh>
+#include <seastar/core/file.hh>
+#include <seastar/core/reactor.hh>
 #include "utils/UUID_gen.hh"
 #include "tmpdir.hh"
 #include "db/commitlog/commitlog.hh"
@@ -47,12 +47,11 @@
 
 using namespace db;
 
-template<typename Func>
-static future<> cl_test(commitlog::config cfg, Func && f) {
+static future<> cl_test(commitlog::config cfg, noncopyable_function<future<> (commitlog& log)> f) {
     tmpdir tmp;
-    cfg.commit_log_location = tmp.path;
-    return commitlog::create_commitlog(cfg).then([f = std::forward<Func>(f)](commitlog log) mutable {
-        return do_with(std::move(log), [f = std::forward<Func>(f)](commitlog& log) {
+    cfg.commit_log_location = tmp.path().string();
+    return commitlog::create_commitlog(cfg).then([f = std::move(f)](commitlog log) mutable {
+        return do_with(std::move(log), [f = std::move(f)](commitlog& log) {
             return futurize_apply(f, log).finally([&log] {
                 return log.shutdown().then([&log] {
                     return log.clear();

@@ -46,6 +46,18 @@
 #include <stdexcept>
 #include <string>
 
+#include "types/user.hh"
+#include "types/map.hh"
+#include "types/list.hh"
+#include "types/set.hh"
+
+class parse_exception : public exceptions::syntax_exception {
+public:
+    parse_exception(const sstring& src, size_t index, const sstring& msg)
+        : syntax_exception(format("Syntax error parsing '{}' at char {:d}: {}", src, index, msg))
+    {}
+};
+
 namespace db {
 
 namespace marshal {
@@ -85,25 +97,23 @@ data_type type_parser::do_parse(bool multicell)
 
     if (_str[_idx] == ':') {
         _idx++;
+        size_t pos = 0;
         try {
-            size_t pos;
             std::stoul(name, &pos, 0x10);
-            if (pos != name.size()) {
-                throw exceptions::syntax_exception(sprint("expected 8-byte hex number, found %s", name));
-            }
-        } catch (const std::invalid_argument & e) {
-            throw exceptions::syntax_exception(sprint("expected 8-byte hex number, found %s", name));
-        } catch (const std::out_of_range& e) {
-            throw exceptions::syntax_exception(sprint("expected 8-byte hex number, found %s", name));
+        } catch (...) {            
+        }
+        if (pos != name.size() || pos == 0) {
+            throw parse_exception(_str, _idx - 1 - name.size() + pos, "expected 8-byte hex number, found '" + name + "'");
         }
         name = read_next_identifier();
     }
 
     skip_blank();
-    if (!is_eos() && _str[_idx] == '(')
+    if (!is_eos() && _str[_idx] == '(') {
         return get_abstract_type(name, *this, multicell);
-    else
+    } else {
         return get_abstract_type(name);
+    }
 }
 
 std::vector<data_type> type_parser::get_type_parameters(bool multicell)
@@ -127,18 +137,9 @@ std::vector<data_type> type_parser::get_type_parameters(bool multicell)
             return list;
         }
 
-        try {
-            list.emplace_back(do_parse(multicell));
-        } catch (exceptions::syntax_exception& e) {
-            // FIXME
-#if 0
-            SyntaxException ex = new SyntaxException(String.format("Exception while parsing '%s' around char %d", str, idx));
-            ex.initCause(e);
-#endif
-            throw e;
-        }
+        list.emplace_back(do_parse(multicell));
     }
-    throw exceptions::syntax_exception(sprint("Syntax error parsing '%s' at char %d: unexpected end of string", _str, _idx));
+    throw parse_exception(_str, _idx, "unexpected end of string");
 }
 
 std::tuple<sstring, bytes, std::vector<bytes>, std::vector<data_type>> type_parser::get_user_type_parameters()
@@ -167,22 +168,13 @@ std::tuple<sstring, bytes, std::vector<bytes>, std::vector<data_type>> type_pars
         field_names.emplace_back(from_hex(read_next_identifier()));
 
         if (_str[_idx] != ':') {
-            throw exceptions::syntax_exception(sprint("expecting ':' token"));
+            throw parse_exception(_str, _idx, "expecting ':' token");
         }
         ++_idx;
 
-        try {
-            field_types.emplace_back(do_parse(true));
-        } catch (exceptions::syntax_exception& e) {
-            // FIXME
-#if 0
-            SyntaxException ex = new SyntaxException(String.format("Exception while parsing '%s' around char %d", str, idx));
-            ex.initCause(e);
-#endif
-            throw e;
-        }
+        field_types.emplace_back(do_parse(true));
     }
-    throw exceptions::syntax_exception(sprint("Syntax error parsing '%s' at char %d: unexpected end of string", _str, _idx));
+    throw parse_exception(_str, _idx, "unexpected end of string");
 }
 
 data_type type_parser::get_abstract_type(const sstring& compare_with)

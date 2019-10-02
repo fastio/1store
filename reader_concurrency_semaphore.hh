@@ -124,14 +124,27 @@ public:
 
         friend class reader_concurrency_semaphore;
 
-        inactive_read_handle() = default;
         explicit inactive_read_handle(uint64_t id)
             : _id(id) {
         }
     public:
+        inactive_read_handle() = default;
+        inactive_read_handle(inactive_read_handle&& o) : _id(std::exchange(o._id, 0)) {
+        }
+        inactive_read_handle& operator=(inactive_read_handle&& o) {
+            _id = std::exchange(o._id, 0);
+            return *this;
+        }
         explicit operator bool() const {
             return bool(_id);
         }
+    };
+
+    struct inactive_read_stats {
+        // The number of inactive reads evicted to free up permits.
+        uint64_t permit_based_evictions = 0;
+        // The number of inactive reads currently registered.
+        uint64_t population = 0;
     };
 
 private:
@@ -155,6 +168,7 @@ private:
     std::function<std::exception_ptr()> _make_queue_overloaded_exception;
     uint64_t _next_id = 1;
     std::map<uint64_t, std::unique_ptr<inactive_read>> _inactive_reads;
+    inactive_read_stats _inactive_read_stats;
 
 private:
     static std::exception_ptr default_make_queue_overloaded_exception() {
@@ -230,6 +244,10 @@ public:
 
     void clear_inactive_reads() {
         _inactive_reads.clear();
+    }
+
+    const inactive_read_stats& get_inactive_read_stats() const {
+        return _inactive_read_stats;
     }
 
     future<lw_shared_ptr<reader_permit>> wait_admission(size_t memory, db::timeout_clock::time_point timeout = db::no_timeout);

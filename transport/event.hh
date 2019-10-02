@@ -46,7 +46,7 @@
 #include <seastar/core/sstring.hh>
 #include <seastar/net/api.hh>
 
-#include <experimental/optional>
+#include <optional>
 #include <stdexcept>
 
 namespace cql_transport {
@@ -69,9 +69,9 @@ public:
     enum class change_type { NEW_NODE, REMOVED_NODE, MOVED_NODE };
 
     const change_type change;
-    const ipv4_addr node;
+    const socket_address node;
 
-    topology_change(change_type change, const ipv4_addr& node);
+    topology_change(change_type change, const socket_address& node);
 
     static topology_change new_node(const gms::inet_address& host, uint16_t port);
 
@@ -83,9 +83,9 @@ public:
     enum class status_type { UP, DOWN };
 
     const status_type status;
-    const ipv4_addr node;
+    const socket_address node;
 
-    status_change(status_type status, const ipv4_addr& node);
+    status_change(status_type status, const socket_address& node);
 
     static status_change node_up(const gms::inet_address& host, uint16_t port);
 
@@ -100,9 +100,9 @@ public:
     const change_type change;
     const target_type target;
     const sstring keyspace;
-    const std::experimental::optional<sstring> table_or_type_or_function;
+    const std::optional<sstring> table_or_type_or_function;
 
-    schema_change(const change_type change_, const target_type target_, const sstring& keyspace_, const std::experimental::optional<sstring>& table_or_type_or_function_);
+    schema_change(const change_type change_, const target_type target_, const sstring& keyspace_, const std::optional<sstring>& table_or_type_or_function_);
 
     schema_change(const change_type change_, const sstring keyspace_);
 };

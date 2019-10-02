@@ -33,8 +33,8 @@
 // a "compression_metadata" object, which also contains additional information
 // needed from decompression - such as the chunk size and compressor type.
 //
-// Cassandra supports three different compression algorithms for the chunks,
-// LZ4, Snappy, and Deflate - the default (and therefore most important) is
+// Cassandra supports four different compression algorithms for the chunks,
+// LZ4, Snappy, Deflate, and Zstd - the default (and therefore most important) is
 // LZ4. Each compressor is an implementation of the "compressor" class.
 //
 // Each compressed chunk is followed by a 4-byte checksum of the compressed
@@ -56,6 +56,7 @@
 #include <seastar/core/fstream.hh>
 
 #include "types.hh"
+#include "sstables/types.hh"
 #include "checksum_utils.hh"
 #include "../compress.hh"
 
@@ -365,6 +366,9 @@ public:
 
     friend class sstable;
 };
+
+// for API query only. Free function just to distinguish it from an accessor in compression
+compressor_ptr get_sstable_compressor(const compression&);
 
 // Note: compression_metadata is passed by reference; The caller is
 // responsible for keeping the compression_metadata alive as long as there

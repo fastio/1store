@@ -21,11 +21,12 @@
 
 #include "server.hh"
 #include "handler.hh"
-#include "core/future-util.hh"
-#include "core/circular_buffer.hh"
+#include <seastar/core/future-util.hh>
+#include <seastar/core/circular_buffer.hh>
 #include <seastar/core/metrics.hh>
-#include "net/byteorder.hh"
-#include "core/scattered_message.hh"
+#include <seastar/net/byteorder.hh>
+#include <seastar/core/scattered_message.hh>
+#include <seastar/core/sleep.hh>
 #include "log.hh"
 #include <thrift/server/TServer.h>
 #include <thrift/transport/TBufferTransports.h>
@@ -40,7 +41,10 @@
 #include <limits>
 #include <cctype>
 #include <vector>
+
+#ifdef THRIFT_USES_BOOST
 #include <boost/make_shared.hpp>
+#endif
 
 static logging::logger tlogger("thrift");
 
@@ -61,9 +65,10 @@ public:
 thrift_server::thrift_server(distributed<database>& db,
                              distributed<cql3::query_processor>& qp,
                              auth::service& auth_service,
+                             const cql3::cql_config& cql_config,
                              thrift_server_config config)
         : _stats(new thrift_stats(*this))
-        , _handler_factory(create_handler_factory(db, qp, auth_service, config.timeout_config).release())
+        , _handler_factory(create_handler_factory(db, qp, auth_service, cql_config, config.timeout_config).release())
         , _protocol_factory(new TBinaryProtocolFactoryT<TMemoryBuffer>())
         , _processor_factory(new CassandraAsyncProcessorFactory(_handler_factory))
         , _config(config) {
@@ -96,9 +101,9 @@ struct thrift_server::connection::fake_transport : TTransport {
 thrift_server::connection::connection(thrift_server& server, connected_socket&& fd, socket_address addr)
         : _server(server), _fd(std::move(fd)), _read_buf(_fd.input())
         , _write_buf(_fd.output())
-        , _transport(boost::make_shared<thrift_server::connection::fake_transport>(this))
-        , _input(boost::make_shared<TMemoryBuffer>())
-        , _output(boost::make_shared<TMemoryBuffer>())
+        , _transport(thrift_std::make_shared<thrift_server::connection::fake_transport>(this))
+        , _input(thrift_std::make_shared<TMemoryBuffer>())
+        , _output(thrift_std::make_shared<TMemoryBuffer>())
         , _in_proto(_server._protocol_factory->getProtocol(_input))
         , _out_proto(_server._protocol_factory->getProtocol(_output))
         , _processor(_server._processor_factory->getProcessor({ _in_proto, _out_proto, _transport })) {
@@ -212,10 +217,10 @@ thrift_server::connection::shutdown() {
 }
 
 future<>
-thrift_server::listen(ipv4_addr addr, bool keepalive) {
+thrift_server::listen(socket_address addr, bool keepalive) {
     listen_options lo;
     lo.reuse_address = true;
-    _listeners.push_back(engine().listen(make_ipv4_address(addr), lo));
+    _listeners.push_back(engine().listen(addr, lo));
     do_accepts(_listeners.size() - 1, keepalive);
     return make_ready_future<>();
 }
@@ -225,11 +230,14 @@ thrift_server::do_accepts(int which, bool keepalive) {
     if (_stop_gate.is_closed()) {
         return;
     }
-    with_gate(_stop_gate, [&, this] {
-        return _listeners[which].accept().then([this, which, keepalive] (connected_socket fd, socket_address addr) {
+    // Future is waited on indirectly in `stop()` (via `_stop_gate`).
+    (void)with_gate(_stop_gate, [&, this] {
+        return _listeners[which].accept().then([this, which, keepalive] (accept_result ar) {
+            auto&& [fd, addr] = ar;
             fd.set_nodelay(true);
             fd.set_keepalive(keepalive);
-            with_gate(_stop_gate, [&, this] {
+            // Future is waited on indirectly in `stop()` (via `_stop_gate`).
+            (void)with_gate(_stop_gate, [&, this] {
                 return do_with(connection(*this, std::move(fd), addr), [this] (auto& conn) {
                     return conn.process().then_wrapped([this, &conn] (future<> f) {
                         conn.shutdown();
@@ -256,7 +264,8 @@ void thrift_server::maybe_retry_accept(int which, bool keepalive, std::exception
     };
     auto retry_with_backoff = [&] {
         // FIXME: Consider using exponential backoff
-        sleep(1ms).then([retry = std::move(retry)] { retry(); });
+        // Done in the background.
+        (void)sleep(1ms).then([retry = std::move(retry)] { retry(); });
     };
     try {
         std::rethrow_exception(std::move(ex));

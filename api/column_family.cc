@@ -22,10 +22,14 @@
 #include "column_family.hh"
 #include "api/api-doc/column_family.json.hh"
 #include <vector>
-#include "http/exception.hh"
+#include <seastar/http/exception.hh>
 #include "sstables/sstables.hh"
 #include "utils/estimated_histogram.hh"
 #include <algorithm>
+#include "db/system_keyspace_view_types.hh"
+#include "db/data_listeners.hh"
+
+extern logging::logger apilog;
 
 namespace api {
 using namespace httpd;
@@ -34,7 +38,7 @@ using namespace std;
 using namespace json;
 namespace cf = httpd::column_family_json;
 
-const utils::UUID& get_uuid(const sstring& name, const database& db) {
+std::tuple<sstring, sstring> parse_fully_qualified_cf_name(sstring name) {
     auto pos = name.find("%3A");
     size_t end;
     if (pos == sstring::npos) {
@@ -46,12 +50,20 @@ const utils::UUID& get_uuid(const sstring& name, const database& db) {
     } else {
         end = pos + 3;
     }
+    return std::make_tuple(name.substr(0, pos), name.substr(end));
+}
+
+const utils::UUID& get_uuid(const sstring& ks, const sstring& cf, const database& db) {
     try {
-        return db.find_uuid(name.substr(0, pos), name.substr(end));
+        return db.find_uuid(ks, cf);
     } catch (std::out_of_range& e) {
-        throw bad_param_exception("Column family '" + name.substr(0, pos) + ":"
-                + name.substr(end) + "' not found");
+        throw bad_param_exception(format("Column family '{}:{}' not found", ks, cf));
     }
+}
+
+const utils::UUID& get_uuid(const sstring& name, const database& db) {
+    auto [ks, cf] = parse_fully_qualified_cf_name(name);
+    return get_uuid(ks, cf, db);
 }
 
 future<> foreach_column_family(http_context& ctx, const sstring& name, function<void(column_family&)> f) {
@@ -166,27 +178,27 @@ static future<json::json_return_type> get_cf_unleveled_sstables(http_context& ct
     }, std::plus<int64_t>());
 }
 
-static int64_t min_row_size(column_family& cf) {
+static int64_t min_partition_size(column_family& cf) {
     int64_t res = INT64_MAX;
     for (auto i: *cf.get_sstables() ) {
-        res = std::min(res, i->get_stats_metadata().estimated_row_size.min());
+        res = std::min(res, i->get_stats_metadata().estimated_partition_size.min());
     }
     return (res == INT64_MAX) ? 0 : res;
 }
 
-static int64_t max_row_size(column_family& cf) {
+static int64_t max_partition_size(column_family& cf) {
     int64_t res = 0;
     for (auto i: *cf.get_sstables() ) {
-        res = std::max(i->get_stats_metadata().estimated_row_size.max(), res);
+        res = std::max(i->get_stats_metadata().estimated_partition_size.max(), res);
     }
     return res;
 }
 
-static integral_ratio_holder mean_row_size(column_family& cf) {
+static integral_ratio_holder mean_partition_size(column_family& cf) {
     integral_ratio_holder res;
     for (auto i: *cf.get_sstables() ) {
-        auto c = i->get_stats_metadata().estimated_row_size.count();
-        res.sub += i->get_stats_metadata().estimated_row_size.mean() * c;
+        auto c = i->get_stats_metadata().estimated_partition_size.count();
+        res.sub += i->get_stats_metadata().estimated_partition_size.mean() * c;
         res.total += c;
     }
     return res;
@@ -242,12 +254,11 @@ class sum_ratio {
     uint64_t _n = 0;
     T _total = 0;
 public:
-    future<> operator()(T value) {
+    void operator()(T value) {
         if (value > 0) {
             _total += value;
             _n++;
         }
-        return make_ready_future<>();
     }
     // Returns average value of all registered ratios.
     T get() && {
@@ -403,22 +414,24 @@ void set_column_family(http_context& ctx, routes& r) {
         return get_cf_stats(ctx, &column_family::stats::memtable_switch_count);
     });
 
+    // FIXME: this refers to partitions, not rows.
     cf::get_estimated_row_size_histogram.set(r, [&ctx] (std::unique_ptr<request> req) {
         return map_reduce_cf(ctx, req->param["name"], utils::estimated_histogram(0), [](column_family& cf) {
             utils::estimated_histogram res(0);
             for (auto i: *cf.get_sstables() ) {
-                res.merge(i->get_stats_metadata().estimated_row_size);
+                res.merge(i->get_stats_metadata().estimated_partition_size);
             }
             return res;
         },
         utils::estimated_histogram_merge, utils_json::estimated_histogram());
     });
 
+    // FIXME: this refers to partitions, not rows.
     cf::get_estimated_row_count.set(r, [&ctx] (std::unique_ptr<request> req) {
         return map_reduce_cf(ctx, req->param["name"], int64_t(0), [](column_family& cf) {
             uint64_t res = 0;
             for (auto i: *cf.get_sstables() ) {
-                res += i->get_stats_metadata().estimated_row_size.count();
+                res += i->get_stats_metadata().estimated_partition_size.count();
             }
             return res;
         },
@@ -546,30 +559,36 @@ void set_column_family(http_context& ctx, routes& r) {
         return sum_sstable(ctx, true);
     });
 
+    // FIXME: this refers to partitions, not rows.
     cf::get_min_row_size.set(r, [&ctx] (std::unique_ptr<request> req) {
-        return map_reduce_cf(ctx, req->param["name"], INT64_MAX, min_row_size, min_int64);
+        return map_reduce_cf(ctx, req->param["name"], INT64_MAX, min_partition_size, min_int64);
     });
 
+    // FIXME: this refers to partitions, not rows.
     cf::get_all_min_row_size.set(r, [&ctx] (std::unique_ptr<request> req) {
-        return map_reduce_cf(ctx, INT64_MAX, min_row_size, min_int64);
+        return map_reduce_cf(ctx, INT64_MAX, min_partition_size, min_int64);
     });
 
+    // FIXME: this refers to partitions, not rows.
     cf::get_max_row_size.set(r, [&ctx] (std::unique_ptr<request> req) {
-        return map_reduce_cf(ctx, req->param["name"], int64_t(0), max_row_size, max_int64);
+        return map_reduce_cf(ctx, req->param["name"], int64_t(0), max_partition_size, max_int64);
     });
 
+    // FIXME: this refers to partitions, not rows.
     cf::get_all_max_row_size.set(r, [&ctx] (std::unique_ptr<request> req) {
-        return map_reduce_cf(ctx, int64_t(0), max_row_size, max_int64);
+        return map_reduce_cf(ctx, int64_t(0), max_partition_size, max_int64);
     });
 
+    // FIXME: this refers to partitions, not rows.
     cf::get_mean_row_size.set(r, [&ctx] (std::unique_ptr<request> req) {
         // Cassandra 3.x mean values are truncated as integrals.
-        return map_reduce_cf(ctx, req->param["name"], integral_ratio_holder(), mean_row_size, std::plus<integral_ratio_holder>());
+        return map_reduce_cf(ctx, req->param["name"], integral_ratio_holder(), mean_partition_size, std::plus<integral_ratio_holder>());
     });
 
+    // FIXME: this refers to partitions, not rows.
     cf::get_all_mean_row_size.set(r, [&ctx] (std::unique_ptr<request> req) {
         // Cassandra 3.x mean values are truncated as integrals.
-        return map_reduce_cf(ctx, integral_ratio_holder(), mean_row_size, std::plus<integral_ratio_holder>());
+        return map_reduce_cf(ctx, integral_ratio_holder(), mean_partition_size, std::plus<integral_ratio_holder>());
     });
 
     cf::get_bloom_filter_false_positives.set(r, [&ctx] (std::unique_ptr<request> req) {
@@ -827,12 +846,27 @@ void set_column_family(http_context& ctx, routes& r) {
         return true;
     });
 
-    cf::get_built_indexes.set(r, [](const_req) {
-        // FIXME
-        // Currently there are no index support
-        return std::vector<sstring>();
+    cf::get_built_indexes.set(r, [&ctx](std::unique_ptr<request> req) {
+        auto [ks, cf_name] = parse_fully_qualified_cf_name(req->param["name"]);
+        return db::system_keyspace::load_view_build_progress().then([ks, cf_name, &ctx](const std::vector<db::system_keyspace::view_build_progress>& vb) mutable {
+            std::set<sstring> vp;
+            for (auto b : vb) {
+                if (b.view.first == ks) {
+                    vp.insert(b.view.second);
+                }
+            }
+            std::vector<sstring> res;
+            auto uuid = get_uuid(ks, cf_name, ctx.db.local());
+            column_family& cf = ctx.db.local().find_column_family(uuid);
+            res.reserve(cf.get_index_manager().list_indexes().size());
+            for (auto&& i : cf.get_index_manager().list_indexes()) {
+                if (vp.find(secondary_index::index_table_name(i.metadata().name())) == vp.end()) {
+                    res.emplace_back(i.metadata().name());
+                }
+            }
+            return make_ready_future<json::json_return_type>(res);
+        });
     });
-
 
     cf::get_compression_metadata_off_heap_memory_used.set(r, [](const_req) {
         // FIXME
@@ -920,5 +954,45 @@ void set_column_family(http_context& ctx, routes& r) {
             return make_ready_future<json::json_return_type>(container_to_vec(res));
         });
     });
+
+    cf::toppartitions.set(r, [&ctx] (std::unique_ptr<request> req) {
+        auto name_param = req->param["name"];
+        auto [ks, cf] = parse_fully_qualified_cf_name(name_param);
+
+        api::req_param<std::chrono::milliseconds, unsigned> duration{*req, "duration", 1000ms};
+        api::req_param<unsigned> capacity(*req, "capacity", 256);
+        api::req_param<unsigned> list_size(*req, "list_size", 10);
+
+        apilog.info("toppartitions query: name={} duration={} list_size={} capacity={}",
+            name_param, duration.param, list_size.param, capacity.param);
+
+        return seastar::do_with(db::toppartitions_query(ctx.db, ks, cf, duration.value, list_size, capacity), [&ctx](auto& q) {
+            return q.scatter().then([&q] {
+                return sleep(q.duration()).then([&q] {
+                    return q.gather(q.capacity()).then([&q] (auto topk_results) {
+                        apilog.debug("toppartitions query: processing results");
+                        cf::toppartitions_query_results results;
+
+                        for (auto& d: topk_results.read.top(q.list_size())) {
+                            cf::toppartitions_record r;
+                            r.partition = sstring(d.item);
+                            r.count = d.count;
+                            r.error = d.error;
+                            results.read.push(r);
+                        }
+                        for (auto& d: topk_results.write.top(q.list_size())) {
+                            cf::toppartitions_record r;
+                            r.partition = sstring(d.item);
+                            r.count = d.count;
+                            r.error = d.error;
+                            results.write.push(r);
+                        }
+                        return make_ready_future<json::json_return_type>(results);
+                    });
+                });
+            });
+        });
+    });
+
 }
 }

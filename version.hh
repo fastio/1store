@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "core/sstring.hh"
-#include "core/print.hh"
+#include <seastar/core/sstring.hh>
+#include <seastar/core/print.hh>
 #include <tuple>
 
 #include "seastarx.hh"
@@ -35,7 +35,7 @@ public:
     version(uint16_t x, uint16_t y = 0, uint16_t z = 0): _version(std::make_tuple(x, y, z)) {}
 
     sstring to_sstring() {
-        return sprint("%d.%d.%d", std::get<0>(_version), std::get<1>(_version), std::get<2>(_version));
+        return format("{:d}.{:d}.{:d}", std::get<0>(_version), std::get<1>(_version), std::get<2>(_version));
     }
 
     static version current() {

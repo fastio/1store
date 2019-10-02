@@ -19,15 +19,20 @@
  * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <boost/range/algorithm/transform.hpp>
+#include <iterator>
 #include <seastar/core/thread.hh>
 #include <seastar/util/defer.hh>
 #include <sstables/sstables.hh>
-#include "core/do_with.hh"
+#include <seastar/core/do_with.hh>
 #include "cql_test_env.hh"
 #include "cql3/query_processor.hh"
 #include "cql3/query_options.hh"
-#include "core/distributed.hh"
-#include "core/shared_ptr.hh"
+#include "cql3/statements/batch_statement.hh"
+#include "cql3/cql_config.hh"
+#include <seastar/core/distributed.hh>
+#include <seastar/core/abort_source.hh>
+#include <seastar/core/shared_ptr.hh>
 #include "utils/UUID_gen.hh"
 #include "service/migration_manager.hh"
 #include "sstables/compaction_manager.hh"
@@ -42,17 +47,34 @@
 #include "test_services.hh"
 #include "db/view/view_builder.hh"
 #include "db/view/node_view_update_backlog.hh"
+#include "distributed_loader.hh"
 
 // TODO: remove (#293)
 #include "message/messaging_service.hh"
-#include "gms/failure_detector.hh"
 #include "gms/gossiper.hh"
+#include "gms/feature_service.hh"
 #include "service/storage_service.hh"
 #include "auth/service.hh"
 #include "db/system_keyspace.hh"
 #include "db/system_distributed_keyspace.hh"
 
 using namespace std::chrono_literals;
+
+cql_test_config::cql_test_config()
+    : cql_test_config(make_shared<db::config>())
+{}
+
+cql_test_config::cql_test_config(shared_ptr<db::config> cfg)
+    : db_config(cfg)
+{
+    // This causes huge amounts of commitlog writes to allocate space on disk,
+    // which all get thrown away when the test is done. This can cause timeouts
+    // if /tmp is not tmpfs.
+    db_config->commitlog_use_o_dsync.set(false);
+}
+
+cql_test_config::cql_test_config(const cql_test_config&) = default;
+cql_test_config::~cql_test_config() = default;
 
 namespace sstables {
 
@@ -62,8 +84,7 @@ future<> await_background_jobs_on_all_shards();
 
 static const sstring testing_superuser = "tester";
 
-static future<> tst_init_ms_fd_gossiper(db::seed_provider_type seed_provider, sstring cluster_name = "Test Cluster") {
-    return gms::get_failure_detector().start().then([seed_provider, cluster_name] {
+static future<> tst_init_ms_fd_gossiper(sharded<gms::feature_service>& features, db::config& cfg, db::seed_provider_type seed_provider, sstring cluster_name = "Test Cluster") {
         // Init gossiper
         std::set<gms::inet_address> seeds;
         if (seed_provider.parameters.count("seeds") > 0) {
@@ -78,12 +99,11 @@ static future<> tst_init_ms_fd_gossiper(db::seed_provider_type seed_provider, ss
         if (seeds.empty()) {
             seeds.emplace(gms::inet_address("127.0.0.1"));
         }
-        return gms::get_gossiper().start().then([seeds, cluster_name] {
+        return gms::get_gossiper().start(std::ref(features), std::ref(cfg)).then([seeds, cluster_name] {
             auto& gossiper = gms::get_local_gossiper();
             gossiper.set_seeds(seeds);
             gossiper.set_cluster_name(cluster_name);
         });
-    });
 }
 // END TODO
 
@@ -92,17 +112,17 @@ public:
     static const char* ks_name;
     static std::atomic<bool> active;
 private:
+    shared_ptr<sharded<gms::feature_service>> _feature_service;
     ::shared_ptr<distributed<database>> _db;
     ::shared_ptr<sharded<auth::service>> _auth_service;
     ::shared_ptr<sharded<db::view::view_builder>> _view_builder;
-    ::shared_ptr<sharded<db::view::view_update_from_staging_generator>> _view_update_generator;
-    lw_shared_ptr<tmpdir> _data_dir;
+    ::shared_ptr<sharded<db::view::view_update_generator>> _view_update_generator;
 private:
     struct core_local_state {
         service::client_state client_state;
 
         core_local_state(auth::service& auth_service)
-            : client_state(service::client_state::for_external_calls(auth_service))
+            : client_state(service::client_state::external_tag{}, auth_service)
         {
             client_state.set_login(::make_shared<auth::authenticated_user>(testing_superuser));
         }
@@ -115,17 +135,19 @@ private:
 private:
     auto make_query_state() {
         if (_db->local().has_keyspace(ks_name)) {
-            _core_local.local().client_state.set_keyspace(*_db, ks_name);
+            _core_local.local().client_state.set_keyspace(_db->local(), ks_name);
         }
-        return ::make_shared<service::query_state>(_core_local.local().client_state);
+        return ::make_shared<service::query_state>(_core_local.local().client_state, empty_service_permit());
     }
 public:
     single_node_cql_env(
+            shared_ptr<sharded<gms::feature_service>> feature_service,
             ::shared_ptr<distributed<database>> db,
             ::shared_ptr<sharded<auth::service>> auth_service,
             ::shared_ptr<sharded<db::view::view_builder>> view_builder,
-            ::shared_ptr<sharded<db::view::view_update_from_staging_generator>> view_update_generator)
-            : _db(db)
+            ::shared_ptr<sharded<db::view::view_update_generator>> view_update_generator)
+            : _feature_service(std::move(feature_service))
+            , _db(db)
             , _auth_service(std::move(auth_service))
             , _view_builder(std::move(view_builder))
             , _view_update_generator(std::move(view_update_generator))
@@ -133,9 +155,7 @@ public:
 
     virtual future<::shared_ptr<cql_transport::messages::result_message>> execute_cql(const sstring& text) override {
         auto qs = make_query_state();
-        return local_qp().process(text, *qs, cql3::query_options::DEFAULT).finally([qs, this] {
-            _core_local.local().client_state.merge(qs->get_client_state());
-        });
+        return local_qp().process(text, *qs, cql3::query_options::DEFAULT).finally([qs] {});
     }
 
     virtual future<::shared_ptr<cql_transport::messages::result_message>> execute_cql(
@@ -144,9 +164,7 @@ public:
     {
         auto qs = make_query_state();
         auto& lqo = *qo;
-        return local_qp().process(text, *qs, lqo).finally([qs, qo = std::move(qo), this] {
-            _core_local.local().client_state.merge(qs->get_client_state());
-        });
+        return local_qp().process(text, *qs, lqo).finally([qs, qo = std::move(qo)] {});
     }
 
     virtual future<cql3::prepared_cache_key_type> prepare(sstring query) override {
@@ -160,7 +178,8 @@ public:
 
     virtual future<::shared_ptr<cql_transport::messages::result_message>> execute_prepared(
         cql3::prepared_cache_key_type id,
-        std::vector<cql3::raw_value> values) override
+        std::vector<cql3::raw_value> values,
+        db::consistency_level cl) override
     {
         auto prepared = local_qp().get_prepared(id);
         if (!prepared) {
@@ -169,14 +188,12 @@ public:
         auto stmt = prepared->statement;
         assert(stmt->get_bound_terms() == values.size());
 
-        auto options = ::make_shared<cql3::query_options>(std::move(values));
+        auto options = ::make_shared<cql3::query_options>(cl, infinite_timeout_config, std::move(values));
         options->prepare(prepared->bound_names);
 
         auto qs = make_query_state();
         return local_qp().process_statement_prepared(std::move(prepared), std::move(id), *qs, *options, true)
-            .finally([options, qs, this] {
-                _core_local.local().client_state.merge(qs->get_client_state());
-            });
+            .finally([options, qs] {});
     }
 
     virtual future<> create_table(std::function<schema(const sstring&)> schema_maker) override {
@@ -274,7 +291,7 @@ public:
         return _view_builder->local();
     }
 
-    virtual db::view::view_update_from_staging_generator& local_view_update_generator() override {
+    virtual db::view::view_update_generator& local_view_update_generator() override {
         return _view_update_generator->local();
     }
 
@@ -287,12 +304,14 @@ public:
     }
 
     future<> create_keyspace(sstring name) {
-        auto query = sprint("create keyspace %s with replication = { 'class' : 'org.apache.cassandra.locator.SimpleStrategy', 'replication_factor' : 1 };", name);
+        auto query = format("create keyspace {} with replication = {{ 'class' : 'org.apache.cassandra.locator.SimpleStrategy', 'replication_factor' : 1 }};", name);
         return execute_cql(query).discard_result();
     }
 
-    static future<> do_with(std::function<future<>(cql_test_env&)> func, const db::config& cfg_in) {
-        return seastar::async([cfg_in, func] {
+    static future<> do_with(std::function<future<>(cql_test_env&)> func, cql_test_config cfg_in) {
+        using namespace std::filesystem;
+
+        return seastar::async([cfg_in = std::move(cfg_in), func] {
             logalloc::prime_segment_pool(memory::stats().total_memory(), memory::min_free_memory()).get();
             bool old_active = false;
             if (!active.compare_exchange_strong(old_active, true)) {
@@ -311,28 +330,36 @@ public:
 
             auto wait_for_background_jobs = defer([] { sstables::await_background_jobs_on_all_shards().get(); });
 
+            sharded<abort_source> abort_sources;
+            abort_sources.start().get();
+            auto stop_abort_sources = defer([&] { abort_sources.stop().get(); });
             auto db = ::make_shared<distributed<database>>();
-            auto cfg = make_lw_shared<db::config>(std::move(cfg_in));
+            auto cfg = cfg_in.db_config;
             tmpdir data_dir;
+            auto data_dir_path = data_dir.path().string();
             if (!cfg->data_file_directories.is_set()) {
-                cfg->data_file_directories() = {data_dir.path};
+                cfg->data_file_directories.set({data_dir_path});
+            } else {
+                data_dir_path = cfg->data_file_directories()[0];
             }
-            cfg->commitlog_directory() = data_dir.path + "/commitlog.dir";
-            cfg->hints_directory() = data_dir.path + "/hints.dir";
-            cfg->view_hints_directory() = data_dir.path + "/view_hints.dir";
-            cfg->num_tokens() = 256;
-            cfg->ring_delay_ms() = 500;
-            cfg->experimental() = true;
-            cfg->shutdown_announce_in_ms() = 0;
-            boost::filesystem::create_directories((data_dir.path + "/system").c_str());
-            boost::filesystem::create_directories(cfg->commitlog_directory().c_str());
-            boost::filesystem::create_directories(cfg->hints_directory().c_str());
-            boost::filesystem::create_directories(cfg->view_hints_directory().c_str());
+            cfg->commitlog_directory.set(data_dir_path + "/commitlog.dir");
+            cfg->hints_directory.set(data_dir_path + "/hints.dir");
+            cfg->view_hints_directory.set(data_dir_path + "/view_hints.dir");
+            cfg->num_tokens.set(256);
+            cfg->ring_delay_ms.set(500);
+            cfg->experimental.set(true);
+            cfg->shutdown_announce_in_ms.set(0);
+            cfg->broadcast_to_all_shards().get();
+            create_directories((data_dir_path + "/system").c_str());
+            create_directories(cfg->commitlog_directory().c_str());
+            create_directories(cfg->hints_directory().c_str());
+            create_directories(cfg->view_hints_directory().c_str());
             for (unsigned i = 0; i < smp::count; ++i) {
-                boost::filesystem::create_directories((cfg->hints_directory() + "/" + std::to_string(i)).c_str());
-                boost::filesystem::create_directories((cfg->view_hints_directory() + "/" + std::to_string(i)).c_str());
+                create_directories((cfg->hints_directory() + "/" + std::to_string(i)).c_str());
+                create_directories((cfg->view_hints_directory() + "/" + std::to_string(i)).c_str());
             }
 
+            set_abort_on_internal_error(true);
             const gms::inet_address listen("127.0.0.1");
             auto& ms = netw::get_messaging_service();
             // don't start listening so tests can be run in parallel
@@ -343,13 +370,31 @@ public:
             auto sys_dist_ks = seastar::sharded<db::system_distributed_keyspace>();
             auto stop_sys_dist_ks = defer([&sys_dist_ks] { sys_dist_ks.stop().get(); });
 
+            auto feature_service = make_shared<sharded<gms::feature_service>>();
+            feature_service->start().get();
+            auto stop_feature_service = defer([&] { feature_service->stop().get(); });
+
+            // FIXME: split
+            tst_init_ms_fd_gossiper(*feature_service, *cfg, db::config::seed_provider_type()).get();
+
+            distributed<service::storage_proxy>& proxy = service::get_storage_proxy();
+            distributed<service::migration_manager>& mm = service::get_migration_manager();
+            distributed<db::batchlog_manager>& bm = db::get_batchlog_manager();
+            sharded<cql3::cql_config> cql_config;
+            cql_config.start().get();
+            auto stop_cql_config = defer([&] { cql_config.stop().get(); });
+
+            auto view_update_generator = ::make_shared<seastar::sharded<db::view::view_update_generator>>();
+
             auto& ss = service::get_storage_service();
-            ss.start(std::ref(*db), std::ref(*auth_service), std::ref(sys_dist_ks)).get();
+            service::storage_service_config sscfg;
+            sscfg.available_memory = memory::stats().total_memory();
+            ss.start(std::ref(abort_sources), std::ref(*db), std::ref(gms::get_gossiper()), std::ref(*auth_service), std::ref(cql_config), std::ref(sys_dist_ks), std::ref(*view_update_generator), std::ref(*feature_service), sscfg, true, cfg_in.disabled_features).get();
             auto stop_storage_service = defer([&ss] { ss.stop().get(); });
 
             database_config dbcfg;
             dbcfg.available_memory = memory::stats().total_memory();
-            db->start(std::move(*cfg), dbcfg).get();
+            db->start(std::ref(*cfg), dbcfg).get();
             auto stop_db = defer([db] {
                 db->stop().get();
             });
@@ -358,20 +403,13 @@ public:
                 db.get_compaction_manager().start();
             }).get();
 
-            // FIXME: split
-            tst_init_ms_fd_gossiper(db::config::seed_provider_type()).get();
             auto stop_ms_fd_gossiper = defer([] {
                 gms::get_gossiper().stop().get();
-                gms::get_failure_detector().stop().get();
             });
 
             ss.invoke_on_all([] (auto&& ss) {
                 ss.enable_all_features();
             }).get();
-
-            distributed<service::storage_proxy>& proxy = service::get_storage_proxy();
-            distributed<service::migration_manager>& mm = service::get_migration_manager();
-            distributed<db::batchlog_manager>& bm = db::get_batchlog_manager();
 
             service::storage_proxy::config spcfg;
             spcfg.available_memory = memory::stats().total_memory();
@@ -387,8 +425,19 @@ public:
             qp.start(std::ref(proxy), std::ref(*db), qp_mcfg).get();
             auto stop_qp = defer([&qp] { qp.stop().get(); });
 
-            bm.start(std::ref(qp)).get();
+            db::batchlog_manager_config bmcfg;
+            bmcfg.replay_rate = 100000000;
+            bmcfg.write_request_timeout = 2s;
+            bm.start(std::ref(qp), bmcfg).get();
             auto stop_bm = defer([&bm] { bm.stop().get(); });
+
+            // FIXME: discarded future.
+            (void)view_update_generator->start(std::ref(*db), std::ref(proxy));
+            // FIXME: discarded future.
+            (void)view_update_generator->invoke_on_all(&db::view::view_update_generator::start);
+            auto stop_view_update_generator = defer([view_update_generator] {
+                view_update_generator->stop().get();
+            });
 
             distributed_loader::init_system_keyspace(*db).get();
 
@@ -402,9 +451,14 @@ public:
             // minimal_setup and init_local_cache
             db::system_keyspace::minimal_setup(*db, qp);
             auto stop_system_keyspace = defer([] { db::qctx = {}; });
+            auto stop_database_d = defer([db] {
+                stop_database(*db).get();
+            });
 
             db::system_keyspace::init_local_cache().get();
             auto stop_local_cache = defer([] { db::system_keyspace::deinit_local_cache().get(); });
+
+            db::system_keyspace::migrate_truncation_records().get();
 
             service::get_local_storage_service().init_messaging_service_part().get();
             service::get_local_storage_service().init_server_without_the_messaging_service_part(service::bind_messaging_port(false)).get();
@@ -435,13 +489,7 @@ public:
                 // The default user may already exist if this `cql_test_env` is starting with previously populated data.
             }
 
-            auto view_update_generator = ::make_shared<seastar::sharded<db::view::view_update_from_staging_generator>>();
-            view_update_generator->start(std::ref(*db), std::ref(proxy));
-            view_update_generator->invoke_on_all(&db::view::view_update_from_staging_generator::start);
-            auto stop_view_update_generator = defer([view_update_generator] {
-                view_update_generator->stop().get();
-            });
-            single_node_cql_env env(db, auth_service, view_builder, view_update_generator);
+            single_node_cql_env env(feature_service, db, auth_service, view_builder, view_update_generator);
             env.start().get();
             auto stop_env = defer([&env] { env.stop().get(); });
 
@@ -452,53 +500,42 @@ public:
             func(env).get();
         });
     }
+
+    future<::shared_ptr<cql_transport::messages::result_message>> execute_batch(
+        const std::vector<sstring_view>& queries, std::unique_ptr<cql3::query_options> qo) override {
+        using cql3::statements::batch_statement;
+        using cql3::statements::modification_statement;
+        std::vector<batch_statement::single_statement> modifications;
+        boost::transform(queries, back_inserter(modifications), [this](const auto& query) {
+            auto stmt = local_qp().get_statement(query, _core_local.local().client_state);
+            if (!dynamic_cast<modification_statement*>(stmt->statement.get())) {
+                throw exceptions::invalid_request_exception(
+                    "Invalid statement in batch: only UPDATE, INSERT and DELETE statements are allowed.");
+            }
+            return batch_statement::single_statement(static_pointer_cast<modification_statement>(stmt->statement));
+        });
+        auto batch = ::make_shared<batch_statement>(
+            batch_statement::type::UNLOGGED,
+            std::move(modifications),
+            cql3::attributes::none(),
+            local_qp().get_cql_stats());
+        auto qs = make_query_state();
+        auto& lqo = *qo;
+        return local_qp().process_batch(batch, *qs, lqo, {}).finally([qs, batch, qo = std::move(qo)] {});
+    }
 };
 
 const char* single_node_cql_env::ks_name = "ks";
 std::atomic<bool> single_node_cql_env::active = { false };
 
-future<> do_with_cql_env(std::function<future<>(cql_test_env&)> func, const db::config& cfg_in) {
-    return single_node_cql_env::do_with(func, cfg_in);
+future<> do_with_cql_env(std::function<future<>(cql_test_env&)> func, cql_test_config cfg_in) {
+    return single_node_cql_env::do_with(func, std::move(cfg_in));
 }
 
-future<> do_with_cql_env(std::function<future<>(cql_test_env&)> func) {
-    return do_with_cql_env(std::move(func), db::config{});
-}
-
-future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func, const db::config& cfg_in) {
+future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func, cql_test_config cfg_in) {
     return single_node_cql_env::do_with([func = std::move(func)] (auto& e) {
         return seastar::async([func = std::move(func), &e] {
             return func(e);
         });
-    }, cfg_in);
+    }, std::move(cfg_in));
 }
-
-future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func) {
-    return do_with_cql_env_thread(std::move(func), db::config{});
-}
-
-class storage_service_for_tests::impl {
-    distributed<database> _db;
-    sharded<auth::service> _auth_service;
-    sharded<db::system_distributed_keyspace> _sys_dist_ks;
-public:
-    impl() {
-        auto thread = seastar::thread_impl::get();
-        assert(thread);
-        netw::get_messaging_service().start(gms::inet_address("127.0.0.1"), 7000, false).get();
-        service::get_storage_service().start(std::ref(_db), std::ref(_auth_service), std::ref(_sys_dist_ks)).get();
-        service::get_storage_service().invoke_on_all([] (auto& ss) {
-            ss.enable_all_features();
-        }).get();
-    }
-    ~impl() {
-        service::get_storage_service().stop().get();
-        netw::get_messaging_service().stop().get();
-        _db.stop().get();
-    }
-};
-
-storage_service_for_tests::storage_service_for_tests() : _impl(std::make_unique<impl>()) {
-}
-
-storage_service_for_tests::~storage_service_for_tests() = default;

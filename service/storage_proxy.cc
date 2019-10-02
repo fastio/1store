@@ -47,12 +47,12 @@
 #include "frozen_mutation.hh"
 #include "supervisor.hh"
 #include "query_result_merger.hh"
-#include "core/do_with.hh"
+#include <seastar/core/do_with.hh>
 #include "message/messaging_service.hh"
 #include "gms/failure_detector.hh"
 #include "gms/gossiper.hh"
 #include "storage_service.hh"
-#include "core/future-util.hh"
+#include <seastar/core/future-util.hh>
 #include "db/read_repair_decision.hh"
 #include "db/config.hh"
 #include "db/batchlog_manager.hh"
@@ -75,15 +75,19 @@
 #include <boost/range/empty.hpp>
 #include <boost/range/algorithm/min_element.hpp>
 #include <boost/range/adaptor/transformed.hpp>
+#include <boost/intrusive/list.hpp>
 #include "utils/latency.hh"
 #include "schema.hh"
 #include "schema_registry.hh"
 #include "utils/joinpoint.hh"
 #include <seastar/util/lazy.hh>
-#include "core/metrics.hh"
+#include <seastar/core/metrics.hh>
 #include <seastar/core/execution_stage.hh>
 #include "db/timeout_clock.hh"
 #include "multishard_mutation_query.hh"
+#include "database.hh"
+
+namespace bi = boost::intrusive;
 
 namespace service {
 
@@ -146,7 +150,7 @@ class per_destination_mutation : public mutation_holder {
     std::unordered_map<gms::inet_address, lw_shared_ptr<const frozen_mutation>> _mutations;
     dht::token _token;
 public:
-    per_destination_mutation(const std::unordered_map<gms::inet_address, std::experimental::optional<mutation>>& mutations) {
+    per_destination_mutation(const std::unordered_map<gms::inet_address, std::optional<mutation>>& mutations) {
         for (auto&& m : mutations) {
             lw_shared_ptr<const frozen_mutation> fm;
             if (m.second) {
@@ -227,6 +231,7 @@ protected:
     size_t _total_endpoints = 0;
     storage_proxy::write_stats& _stats;
     timer<storage_proxy::clock_type> _expire_timer;
+    service_permit _permit; // holds admission permit until operation completes
 
 protected:
     virtual bool waited_for(gms::inet_address from) = 0;
@@ -239,9 +244,9 @@ protected:
 public:
     abstract_write_response_handler(shared_ptr<storage_proxy> p, keyspace& ks, db::consistency_level cl, db::write_type type,
             std::unique_ptr<mutation_holder> mh, std::unordered_set<gms::inet_address> targets, tracing::trace_state_ptr trace_state,
-            storage_proxy::write_stats& stats, size_t pending_endpoints = 0, std::vector<gms::inet_address> dead_endpoints = {})
+            storage_proxy::write_stats& stats, service_permit permit, size_t pending_endpoints = 0, std::vector<gms::inet_address> dead_endpoints = {})
             : _id(p->get_next_response_id()), _proxy(std::move(p)), _trace_state(trace_state), _cl(cl), _type(type), _mutation_holder(std::move(mh)), _targets(std::move(targets)),
-              _dead_endpoints(std::move(dead_endpoints)), _stats(stats), _expire_timer([this] { timeout_cb(); }) {
+              _dead_endpoints(std::move(dead_endpoints)), _stats(stats), _expire_timer([this] { timeout_cb(); }), _permit(std::move(permit)) {
         // original comment from cassandra:
         // during bootstrap, include pending endpoints in the count
         // or we may fail the consistency level guarantees (see #833, #8058)
@@ -278,7 +283,7 @@ public:
         _cl_acks += nr;
         if (!_cl_achieved && _cl_acks >= _total_block_for) {
              _cl_achieved = true;
-            delay([] (abstract_write_response_handler* self) {
+            delay(get_trace_state(), [] (abstract_write_response_handler* self) {
                 if (self->_proxy->need_throttle_writes()) {
                     self->_throttled = true;
                     self->_proxy->_throttled_writes.push_back(self->_id);
@@ -294,7 +299,7 @@ public:
             _failed += count;
             if (_total_block_for + _failed > _total_endpoints) {
                 _error = error::FAILURE;
-                delay([] (abstract_write_response_handler*) { });
+                delay(get_trace_state(), [] (abstract_write_response_handler*) { });
                 return true;
             }
         }
@@ -389,16 +394,19 @@ public:
     }
     // Calculates how much to delay completing the request. The delay adds to the request's inherent latency.
     template<typename Func>
-    void delay(Func&& on_resume) {
+    void delay(tracing::trace_state_ptr trace, Func&& on_resume) {
         auto backlog = max_backlog();
         auto delay = calculate_delay(backlog);
+        stats().last_mv_flow_control_delay = delay;
         if (delay.count() == 0) {
+            tracing::trace(trace, "Delay decision due to throttling: do not delay, resuming now");
             on_resume(this);
         } else {
             ++stats().throttled_base_writes;
-            slogger.trace("Delaying user write due to view update backlog {}/{} by {}us",
+            tracing::trace(trace, "Delaying user write due to view update backlog {}/{} by {}us",
                           backlog.current, backlog.max, delay.count());
-            sleep_abortable<seastar::steady_clock_type>(delay).finally([self = shared_from_this(), on_resume = std::forward<Func>(on_resume)] {
+            // Waited on indirectly.
+            (void)sleep_abortable<seastar::steady_clock_type>(delay).finally([self = shared_from_this(), on_resume = std::forward<Func>(on_resume)] {
                 --self->stats().throttled_base_writes;
                 on_resume(self.get());
             }).handle_exception_type([] (const seastar::sleep_aborted& ignored) { });
@@ -443,9 +451,9 @@ public:
     datacenter_write_response_handler(shared_ptr<storage_proxy> p, keyspace& ks, db::consistency_level cl, db::write_type type,
             std::unique_ptr<mutation_holder> mh, std::unordered_set<gms::inet_address> targets,
             const std::vector<gms::inet_address>& pending_endpoints, std::vector<gms::inet_address> dead_endpoints, tracing::trace_state_ptr tr_state,
-            storage_proxy::write_stats& stats) :
+            storage_proxy::write_stats& stats, service_permit permit) :
                 abstract_write_response_handler(std::move(p), ks, cl, type, std::move(mh),
-                        std::move(targets), std::move(tr_state), stats, db::count_local_endpoints(pending_endpoints), std::move(dead_endpoints)) {
+                        std::move(targets), std::move(tr_state), stats, std::move(permit), db::count_local_endpoints(pending_endpoints), std::move(dead_endpoints)) {
         _total_endpoints = db::count_local_endpoints(_targets);
     }
 };
@@ -458,12 +466,74 @@ public:
     write_response_handler(shared_ptr<storage_proxy> p, keyspace& ks, db::consistency_level cl, db::write_type type,
             std::unique_ptr<mutation_holder> mh, std::unordered_set<gms::inet_address> targets,
             const std::vector<gms::inet_address>& pending_endpoints, std::vector<gms::inet_address> dead_endpoints, tracing::trace_state_ptr tr_state,
-            storage_proxy::write_stats& stats) :
+            storage_proxy::write_stats& stats, service_permit permit) :
                 abstract_write_response_handler(std::move(p), ks, cl, type, std::move(mh),
-                        std::move(targets), std::move(tr_state), stats, pending_endpoints.size(), std::move(dead_endpoints)) {
+                        std::move(targets), std::move(tr_state), stats, std::move(permit), pending_endpoints.size(), std::move(dead_endpoints)) {
         _total_endpoints = _targets.size();
     }
 };
+
+class view_update_write_response_handler : public write_response_handler, public bi::list_base_hook<bi::link_mode<bi::auto_unlink>> {
+public:
+    view_update_write_response_handler(shared_ptr<storage_proxy> p, keyspace& ks, db::consistency_level cl,
+            std::unique_ptr<mutation_holder> mh, std::unordered_set<gms::inet_address> targets,
+            const std::vector<gms::inet_address>& pending_endpoints, std::vector<gms::inet_address> dead_endpoints, tracing::trace_state_ptr tr_state,
+            storage_proxy::write_stats& stats, service_permit permit):
+                write_response_handler(p, ks, cl, db::write_type::VIEW, std::move(mh),
+                        std::move(targets), pending_endpoints, std::move(dead_endpoints), std::move(tr_state), stats, std::move(permit)) {
+        register_in_intrusive_list(*p);
+    }
+    ~view_update_write_response_handler();
+private:
+    void register_in_intrusive_list(storage_proxy& p);
+};
+
+class storage_proxy::view_update_handlers_list : public bi::list<view_update_write_response_handler, bi::base_hook<view_update_write_response_handler>, bi::constant_time_size<false>> {
+    // _live_iterators holds all iterators that point into the bi:list in the base class of this object.
+    // If we remove a view_update_write_response_handler from the list, and an iterator happens to point
+    // into it, we advance the iterator so it doesn't point at a removed object. See #4912.
+    std::vector<iterator*> _live_iterators;
+public:
+    view_update_handlers_list() {
+        _live_iterators.reserve(10); // We only expect 1.
+    }
+    void register_live_iterator(iterator* itp) noexcept { // We don't tolerate failure, so abort instead
+        _live_iterators.push_back(itp);
+    }
+    void unregister_live_iterator(iterator* itp) {
+        _live_iterators.erase(boost::remove(_live_iterators, itp), _live_iterators.end());
+    }
+    void update_live_iterators(view_update_write_response_handler* vuwrh) {
+        // vuwrh is being removed from the b::list, so if any live iterator points at it,
+        // move it to the next object (this requires that the list is traversed in the forward
+        // direction).
+        for (auto& itp : _live_iterators) {
+            if (&**itp == vuwrh) {
+                ++*itp;
+            }
+        }
+    }
+    class iterator_guard {
+        view_update_handlers_list& _vuhl;
+        iterator* _itp;
+    public:
+        iterator_guard(view_update_handlers_list& vuhl, iterator& it) : _vuhl(vuhl), _itp(&it) {
+            _vuhl.register_live_iterator(_itp);
+        }
+        ~iterator_guard() {
+            _vuhl.unregister_live_iterator(_itp);
+        }
+    };
+};
+
+void view_update_write_response_handler::register_in_intrusive_list(storage_proxy& p) {
+    p.get_view_update_handlers_list().push_back(*this);
+}
+
+
+view_update_write_response_handler::~view_update_write_response_handler() {
+    _proxy->_view_update_handlers_list->update_live_iterators(this);
+}
 
 class datacenter_sync_write_response_handler : public abstract_write_response_handler {
     struct dc_info {
@@ -487,8 +557,8 @@ class datacenter_sync_write_response_handler : public abstract_write_response_ha
 public:
     datacenter_sync_write_response_handler(shared_ptr<storage_proxy> p, keyspace& ks, db::consistency_level cl, db::write_type type,
             std::unique_ptr<mutation_holder> mh, std::unordered_set<gms::inet_address> targets, const std::vector<gms::inet_address>& pending_endpoints,
-            std::vector<gms::inet_address> dead_endpoints, tracing::trace_state_ptr tr_state, storage_proxy::write_stats& stats) :
-        abstract_write_response_handler(std::move(p), ks, cl, type, std::move(mh), targets, std::move(tr_state), stats, 0, dead_endpoints) {
+            std::vector<gms::inet_address> dead_endpoints, tracing::trace_state_ptr tr_state, storage_proxy::write_stats& stats, service_permit permit) :
+        abstract_write_response_handler(std::move(p), ks, cl, type, std::move(mh), targets, std::move(tr_state), stats, std::move(permit), 0, dead_endpoints) {
         auto& snitch_ptr = locator::i_endpoint_snitch::get_local_snitch_ptr();
 
         for (auto& target : targets) {
@@ -582,7 +652,7 @@ void storage_proxy::remove_response_handler(storage_proxy::response_id_type id) 
 }
 
 
-void storage_proxy::got_response(storage_proxy::response_id_type id, gms::inet_address from, stdx::optional<db::view::update_backlog> backlog) {
+void storage_proxy::got_response(storage_proxy::response_id_type id, gms::inet_address from, std::optional<db::view::update_backlog> backlog) {
     auto it = _response_handlers.find(id);
     if (it != _response_handlers.end()) {
         tracing::trace(it->second->get_trace_state(), "Got a response from /{}", from);
@@ -595,7 +665,7 @@ void storage_proxy::got_response(storage_proxy::response_id_type id, gms::inet_a
     maybe_update_view_backlog_of(std::move(from), std::move(backlog));
 }
 
-void storage_proxy::got_failure_response(storage_proxy::response_id_type id, gms::inet_address from, size_t count, stdx::optional<db::view::update_backlog> backlog) {
+void storage_proxy::got_failure_response(storage_proxy::response_id_type id, gms::inet_address from, size_t count, std::optional<db::view::update_backlog> backlog) {
     auto it = _response_handlers.find(id);
     if (it != _response_handlers.end()) {
         tracing::trace(it->second->get_trace_state(), "Got {} failures from /{}", count, from);
@@ -608,7 +678,7 @@ void storage_proxy::got_failure_response(storage_proxy::response_id_type id, gms
     maybe_update_view_backlog_of(std::move(from), std::move(backlog));
 }
 
-void storage_proxy::maybe_update_view_backlog_of(gms::inet_address replica, stdx::optional<db::view::update_backlog> backlog) {
+void storage_proxy::maybe_update_view_backlog_of(gms::inet_address replica, std::optional<db::view::update_backlog> backlog) {
     if (backlog) {
         auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         _view_update_backlogs[replica] = {std::move(*backlog), now};
@@ -616,9 +686,7 @@ void storage_proxy::maybe_update_view_backlog_of(gms::inet_address replica, stdx
 }
 
 db::view::update_backlog storage_proxy::get_view_update_backlog() const {
-    auto memory_backlog = get_db().local().get_view_update_backlog();
-    auto hints_backlog = db::view::update_backlog{_hints_for_views_manager.backlog_size(), _hints_for_views_manager.max_backlog_size()};
-    return _max_view_update_backlog.add_fetch(engine().cpu_id(), std::max(memory_backlog, hints_backlog));
+    return _max_view_update_backlog.add_fetch(engine().cpu_id(), get_db().local().get_view_update_backlog());
 }
 
 db::view::update_backlog storage_proxy::get_backlog_of(gms::inet_address ep) const {
@@ -641,17 +709,19 @@ future<> storage_proxy::response_wait(storage_proxy::response_id_type id, clock_
 
 storage_proxy::response_id_type storage_proxy::create_write_response_handler(keyspace& ks, db::consistency_level cl, db::write_type type, std::unique_ptr<mutation_holder> m,
                              std::unordered_set<gms::inet_address> targets, const std::vector<gms::inet_address>& pending_endpoints, std::vector<gms::inet_address> dead_endpoints, tracing::trace_state_ptr tr_state,
-                             storage_proxy::write_stats& stats)
+                             storage_proxy::write_stats& stats, service_permit permit)
 {
     shared_ptr<abstract_write_response_handler> h;
     auto& rs = ks.get_replication_strategy();
 
     if (db::is_datacenter_local(cl)) {
-        h = ::make_shared<datacenter_write_response_handler>(shared_from_this(), ks, cl, type, std::move(m), std::move(targets), pending_endpoints, std::move(dead_endpoints), std::move(tr_state), stats);
+        h = ::make_shared<datacenter_write_response_handler>(shared_from_this(), ks, cl, type, std::move(m), std::move(targets), pending_endpoints, std::move(dead_endpoints), std::move(tr_state), stats, std::move(permit));
     } else if (cl == db::consistency_level::EACH_QUORUM && rs.get_type() == locator::replication_strategy_type::network_topology){
-        h = ::make_shared<datacenter_sync_write_response_handler>(shared_from_this(), ks, cl, type, std::move(m), std::move(targets), pending_endpoints, std::move(dead_endpoints), std::move(tr_state), stats);
+        h = ::make_shared<datacenter_sync_write_response_handler>(shared_from_this(), ks, cl, type, std::move(m), std::move(targets), pending_endpoints, std::move(dead_endpoints), std::move(tr_state), stats, std::move(permit));
+    } else if (type == db::write_type::VIEW) {
+        h = ::make_shared<view_update_write_response_handler>(shared_from_this(), ks, cl, std::move(m), std::move(targets), pending_endpoints, std::move(dead_endpoints), std::move(tr_state), stats, std::move(permit));
     } else {
-        h = ::make_shared<write_response_handler>(shared_from_this(), ks, cl, type, std::move(m), std::move(targets), pending_endpoints, std::move(dead_endpoints), std::move(tr_state), stats);
+        h = ::make_shared<write_response_handler>(shared_from_this(), ks, cl, type, std::move(m), std::move(targets), pending_endpoints, std::move(dead_endpoints), std::move(tr_state), stats, std::move(permit));
     }
     return register_response_handler(std::move(h));
 }
@@ -770,12 +840,16 @@ using namespace std::literals::chrono_literals;
 storage_proxy::~storage_proxy() {}
 storage_proxy::storage_proxy(distributed<database>& db, storage_proxy::config cfg, db::view::node_update_backlog& max_view_update_backlog)
     : _db(db)
+    , _read_smp_service_group(cfg.read_smp_service_group)
+    , _write_smp_service_group(cfg.write_smp_service_group)
+    , _write_ack_smp_service_group(cfg.write_ack_smp_service_group)
     , _next_response_id(std::chrono::system_clock::now().time_since_epoch()/1ms)
     , _hints_resource_manager(cfg.available_memory / 10)
     , _hints_for_views_manager(_db.local().get_config().view_hints_directory(), {}, _db.local().get_config().max_hint_window_in_ms(), _hints_resource_manager, _db)
     , _background_write_throttle_threahsold(cfg.available_memory / 10)
     , _mutate_stage{"storage_proxy_mutate", &storage_proxy::do_mutate}
-    , _max_view_update_backlog(max_view_update_backlog) {
+    , _max_view_update_backlog(max_view_update_backlog)
+    , _view_update_handlers_list(std::make_unique<view_update_handlers_list>()) {
     namespace sm = seastar::metrics;
     _metrics.add_group(COORDINATOR_STATS_CATEGORY, {
         sm::make_histogram("read_latency", sm::description("The general read latency histogram"), [this]{ return _stats.estimated_read.get_histogram(16, 20);}),
@@ -783,67 +857,76 @@ storage_proxy::storage_proxy(distributed<database>& db, storage_proxy::config cf
         sm::make_queue_length("foreground_writes", [this] { return _stats.writes - _stats.background_writes; },
                        sm::description("number of currently pending foreground write requests")),
 
-        sm::make_queue_length("background_writes", [this] { return _stats.background_writes; },
+        sm::make_queue_length("background_writes", _stats.background_writes,
                        sm::description("number of currently pending background write requests")),
+
+        sm::make_total_operations("writes_coordinator_outside_replica_set", _stats.writes_coordinator_outside_replica_set,
+                                  sm::description("number of CQL write requests which arrived to a non-replica and had to be forwarded to a replica")),
+
+        sm::make_total_operations("reads_coordinator_outside_replica_set", _stats.reads_coordinator_outside_replica_set,
+                                  sm::description("number of CQL read requests which arrived to a non-replica and had to be forwarded to a replica")),
 
         sm::make_queue_length("current_throttled_writes", [this] { return _throttled_writes.size(); },
                        sm::description("number of currently throttled write requests")),
 
-        sm::make_queue_length("current_throttled_base_writes", [this] { return _stats.throttled_base_writes; },
+        sm::make_queue_length("current_throttled_base_writes", _stats.throttled_base_writes,
                        sm::description("number of currently throttled base replica write requests")),
 
-        sm::make_total_operations("throttled_writes", [this] { return _stats.throttled_writes; },
+        sm::make_gauge("last_mv_flow_control_delay", [this] { return std::chrono::duration<float>(_stats.last_mv_flow_control_delay).count(); },
+                                      sm::description("delay (in seconds) added for MV flow control in the last request")),
+
+        sm::make_total_operations("throttled_writes", _stats.throttled_writes,
                                   sm::description("number of throttled write requests")),
 
-        sm::make_current_bytes("queued_write_bytes", [this] { return _stats.queued_write_bytes; },
+        sm::make_current_bytes("queued_write_bytes", _stats.queued_write_bytes,
                        sm::description("number of bytes in pending write requests")),
 
-        sm::make_current_bytes("background_write_bytes", [this] { return _stats.background_write_bytes; },
+        sm::make_current_bytes("background_write_bytes", _stats.background_write_bytes,
                        sm::description("number of bytes in pending background write requests")),
 
-        sm::make_queue_length("foreground_reads", [this] { return _stats.foreground_reads; },
+        sm::make_queue_length("foreground_reads", _stats.foreground_reads,
                        sm::description("number of currently pending foreground read requests")),
 
         sm::make_queue_length("background_reads", [this] { return _stats.reads - _stats.foreground_reads; },
                        sm::description("number of currently pending background read requests")),
 
-        sm::make_total_operations("read_retries", [this] { return _stats.read_retries; },
+        sm::make_total_operations("read_retries", _stats.read_retries,
                        sm::description("number of read retry attempts")),
 
-        sm::make_total_operations("canceled_read_repairs", [this] { return _stats.global_read_repairs_canceled_due_to_concurrent_write; },
+        sm::make_total_operations("canceled_read_repairs", _stats.global_read_repairs_canceled_due_to_concurrent_write,
                        sm::description("number of global read repairs canceled due to a concurrent write")),
 
-        sm::make_total_operations("foreground_read_repair", [this] { return _stats.read_repair_repaired_blocking; },
+        sm::make_total_operations("foreground_read_repairs", _stats.read_repair_repaired_blocking,
                       sm::description("number of foreground read repairs")),
 
-        sm::make_total_operations("background_read_repairs", [this] { return _stats.read_repair_repaired_background; },
+        sm::make_total_operations("background_read_repairs", _stats.read_repair_repaired_background,
                        sm::description("number of background read repairs")),
 
-        sm::make_total_operations("write_timeouts", [this] { return _stats.write_timeouts._count; },
+        sm::make_total_operations("write_timeouts", _stats.write_timeouts._count,
                        sm::description("number of write request failed due to a timeout")),
 
-        sm::make_total_operations("write_unavailable", [this] { return _stats.write_unavailables._count; },
+        sm::make_total_operations("write_unavailable", _stats.write_unavailables._count,
                        sm::description("number write requests failed due to an \"unavailable\" error")),
 
-        sm::make_total_operations("read_timeouts", [this] { return _stats.read_timeouts._count; },
+        sm::make_total_operations("read_timeouts", _stats.read_timeouts._count,
                        sm::description("number of read request failed due to a timeout")),
 
-        sm::make_total_operations("read_unavailable", [this] { return _stats.read_unavailables._count; },
+        sm::make_total_operations("read_unavailable", _stats.read_unavailables._count,
                        sm::description("number read requests failed due to an \"unavailable\" error")),
 
-        sm::make_total_operations("range_timeouts", [this] { return _stats.range_slice_timeouts._count; },
+        sm::make_total_operations("range_timeouts", _stats.range_slice_timeouts._count,
                        sm::description("number of range read operations failed due to a timeout")),
 
-        sm::make_total_operations("range_unavailable", [this] { return _stats.range_slice_unavailables._count; },
+        sm::make_total_operations("range_unavailable", _stats.range_slice_unavailables._count,
                        sm::description("number of range read operations failed due to an \"unavailable\" error")),
 
-        sm::make_total_operations("speculative_digest_reads", [this] { return _stats.speculative_digest_reads; },
+        sm::make_total_operations("speculative_digest_reads", _stats.speculative_digest_reads,
                        sm::description("number of speculative digest read requests that were sent")),
 
-        sm::make_total_operations("speculative_data_reads", [this] { return _stats.speculative_data_reads; },
+        sm::make_total_operations("speculative_data_reads", _stats.speculative_data_reads,
                        sm::description("number of speculative data read requests that were sent")),
 
-        sm::make_total_operations("background_writes_failed", [this] { return _stats.background_writes_failed; },
+        sm::make_total_operations("background_writes_failed", _stats.background_writes_failed,
                        sm::description("number of write requests that failed after CL was reached")),
     });
 
@@ -902,394 +985,11 @@ storage_proxy::response_id_type storage_proxy::unique_response_handler::release(
     return r;
 }
 
-#if 0
-    static
-    {
-        /*
-         * We execute counter writes in 2 places: either directly in the coordinator node if it is a replica, or
-         * in CounterMutationVerbHandler on a replica othewise. The write must be executed on the COUNTER_MUTATION stage
-         * but on the latter case, the verb handler already run on the COUNTER_MUTATION stage, so we must not execute the
-         * underlying on the stage otherwise we risk a deadlock. Hence two different performer.
-         */
-        counterWritePerformer = new WritePerformer()
-        {
-            public void apply(IMutation mutation,
-                              Iterable<InetAddress> targets,
-                              AbstractWriteResponseHandler responseHandler,
-                              String localDataCenter,
-                              ConsistencyLevel consistencyLevel)
-            {
-                counterWriteTask(mutation, targets, responseHandler, localDataCenter).run();
-            }
-        };
-
-        counterWriteOnCoordinatorPerformer = new WritePerformer()
-        {
-            public void apply(IMutation mutation,
-                              Iterable<InetAddress> targets,
-                              AbstractWriteResponseHandler responseHandler,
-                              String localDataCenter,
-                              ConsistencyLevel consistencyLevel)
-            {
-                StageManager.getStage(Stage.COUNTER_MUTATION)
-                            .execute(counterWriteTask(mutation, targets, responseHandler, localDataCenter));
-            }
-        };
-    }
-
-    /**
-     * Apply @param updates if and only if the current values in the row for @param key
-     * match the provided @param conditions.  The algorithm is "raw" Paxos: that is, Paxos
-     * minus leader election -- any node in the cluster may propose changes for any row,
-     * which (that is, the row) is the unit of values being proposed, not single columns.
-     *
-     * The Paxos cohort is only the replicas for the given key, not the entire cluster.
-     * So we expect performance to be reasonable, but CAS is still intended to be used
-     * "when you really need it," not for all your updates.
-     *
-     * There are three phases to Paxos:
-     *  1. Prepare: the coordinator generates a ballot (timeUUID in our case) and asks replicas to (a) promise
-     *     not to accept updates from older ballots and (b) tell us about the most recent update it has already
-     *     accepted.
-     *  2. Accept: if a majority of replicas reply, the coordinator asks replicas to accept the value of the
-     *     highest proposal ballot it heard about, or a new value if no in-progress proposals were reported.
-     *  3. Commit (Learn): if a majority of replicas acknowledge the accept request, we can commit the new
-     *     value.
-     *
-     *  Commit procedure is not covered in "Paxos Made Simple," and only briefly mentioned in "Paxos Made Live,"
-     *  so here is our approach:
-     *   3a. The coordinator sends a commit message to all replicas with the ballot and value.
-     *   3b. Because of 1-2, this will be the highest-seen commit ballot.  The replicas will note that,
-     *       and send it with subsequent promise replies.  This allows us to discard acceptance records
-     *       for successfully committed replicas, without allowing incomplete proposals to commit erroneously
-     *       later on.
-     *
-     *  Note that since we are performing a CAS rather than a simple update, we perform a read (of committed
-     *  values) between the prepare and accept phases.  This gives us a slightly longer window for another
-     *  coordinator to come along and trump our own promise with a newer one but is otherwise safe.
-     *
-     * @param keyspaceName the keyspace for the CAS
-     * @param cfName the column family for the CAS
-     * @param key the row key for the row to CAS
-     * @param request the conditions for the CAS to apply as well as the update to perform if the conditions hold.
-     * @param consistencyForPaxos the consistency for the paxos prepare and propose round. This can only be either SERIAL or LOCAL_SERIAL.
-     * @param consistencyForCommit the consistency for write done during the commit phase. This can be anything, except SERIAL or LOCAL_SERIAL.
-     *
-     * @return null if the operation succeeds in updating the row, or the current values corresponding to conditions.
-     * (since, if the CAS doesn't succeed, it means the current value do not match the conditions).
-     */
-    public static ColumnFamily cas(String keyspaceName,
-                                   String cfName,
-                                   ByteBuffer key,
-                                   CASRequest request,
-                                   ConsistencyLevel consistencyForPaxos,
-                                   ConsistencyLevel consistencyForCommit,
-                                   ClientState state)
-    throws UnavailableException, IsBootstrappingException, ReadTimeoutException, WriteTimeoutException, InvalidRequestException
-    {
-        final long start = System.nanoTime();
-        int contentions = 0;
-        try
-        {
-            consistencyForPaxos.validateForCas();
-            consistencyForCommit.validateForCasCommit(keyspaceName);
-
-            CFMetaData metadata = Schema.instance.getCFMetaData(keyspaceName, cfName);
-
-            long timeout = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getCasContentionTimeout());
-            while (System.nanoTime() - start < timeout)
-            {
-                // for simplicity, we'll do a single liveness check at the start of each attempt
-                Pair<List<InetAddress>, Integer> p = getPaxosParticipants(keyspaceName, key, consistencyForPaxos);
-                List<InetAddress> liveEndpoints = p.left;
-                int requiredParticipants = p.right;
-
-                final Pair<UUID, Integer> pair = beginAndRepairPaxos(start, key, metadata, liveEndpoints, requiredParticipants, consistencyForPaxos, consistencyForCommit, true, state);
-                final UUID ballot = pair.left;
-                contentions += pair.right;
-                // read the current values and check they validate the conditions
-                Tracing.trace("Reading existing values for CAS precondition");
-                long timestamp = System.currentTimeMillis();
-                ReadCommand readCommand = ReadCommand.create(keyspaceName, key, cfName, timestamp, request.readFilter());
-                List<Row> rows = read(Arrays.asList(readCommand), consistencyForPaxos == ConsistencyLevel.LOCAL_SERIAL ? ConsistencyLevel.LOCAL_QUORUM : ConsistencyLevel.QUORUM);
-                ColumnFamily current = rows.get(0).cf;
-                if (!request.appliesTo(current))
-                {
-                    Tracing.trace("CAS precondition does not match current values {}", current);
-                    // We should not return null as this means success
-                    casWriteMetrics.conditionNotMet.inc();
-                    return current == null ? ArrayBackedSortedColumns.factory.create(metadata) : current;
-                }
-
-                // finish the paxos round w/ the desired updates
-                // TODO turn null updates into delete?
-                ColumnFamily updates = request.makeUpdates(current);
-
-                // Apply triggers to cas updates. A consideration here is that
-                // triggers emit Mutations, and so a given trigger implementation
-                // may generate mutations for partitions other than the one this
-                // paxos round is scoped for. In this case, TriggerExecutor will
-                // validate that the generated mutations are targetted at the same
-                // partition as the initial updates and reject (via an
-                // InvalidRequestException) any which aren't.
-                updates = TriggerExecutor.instance.execute(key, updates);
-
-                Commit proposal = Commit.newProposal(key, ballot, updates);
-                Tracing.trace("CAS precondition is met; proposing client-requested updates for {}", ballot);
-                if (proposePaxos(proposal, liveEndpoints, requiredParticipants, true, consistencyForPaxos))
-                {
-                    commitPaxos(proposal, consistencyForCommit);
-                    Tracing.trace("CAS successful");
-                    return null;
-                }
-
-                Tracing.trace("Paxos proposal not accepted (pre-empted by a higher ballot)");
-                contentions++;
-                Uninterruptibles.sleepUninterruptibly(ThreadLocalRandom.current().nextInt(100), TimeUnit.MILLISECONDS);
-                // continue to retry
-            }
-
-            throw new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(keyspaceName)));
-        }
-        catch (WriteTimeoutException|ReadTimeoutException e)
-        {
-            casWriteMetrics.timeouts.mark();
-            throw e;
-        }
-        catch(UnavailableException e)
-        {
-            casWriteMetrics.unavailables.mark();
-            throw e;
-        }
-        finally
-        {
-            if(contentions > 0)
-                casWriteMetrics.contention.update(contentions);
-            casWriteMetrics.addNano(System.nanoTime() - start);
-        }
-    }
-
-    private static Predicate<InetAddress> sameDCPredicateFor(final String dc)
-    {
-        final IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
-        return new Predicate<InetAddress>()
-        {
-            public boolean apply(InetAddress host)
-            {
-                return dc.equals(snitch.getDatacenter(host));
-            }
-        };
-    }
-
-    private static Pair<List<InetAddress>, Integer> getPaxosParticipants(String keyspaceName, ByteBuffer key, ConsistencyLevel consistencyForPaxos) throws UnavailableException
-    {
-        Token tk = StorageService.getPartitioner().getToken(key);
-        List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspaceName, tk);
-        Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspaceName);
-
-        if (consistencyForPaxos == ConsistencyLevel.LOCAL_SERIAL)
-        {
-            // Restrict naturalEndpoints and pendingEndpoints to node in the local DC only
-            String localDc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
-            Predicate<InetAddress> isLocalDc = sameDCPredicateFor(localDc);
-            naturalEndpoints = ImmutableList.copyOf(Iterables.filter(naturalEndpoints, isLocalDc));
-            pendingEndpoints = ImmutableList.copyOf(Iterables.filter(pendingEndpoints, isLocalDc));
-        }
-        int participants = pendingEndpoints.size() + naturalEndpoints.size();
-        int requiredParticipants = participants + 1  / 2; // See CASSANDRA-833
-        List<InetAddress> liveEndpoints = ImmutableList.copyOf(Iterables.filter(Iterables.concat(naturalEndpoints, pendingEndpoints), IAsyncCallback.isAlive));
-        if (liveEndpoints.size() < requiredParticipants)
-            throw new UnavailableException(consistencyForPaxos, requiredParticipants, liveEndpoints.size());
-
-        // We cannot allow CAS operations with 2 or more pending endpoints, see #8346.
-        // Note that we fake an impossible number of required nodes in the unavailable exception
-        // to nail home the point that it's an impossible operation no matter how many nodes are live.
-        if (pendingEndpoints.size() > 1)
-            throw new UnavailableException(String.format("Cannot perform LWT operation as there is more than one (%d) pending range movement", pendingEndpoints.size()),
-                                           consistencyForPaxos,
-                                           participants + 1,
-                                           liveEndpoints.size());
-
-        return Pair.create(liveEndpoints, requiredParticipants);
-    }
-
-    /**
-     * begin a Paxos session by sending a prepare request and completing any in-progress requests seen in the replies
-     *
-     * @return the Paxos ballot promised by the replicas if no in-progress requests were seen and a quorum of
-     * nodes have seen the mostRecentCommit.  Otherwise, return null.
-     */
-    private static Pair<UUID, Integer> beginAndRepairPaxos(long start,
-                                                           ByteBuffer key,
-                                                           CFMetaData metadata,
-                                                           List<InetAddress> liveEndpoints,
-                                                           int requiredParticipants,
-                                                           ConsistencyLevel consistencyForPaxos,
-                                                           ConsistencyLevel consistencyForCommit,
-                                                           final boolean isWrite,
-                                                           ClientState state)
-    throws WriteTimeoutException
-    {
-        long timeout = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getCasContentionTimeout());
-
-        PrepareCallback summary = null;
-        int contentions = 0;
-        while (System.nanoTime() - start < timeout)
-        {
-            // We don't want to use a timestamp that is older than the last one assigned by the ClientState or operations
-            // may appear out-of-order (#7801). But note that state.getTimestamp() is in microseconds while the ballot
-            // timestamp is only in milliseconds
-            long currentTime = (state.getTimestamp() / 1000) + 1;
-            long ballotMillis = summary == null
-                              ? currentTime
-                              : Math.max(currentTime, 1 + UUIDGen.unixTimestamp(summary.mostRecentInProgressCommit.ballot));
-            UUID ballot = UUIDGen.getTimeUUID(ballotMillis);
-
-            // prepare
-            Tracing.trace("Preparing {}", ballot);
-            Commit toPrepare = Commit.newPrepare(key, metadata, ballot);
-            summary = preparePaxos(toPrepare, liveEndpoints, requiredParticipants, consistencyForPaxos);
-            if (!summary.promised)
-            {
-                Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
-                contentions++;
-                // sleep a random amount to give the other proposer a chance to finish
-                Uninterruptibles.sleepUninterruptibly(ThreadLocalRandom.current().nextInt(100), TimeUnit.MILLISECONDS);
-                continue;
-            }
-
-            Commit inProgress = summary.mostRecentInProgressCommitWithUpdate;
-            Commit mostRecent = summary.mostRecentCommit;
-
-            // If we have an in-progress ballot greater than the MRC we know, then it's an in-progress round that
-            // needs to be completed, so do it.
-            if (!inProgress.update.isEmpty() && inProgress.isAfter(mostRecent))
-            {
-                Tracing.trace("Finishing incomplete paxos round {}", inProgress);
-                if(isWrite)
-                    casWriteMetrics.unfinishedCommit.inc();
-                else
-                    casReadMetrics.unfinishedCommit.inc();
-                Commit refreshedInProgress = Commit.newProposal(inProgress.key, ballot, inProgress.update);
-                if (proposePaxos(refreshedInProgress, liveEndpoints, requiredParticipants, false, consistencyForPaxos))
-                {
-                    commitPaxos(refreshedInProgress, consistencyForCommit);
-                }
-                else
-                {
-                    Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
-                    // sleep a random amount to give the other proposer a chance to finish
-                    contentions++;
-                    Uninterruptibles.sleepUninterruptibly(ThreadLocalRandom.current().nextInt(100), TimeUnit.MILLISECONDS);
-                }
-                continue;
-            }
-
-            // To be able to propose our value on a new round, we need a quorum of replica to have learn the previous one. Why is explained at:
-            // https://issues.apache.org/jira/browse/CASSANDRA-5062?focusedCommentId=13619810&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-13619810)
-            // Since we waited for quorum nodes, if some of them haven't seen the last commit (which may just be a timing issue, but may also
-            // mean we lost messages), we pro-actively "repair" those nodes, and retry.
-            Iterable<InetAddress> missingMRC = summary.replicasMissingMostRecentCommit();
-            if (Iterables.size(missingMRC) > 0)
-            {
-                Tracing.trace("Repairing replicas that missed the most recent commit");
-                sendCommit(mostRecent, missingMRC);
-                // TODO: provided commits don't invalid the prepare we just did above (which they don't), we could just wait
-                // for all the missingMRC to acknowledge this commit and then move on with proposing our value. But that means
-                // adding the ability to have commitPaxos block, which is exactly CASSANDRA-5442 will do. So once we have that
-                // latter ticket, we can pass CL.ALL to the commit above and remove the 'continue'.
-                continue;
-            }
-
-            // We might commit this ballot and we want to ensure operations starting after this CAS succeed will be assigned
-            // a timestamp greater that the one of this ballot, so operation order is preserved (#7801)
-            state.updateLastTimestamp(ballotMillis * 1000);
-
-            return Pair.create(ballot, contentions);
-        }
-
-        throw new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(metadata.ksName)));
-    }
-
-    /**
-     * Unlike commitPaxos, this does not wait for replies
-     */
-    private static void sendCommit(Commit commit, Iterable<InetAddress> replicas)
-    {
-        MessageOut<Commit> message = new MessageOut<Commit>(MessagingService.Verb.PAXOS_COMMIT, commit, Commit.serializer);
-        for (InetAddress target : replicas)
-            MessagingService.instance().sendOneWay(message, target);
-    }
-
-    private static PrepareCallback preparePaxos(Commit toPrepare, List<InetAddress> endpoints, int requiredParticipants, ConsistencyLevel consistencyForPaxos)
-    throws WriteTimeoutException
-    {
-        PrepareCallback callback = new PrepareCallback(toPrepare.key, toPrepare.update.metadata(), requiredParticipants, consistencyForPaxos);
-        MessageOut<Commit> message = new MessageOut<Commit>(MessagingService.Verb.PAXOS_PREPARE, toPrepare, Commit.serializer);
-        for (InetAddress target : endpoints)
-            MessagingService.instance().sendRR(message, target, callback);
-        callback.await();
-        return callback;
-    }
-
-    private static boolean proposePaxos(Commit proposal, List<InetAddress> endpoints, int requiredParticipants, boolean timeoutIfPartial, ConsistencyLevel consistencyLevel)
-    throws WriteTimeoutException
-    {
-        ProposeCallback callback = new ProposeCallback(endpoints.size(), requiredParticipants, !timeoutIfPartial, consistencyLevel);
-        MessageOut<Commit> message = new MessageOut<Commit>(MessagingService.Verb.PAXOS_PROPOSE, proposal, Commit.serializer);
-        for (InetAddress target : endpoints)
-            MessagingService.instance().sendRR(message, target, callback);
-
-        callback.await();
-
-        if (callback.isSuccessful())
-            return true;
-
-        if (timeoutIfPartial && !callback.isFullyRefused())
-            throw new WriteTimeoutException(WriteType.CAS, consistencyLevel, callback.getAcceptCount(), requiredParticipants);
-
-        return false;
-    }
-
-    private static void commitPaxos(Commit proposal, ConsistencyLevel consistencyLevel) throws WriteTimeoutException
-    {
-        boolean shouldBlock = consistencyLevel != ConsistencyLevel.ANY;
-        Keyspace keyspace = Keyspace.open(proposal.update.metadata().ksName);
-
-        Token tk = StorageService.getPartitioner().getToken(proposal.key);
-        List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspace.getName(), tk);
-        Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspace.getName());
-
-        AbstractWriteResponseHandler responseHandler = null;
-        if (shouldBlock)
-        {
-            AbstractReplicationStrategy rs = keyspace.getReplicationStrategy();
-            responseHandler = rs.getWriteResponseHandler(naturalEndpoints, pendingEndpoints, consistencyLevel, null, WriteType.SIMPLE);
-        }
-
-        MessageOut<Commit> message = new MessageOut<Commit>(MessagingService.Verb.PAXOS_COMMIT, proposal, Commit.serializer);
-        for (InetAddress destination : Iterables.concat(naturalEndpoints, pendingEndpoints))
-        {
-            if (FailureDetector.instance.isAlive(destination))
-            {
-                if (shouldBlock)
-                    MessagingService.instance().sendRR(message, destination, responseHandler);
-                else
-                    MessagingService.instance().sendOneWay(message, destination);
-            }
-        }
-
-        if (shouldBlock)
-            responseHandler.get();
-    }
-#endif
-
-
 future<>
 storage_proxy::mutate_locally(const mutation& m, clock_type::time_point timeout) {
     auto shard = _db.local().shard_of(m);
     _stats.replica_cross_shard_ops += shard != engine().cpu_id();
-    return _db.invoke_on(shard, [s = global_schema_ptr(m.schema()), m = freeze(m), timeout] (database& db) -> future<> {
+    return _db.invoke_on(shard, _write_smp_service_group, [s = global_schema_ptr(m.schema()), m = freeze(m), timeout] (database& db) -> future<> {
         return db.apply(s, m, timeout);
     });
 }
@@ -1298,7 +998,7 @@ future<>
 storage_proxy::mutate_locally(const schema_ptr& s, const frozen_mutation& m, clock_type::time_point timeout) {
     auto shard = _db.local().shard_of(m);
     _stats.replica_cross_shard_ops += shard != engine().cpu_id();
-    return _db.invoke_on(shard, [&m, gs = global_schema_ptr(s), timeout] (database& db) -> future<> {
+    return _db.invoke_on(shard, _write_smp_service_group, [&m, gs = global_schema_ptr(s), timeout] (database& db) -> future<> {
         return db.apply(gs, m, timeout);
     });
 }
@@ -1314,24 +1014,26 @@ storage_proxy::mutate_locally(std::vector<mutation> mutations, clock_type::time_
 
 future<>
 storage_proxy::mutate_counters_on_leader(std::vector<frozen_mutation_and_schema> mutations, db::consistency_level cl, clock_type::time_point timeout,
-                                         tracing::trace_state_ptr trace_state) {
+                                         tracing::trace_state_ptr trace_state, service_permit permit) {
     _stats.received_counter_updates += mutations.size();
-    return do_with(std::move(mutations), [this, cl, timeout, trace_state = std::move(trace_state)] (std::vector<frozen_mutation_and_schema>& update_ms) mutable {
-        return parallel_for_each(update_ms, [this, cl, timeout, trace_state] (frozen_mutation_and_schema& fm_a_s) {
-            return mutate_counter_on_leader_and_replicate(fm_a_s.s, std::move(fm_a_s.fm), cl, timeout, trace_state);
+    return do_with(std::move(mutations), [this, cl, timeout, trace_state = std::move(trace_state), permit = std::move(permit)] (std::vector<frozen_mutation_and_schema>& update_ms) mutable {
+        return parallel_for_each(update_ms, [this, cl, timeout, trace_state, permit] (frozen_mutation_and_schema& fm_a_s) {
+            return mutate_counter_on_leader_and_replicate(fm_a_s.s, std::move(fm_a_s.fm), cl, timeout, trace_state, permit);
         });
     });
 }
 
 future<>
 storage_proxy::mutate_counter_on_leader_and_replicate(const schema_ptr& s, frozen_mutation fm, db::consistency_level cl, clock_type::time_point timeout,
-                                                      tracing::trace_state_ptr trace_state) {
+                                                      tracing::trace_state_ptr trace_state, service_permit permit) {
     auto shard = _db.local().shard_of(fm);
-    _stats.replica_cross_shard_ops += shard != engine().cpu_id();
-    return _db.invoke_on(shard, [gs = global_schema_ptr(s), fm = std::move(fm), cl, timeout, gt = tracing::global_trace_state_ptr(std::move(trace_state))] (database& db) {
+    bool local = shard == engine().cpu_id();
+    _stats.replica_cross_shard_ops += !local;
+    return _db.invoke_on(shard, _write_smp_service_group, [gs = global_schema_ptr(s), fm = std::move(fm), cl, timeout, gt = tracing::global_trace_state_ptr(std::move(trace_state)), permit = std::move(permit), local] (database& db) {
         auto trace_state = gt.get();
-        return db.apply_counter_update(gs, fm, timeout, trace_state).then([cl, timeout, trace_state] (mutation m) mutable {
-            return service::get_local_storage_proxy().replicate_counter_from_leader(std::move(m), cl, std::move(trace_state), timeout);
+        auto p = local ? std::move(permit) : /* FIXME: either obtain a real permit on this shard or hold original one across shard */ empty_service_permit();
+        return db.apply_counter_update(gs, fm, timeout, trace_state).then([cl, timeout, trace_state, p = std::move(p)] (mutation m) mutable {
+            return service::get_local_storage_proxy().replicate_counter_from_leader(std::move(m), cl, std::move(trace_state), timeout, std::move(p));
         });
     });
 }
@@ -1340,7 +1042,9 @@ future<>
 storage_proxy::mutate_streaming_mutation(const schema_ptr& s, utils::UUID plan_id, const frozen_mutation& m, bool fragmented) {
     auto shard = _db.local().shard_of(m);
     _stats.replica_cross_shard_ops += shard != engine().cpu_id();
-    return _db.invoke_on(shard, [&m, plan_id, fragmented, gs = global_schema_ptr(s)] (database& db) mutable -> future<> {
+    // In theory streaming writes should have their own smp_service_group, but this is only used during upgrades from old versions; new
+    // versions use rpc streaming.
+    return _db.invoke_on(shard, _write_smp_service_group, [&m, plan_id, fragmented, gs = global_schema_ptr(s)] (database& db) mutable -> future<> {
         return db.apply_streaming_mutation(gs, plan_id, m, fragmented);
     });
 }
@@ -1354,7 +1058,7 @@ storage_proxy::mutate_streaming_mutation(const schema_ptr& s, utils::UUID plan_i
  * to the hint method below (dead nodes).
  */
 storage_proxy::response_id_type
-storage_proxy::create_write_response_handler(const mutation& m, db::consistency_level cl, db::write_type type, tracing::trace_state_ptr tr_state) {
+storage_proxy::create_write_response_handler(const mutation& m, db::consistency_level cl, db::write_type type, tracing::trace_state_ptr tr_state, service_permit permit) {
     auto keyspace_name = m.schema()->ks_name();
     keyspace& ks = _db.local().find_keyspace(keyspace_name);
     auto& rs = ks.get_replication_strategy();
@@ -1365,7 +1069,18 @@ storage_proxy::create_write_response_handler(const mutation& m, db::consistency_
     slogger.trace("creating write handler for token: {} natural: {} pending: {}", m.token(), natural_endpoints, pending_endpoints);
     tracing::trace(tr_state, "Creating write handler for token: {} natural: {} pending: {}", m.token(), natural_endpoints ,pending_endpoints);
 
-    // filter out naturale_endpoints from pending_endpoint if later is not yet updated during node join
+    // Check if this node, which is serving as a coordinator for
+    // the mutation, is also a replica for the partition being
+    // changed. Mutations sent by drivers unaware of token
+    // distribution create a lot of network noise and thus should be
+    // accounted in the metrics.
+    if (std::find(natural_endpoints.begin(), natural_endpoints.end(),
+                  utils::fb_utilities::get_broadcast_address()) == natural_endpoints.end()) {
+
+        _stats.writes_coordinator_outside_replica_set++;
+    }
+
+    // filter out natural_endpoints from pending_endpoints if the latter is not yet updated during node join
     auto itend = boost::range::remove_if(pending_endpoints, [&natural_endpoints] (gms::inet_address& p) {
         return boost::range::find(natural_endpoints, p) != natural_endpoints.end();
     });
@@ -1388,18 +1103,18 @@ storage_proxy::create_write_response_handler(const mutation& m, db::consistency_
     live_endpoints.reserve(all.size());
     dead_endpoints.reserve(all.size());
     std::partition_copy(all.begin(), all.end(), std::inserter(live_endpoints, live_endpoints.begin()), std::back_inserter(dead_endpoints),
-            std::bind1st(std::mem_fn(&gms::failure_detector::is_alive), &gms::get_local_failure_detector()));
+            std::bind1st(std::mem_fn(&gms::gossiper::is_alive), &gms::get_local_gossiper()));
 
     slogger.trace("creating write handler with live: {} dead: {}", live_endpoints, dead_endpoints);
     tracing::trace(tr_state, "Creating write handler with live: {} dead: {}", live_endpoints, dead_endpoints);
 
     db::assure_sufficient_live_nodes(cl, ks, live_endpoints, pending_endpoints);
 
-    return create_write_response_handler(ks, cl, type, std::make_unique<shared_mutation>(m), std::move(live_endpoints), pending_endpoints, std::move(dead_endpoints), std::move(tr_state), _stats);
+    return create_write_response_handler(ks, cl, type, std::make_unique<shared_mutation>(m), std::move(live_endpoints), pending_endpoints, std::move(dead_endpoints), std::move(tr_state), _stats, std::move(permit));
 }
 
 storage_proxy::response_id_type
-storage_proxy::create_write_response_handler(const std::unordered_map<gms::inet_address, std::experimental::optional<mutation>>& m, db::consistency_level cl, db::write_type type, tracing::trace_state_ptr tr_state) {
+storage_proxy::create_write_response_handler(const std::unordered_map<gms::inet_address, std::optional<mutation>>& m, db::consistency_level cl, db::write_type type, tracing::trace_state_ptr tr_state, service_permit permit) {
     std::unordered_set<gms::inet_address> endpoints(m.size());
     boost::copy(m | boost::adaptors::map_keys, std::inserter(endpoints, endpoints.begin()));
     auto mh = std::make_unique<per_destination_mutation>(m);
@@ -1410,7 +1125,7 @@ storage_proxy::create_write_response_handler(const std::unordered_map<gms::inet_
     auto keyspace_name = mh->schema()->ks_name();
     keyspace& ks = _db.local().find_keyspace(keyspace_name);
 
-    return create_write_response_handler(ks, cl, type, std::move(mh), std::move(endpoints), std::vector<gms::inet_address>(), std::vector<gms::inet_address>(), std::move(tr_state), _stats);
+    return create_write_response_handler(ks, cl, type, std::move(mh), std::move(endpoints), std::vector<gms::inet_address>(), std::vector<gms::inet_address>(), std::move(tr_state), _stats, std::move(permit));
 }
 
 void
@@ -1426,29 +1141,45 @@ storage_proxy::hint_to_dead_endpoints(response_id_type id, db::consistency_level
 }
 
 template<typename Range, typename CreateWriteHandler>
-future<std::vector<storage_proxy::unique_response_handler>> storage_proxy::mutate_prepare(Range&& mutations, db::consistency_level cl, db::write_type type, CreateWriteHandler create_handler) {
+future<std::vector<storage_proxy::unique_response_handler>> storage_proxy::mutate_prepare(Range&& mutations, db::consistency_level cl, db::write_type type, service_permit permit, CreateWriteHandler create_handler) {
     // apply is used to convert exceptions to exceptional future
-    return futurize<std::vector<storage_proxy::unique_response_handler>>::apply([this] (Range&& mutations, db::consistency_level cl, db::write_type type, CreateWriteHandler create_handler) {
+    return futurize<std::vector<storage_proxy::unique_response_handler>>::apply([this] (Range&& mutations, db::consistency_level cl, db::write_type type, service_permit permit, CreateWriteHandler create_handler) {
         std::vector<unique_response_handler> ids;
         ids.reserve(std::distance(std::begin(mutations), std::end(mutations)));
         for (auto& m : mutations) {
-            ids.emplace_back(*this, create_handler(m, cl, type));
+            ids.emplace_back(*this, create_handler(m, cl, type, permit));
         }
         return make_ready_future<std::vector<unique_response_handler>>(std::move(ids));
-    }, std::forward<Range>(mutations), cl, type, std::move(create_handler));
+    }, std::forward<Range>(mutations), cl, type, std::move(permit), std::move(create_handler));
 }
 
 template<typename Range>
-future<std::vector<storage_proxy::unique_response_handler>> storage_proxy::mutate_prepare(Range&& mutations, db::consistency_level cl, db::write_type type, tracing::trace_state_ptr tr_state) {
-    return mutate_prepare<>(std::forward<Range>(mutations), cl, type, [this, tr_state = std::move(tr_state)] (const typename std::decay_t<Range>::value_type& m, db::consistency_level cl, db::write_type type) mutable {
-        return create_write_response_handler(m, cl, type, tr_state);
+future<std::vector<storage_proxy::unique_response_handler>> storage_proxy::mutate_prepare(Range&& mutations, db::consistency_level cl, db::write_type type, tracing::trace_state_ptr tr_state, service_permit permit) {
+    return mutate_prepare<>(std::forward<Range>(mutations), cl, type, std::move(permit), [this, tr_state = std::move(tr_state)] (const typename std::decay_t<Range>::value_type& m, db::consistency_level cl, db::write_type type, service_permit permit) mutable {
+        return create_write_response_handler(m, cl, type, tr_state, std::move(permit));
     });
 }
 
 future<> storage_proxy::mutate_begin(std::vector<unique_response_handler> ids, db::consistency_level cl,
-                                     stdx::optional<clock_type::time_point> timeout_opt) {
+                                     std::optional<clock_type::time_point> timeout_opt) {
     return parallel_for_each(ids, [this, cl, timeout_opt] (unique_response_handler& protected_response) {
         auto response_id = protected_response.id;
+        // This function, mutate_begin(), is called after a preemption point
+        // so it's possible that other code besides our caller just ran. In
+        // particular, Scylla may have noticed that a remote node went down,
+        // called storage_proxy::on_down(), and removed some of the ongoing
+        // handlers, including this id. If this happens, we need to ignore
+        // this id - not try to look it up or start a send.
+        if (_response_handlers.find(response_id) == _response_handlers.end()) {
+            protected_response.release(); // Don't try to remove this id again
+            // Requests that time-out normally below after response_wait()
+            // result in an exception (see ~abstract_write_response_handler())
+            // However, here we no longer have the handler or its information
+            // to put in the exception. The exception is not needed for
+            // correctness (e.g., hints are written by timeout_cb(), not
+            // because of an exception here).
+            return make_exception_future<>(std::runtime_error("unstarted write cancelled"));
+        }
         // it is better to send first and hint afterwards to reduce latency
         // but request may complete before hint_to_dead_endpoints() is called and
         // response_id handler will be removed, so we will have to do hint with separate
@@ -1459,7 +1190,7 @@ future<> storage_proxy::mutate_begin(std::vector<unique_response_handler> ids, d
         // call before send_to_live_endpoints() for the same reason as above
         auto f = response_wait(response_id, timeout);
         send_to_live_endpoints(protected_response.release(), timeout); // response is now running and it will either complete or timeout
-        return std::move(f);
+        return f;
     });
 }
 
@@ -1526,7 +1257,7 @@ gms::inet_address storage_proxy::find_leader_for_counter_update(const mutation& 
 }
 
 template<typename Range>
-future<> storage_proxy::mutate_counters(Range&& mutations, db::consistency_level cl, tracing::trace_state_ptr tr_state, clock_type::time_point timeout) {
+future<> storage_proxy::mutate_counters(Range&& mutations, db::consistency_level cl, tracing::trace_state_ptr tr_state, service_permit permit, clock_type::time_point timeout) {
     if (boost::empty(mutations)) {
         return make_ready_future<>();
     }
@@ -1545,14 +1276,14 @@ future<> storage_proxy::mutate_counters(Range&& mutations, db::consistency_level
 
     // Forward mutations to the leaders chosen for them
     auto my_address = utils::fb_utilities::get_broadcast_address();
-    return parallel_for_each(leaders, [this, cl, timeout, tr_state = std::move(tr_state), my_address] (auto& endpoint_and_mutations) {
+    return parallel_for_each(leaders, [this, cl, timeout, tr_state = std::move(tr_state), permit = std::move(permit), my_address] (auto& endpoint_and_mutations) {
         auto endpoint = endpoint_and_mutations.first;
 
         // The leader receives a vector of mutations and processes them together,
         // so if there is a timeout we don't really know which one is to "blame"
         // and what to put in ks and cf fields of write timeout exception.
         // Let's just use the schema of the first mutation in a vector.
-        auto handle_error = [this, sp = this->shared_from_this(), s = endpoint_and_mutations.second[0].s, cl] (std::exception_ptr exp) {
+        auto handle_error = [this, sp = this->shared_from_this(), s = endpoint_and_mutations.second[0].s, cl, permit] (std::exception_ptr exp) {
             auto& ks = _db.local().find_keyspace(s->ks_name());
             try {
                 std::rethrow_exception(std::move(exp));
@@ -1565,7 +1296,7 @@ future<> storage_proxy::mutate_counters(Range&& mutations, db::consistency_level
 
         auto f = make_ready_future<>();
         if (endpoint == my_address) {
-            f = this->mutate_counters_on_leader(std::move(endpoint_and_mutations.second), cl, timeout, tr_state);
+            f = this->mutate_counters_on_leader(std::move(endpoint_and_mutations.second), cl, timeout, tr_state, permit);
         } else {
             auto& mutations = endpoint_and_mutations.second;
             auto fms = boost::copy_range<std::vector<frozen_mutation>>(mutations | boost::adaptors::transformed([] (auto& m) {
@@ -1591,24 +1322,24 @@ future<> storage_proxy::mutate_counters(Range&& mutations, db::consistency_level
  * @param consistency_level the consistency level for the operation
  * @param tr_state trace state handle
  */
-future<> storage_proxy::mutate(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state, bool raw_counters) {
-    return _mutate_stage(this, std::move(mutations), cl, timeout, std::move(tr_state), raw_counters);
+future<> storage_proxy::mutate(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state, service_permit permit, bool raw_counters) {
+    return _mutate_stage(this, std::move(mutations), cl, timeout, std::move(tr_state), std::move(permit), raw_counters);
 }
 
-future<> storage_proxy::do_mutate(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state, bool raw_counters) {
+future<> storage_proxy::do_mutate(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state, service_permit permit, bool raw_counters) {
     auto mid = raw_counters ? mutations.begin() : boost::range::partition(mutations, [] (auto&& m) {
         return m.schema()->is_counter();
     });
     return seastar::when_all_succeed(
-        mutate_counters(boost::make_iterator_range(mutations.begin(), mid), cl, tr_state, timeout),
-        mutate_internal(boost::make_iterator_range(mid, mutations.end()), cl, false, tr_state, timeout)
+        mutate_counters(boost::make_iterator_range(mutations.begin(), mid), cl, tr_state, permit, timeout),
+        mutate_internal(boost::make_iterator_range(mid, mutations.end()), cl, false, tr_state, permit, timeout)
     );
 }
 
 future<> storage_proxy::replicate_counter_from_leader(mutation m, db::consistency_level cl, tracing::trace_state_ptr tr_state,
-                                                      clock_type::time_point timeout) {
+                                                      clock_type::time_point timeout, service_permit permit) {
     // FIXME: do not send the mutation to itself, it has already been applied (it is not incorrect to do so, though)
-    return mutate_internal(std::array<mutation, 1>{std::move(m)}, cl, true, std::move(tr_state), timeout);
+    return mutate_internal(std::array<mutation, 1>{std::move(m)}, cl, true, std::move(tr_state), std::move(permit), timeout);
 }
 
 /*
@@ -1618,8 +1349,8 @@ future<> storage_proxy::replicate_counter_from_leader(mutation m, db::consistenc
  */
 template<typename Range>
 future<>
-storage_proxy::mutate_internal(Range mutations, db::consistency_level cl, bool counters, tracing::trace_state_ptr tr_state,
-                               stdx::optional<clock_type::time_point> timeout_opt) {
+storage_proxy::mutate_internal(Range mutations, db::consistency_level cl, bool counters, tracing::trace_state_ptr tr_state, service_permit permit,
+                               std::optional<clock_type::time_point> timeout_opt) {
     if (boost::empty(mutations)) {
         return make_ready_future<>();
     }
@@ -1636,7 +1367,7 @@ storage_proxy::mutate_internal(Range mutations, db::consistency_level cl, bool c
     utils::latency_counter lc;
     lc.start();
 
-    return mutate_prepare(mutations, cl, type, tr_state).then([this, cl, timeout_opt] (std::vector<storage_proxy::unique_response_handler> ids) {
+    return mutate_prepare(mutations, cl, type, tr_state, std::move(permit)).then([this, cl, timeout_opt] (std::vector<storage_proxy::unique_response_handler> ids) {
         return mutate_begin(std::move(ids), cl, timeout_opt);
     }).then_wrapped([this, p = shared_from_this(), lc, tr_state] (future<> f) mutable {
         return p->mutate_end(std::move(f), lc, _stats, std::move(tr_state));
@@ -1646,22 +1377,13 @@ storage_proxy::mutate_internal(Range mutations, db::consistency_level cl, bool c
 future<>
 storage_proxy::mutate_with_triggers(std::vector<mutation> mutations, db::consistency_level cl,
     clock_type::time_point timeout,
-    bool should_mutate_atomically, tracing::trace_state_ptr tr_state, bool raw_counters) {
+    bool should_mutate_atomically, tracing::trace_state_ptr tr_state, service_permit permit, bool raw_counters) {
     warn(unimplemented::cause::TRIGGERS);
-#if 0
-        Collection<Mutation> augmented = TriggerExecutor.instance.execute(mutations);
-        if (augmented != null) {
-            return mutate_atomically(augmented, consistencyLevel);
-        } else {
-#endif
     if (should_mutate_atomically) {
         assert(!raw_counters);
-        return mutate_atomically(std::move(mutations), cl, timeout, std::move(tr_state));
+        return mutate_atomically(std::move(mutations), cl, timeout, std::move(tr_state), std::move(permit));
     }
-    return mutate(std::move(mutations), cl, timeout, std::move(tr_state), raw_counters);
-#if 0
-    }
-#endif
+    return mutate(std::move(mutations), cl, timeout, std::move(tr_state), std::move(permit), raw_counters);
 }
 
 /**
@@ -1674,7 +1396,7 @@ storage_proxy::mutate_with_triggers(std::vector<mutation> mutations, db::consist
  * @param consistency_level the consistency level for the operation
  */
 future<>
-storage_proxy::mutate_atomically(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state) {
+storage_proxy::mutate_atomically(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state, service_permit permit) {
 
     utils::latency_counter lc;
     lc.start();
@@ -1686,24 +1408,26 @@ storage_proxy::mutate_atomically(std::vector<mutation> mutations, db::consistenc
         clock_type::time_point _timeout;
         tracing::trace_state_ptr _trace_state;
         storage_proxy::stats& _stats;
+        service_permit _permit;
 
         const utils::UUID _batch_uuid;
         const std::unordered_set<gms::inet_address> _batchlog_endpoints;
 
     public:
-        context(storage_proxy & p, std::vector<mutation>&& mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state)
+        context(storage_proxy & p, std::vector<mutation>&& mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state, service_permit permit)
                 : _p(p)
                 , _mutations(std::move(mutations))
                 , _cl(cl)
                 , _timeout(timeout)
                 , _trace_state(std::move(tr_state))
                 , _stats(p._stats)
+                , _permit(std::move(permit))
                 , _batch_uuid(utils::UUID_gen::get_time_UUID())
                 , _batchlog_endpoints(
                         [this]() -> std::unordered_set<gms::inet_address> {
                             auto local_addr = utils::fb_utilities::get_broadcast_address();
-                            auto topology = service::get_storage_service().local().get_token_metadata().get_topology();
-                            auto local_endpoints = topology.get_datacenter_racks().at(get_local_dc()); // note: origin copies, so do that here too...
+                            auto& topology = service::get_storage_service().local().get_token_metadata().get_topology();
+                            auto& local_endpoints = topology.get_datacenter_racks().at(get_local_dc());
                             auto local_rack = locator::i_endpoint_snitch::get_local_snitch_ptr()->get_rack(local_addr);
                             auto chosen_endpoints = db::get_batchlog_manager().local().endpoint_filter(local_rack, local_endpoints);
 
@@ -1720,9 +1444,9 @@ storage_proxy::mutate_atomically(std::vector<mutation> mutations, db::consistenc
         }
 
         future<> send_batchlog_mutation(mutation m, db::consistency_level cl = db::consistency_level::ONE) {
-            return _p.mutate_prepare<>(std::array<mutation, 1>{std::move(m)}, cl, db::write_type::BATCH_LOG, [this] (const mutation& m, db::consistency_level cl, db::write_type type) {
+            return _p.mutate_prepare<>(std::array<mutation, 1>{std::move(m)}, cl, db::write_type::BATCH_LOG, _permit, [this] (const mutation& m, db::consistency_level cl, db::write_type type, service_permit permit) {
                 auto& ks = _p._db.local().find_keyspace(m.schema()->ks_name());
-                return _p.create_write_response_handler(ks, cl, type, std::make_unique<shared_mutation>(m), _batchlog_endpoints, {}, {}, _trace_state, _stats);
+                return _p.create_write_response_handler(ks, cl, type, std::make_unique<shared_mutation>(m), _batchlog_endpoints, {}, {}, _trace_state, _stats, std::move(permit));
             }).then([this, cl] (std::vector<unique_response_handler> ids) {
                 return _p.mutate_begin(std::move(ids), cl, _timeout);
             });
@@ -1747,7 +1471,7 @@ storage_proxy::mutate_atomically(std::vector<mutation> mutations, db::consistenc
         };
 
         future<> run() {
-            return _p.mutate_prepare(_mutations, _cl, db::write_type::BATCH, _trace_state).then([this] (std::vector<unique_response_handler> ids) {
+            return _p.mutate_prepare(_mutations, _cl, db::write_type::BATCH, _trace_state, _permit).then([this] (std::vector<unique_response_handler> ids) {
                 return sync_write_to_batchlog().then([this, ids = std::move(ids)] () mutable {
                     tracing::trace(_trace_state, "Sending batch mutations");
                     return _p.mutate_begin(std::move(ids), _cl, _timeout);
@@ -1756,9 +1480,9 @@ storage_proxy::mutate_atomically(std::vector<mutation> mutations, db::consistenc
         }
     };
 
-    auto mk_ctxt = [this, tr_state, timeout] (std::vector<mutation> mutations, db::consistency_level cl) mutable {
+    auto mk_ctxt = [this, tr_state, timeout, permit = std::move(permit)] (std::vector<mutation> mutations, db::consistency_level cl) mutable {
       try {
-          return make_ready_future<lw_shared_ptr<context>>(make_lw_shared<context>(*this, std::move(mutations), cl, timeout, std::move(tr_state)));
+          return make_ready_future<lw_shared_ptr<context>>(make_lw_shared<context>(*this, std::move(mutations), cl, timeout, std::move(tr_state), std::move(permit)));
       } catch(...) {
           return make_exception_future<lw_shared_ptr<context>>(std::current_exception());
       }
@@ -1782,26 +1506,23 @@ future<> storage_proxy::send_to_endpoint(
         gms::inet_address target,
         std::vector<gms::inet_address> pending_endpoints,
         db::write_type type,
-        write_stats& stats) {
+        write_stats& stats,
+        allow_hints allow_hints) {
     utils::latency_counter lc;
     lc.start();
 
-    stdx::optional<clock_type::time_point> timeout;
-    db::consistency_level cl;
+    std::optional<clock_type::time_point> timeout;
+    db::consistency_level cl = allow_hints ? db::consistency_level::ANY : db::consistency_level::ONE;
     if (type == db::write_type::VIEW) {
-        // View updates use consistency level ANY in order to fall back to hinted handoff in case of a failed update.
-        // They also have a near-infinite timeout to avoid incurring the extra work of writting hints and to apply
-        // backpressure.
+        // View updates have a near-infinite timeout to avoid incurring the extra work of writting hints
+        // and to apply backpressure.
         timeout = clock_type::now() + 5min;
-        cl = db::consistency_level::ANY;
-    } else {
-        cl = db::consistency_level::ONE;
     }
-    return mutate_prepare(std::array{std::move(m)}, cl, type,
+    return mutate_prepare(std::array{std::move(m)}, cl, type, /* does view building should hold a real permit */ empty_service_permit(),
             [this, target = std::array{target}, pending_endpoints = std::move(pending_endpoints), &stats] (
                 std::unique_ptr<mutation_holder>& m,
                 db::consistency_level cl,
-                db::write_type type) mutable {
+                db::write_type type, service_permit permit) mutable {
         std::unordered_set<gms::inet_address> targets;
         targets.reserve(pending_endpoints.size() + 1);
         std::vector<gms::inet_address> dead_endpoints;
@@ -1809,7 +1530,7 @@ future<> storage_proxy::send_to_endpoint(
                 boost::range::join(pending_endpoints, target),
                 std::inserter(targets, targets.begin()),
                 std::back_inserter(dead_endpoints),
-                [] (gms::inet_address ep) { return gms::get_local_failure_detector().is_alive(ep); });
+                [] (gms::inet_address ep) { return gms::get_local_gossiper().is_alive(ep); });
         auto& ks = _db.local().find_keyspace(m->schema()->ks_name());
         slogger.trace("Creating write handler with live: {}; dead: {}", targets, dead_endpoints);
         db::assure_sufficient_live_nodes(cl, ks, targets, pending_endpoints);
@@ -1822,7 +1543,8 @@ future<> storage_proxy::send_to_endpoint(
             pending_endpoints,
             std::move(dead_endpoints),
             nullptr,
-            stats);
+            stats,
+            std::move(permit));
     }).then([this, cl, timeout = std::move(timeout)] (std::vector<unique_response_handler> ids) mutable {
         return mutate_begin(std::move(ids), cl, std::move(timeout));
     }).then_wrapped([p = shared_from_this(), lc, &stats] (future<>&& f) {
@@ -1834,13 +1556,15 @@ future<> storage_proxy::send_to_endpoint(
         frozen_mutation_and_schema fm_a_s,
         gms::inet_address target,
         std::vector<gms::inet_address> pending_endpoints,
-        db::write_type type) {
+        db::write_type type,
+        allow_hints allow_hints) {
     return send_to_endpoint(
             std::make_unique<shared_mutation>(std::move(fm_a_s)),
             std::move(target),
             std::move(pending_endpoints),
             type,
-            _stats);
+            _stats,
+            allow_hints);
 }
 
 future<> storage_proxy::send_to_endpoint(
@@ -1848,13 +1572,15 @@ future<> storage_proxy::send_to_endpoint(
         gms::inet_address target,
         std::vector<gms::inet_address> pending_endpoints,
         db::write_type type,
-        write_stats& stats) {
+        write_stats& stats,
+        allow_hints allow_hints) {
     return send_to_endpoint(
             std::make_unique<shared_mutation>(std::move(fm_a_s)),
             std::move(target),
             std::move(pending_endpoints),
             type,
-            stats);
+            stats,
+            allow_hints);
 }
 
 /**
@@ -1937,7 +1663,7 @@ void storage_proxy::send_to_live_endpoints(storage_proxy::response_id_type respo
         lw_shared_ptr<const frozen_mutation> m = handler.get_mutation_for(coordinator);
 
         if (!m || (handler.is_counter() && coordinator == my_address)) {
-            got_response(response_id, coordinator, stdx::nullopt);
+            got_response(response_id, coordinator, std::nullopt);
         } else {
             if (!handler.read_repair_write()) {
                 ++stats.writes_attempts.get_ep_stat(coordinator);
@@ -1952,9 +1678,10 @@ void storage_proxy::send_to_live_endpoints(storage_proxy::response_id_type respo
             }
         }
 
-        f.handle_exception([response_id, forward_size, coordinator, handler_ptr, p = shared_from_this(), &stats] (std::exception_ptr eptr) {
+        // Waited on indirectly.
+        (void)f.handle_exception([response_id, forward_size, coordinator, handler_ptr, p = shared_from_this(), &stats] (std::exception_ptr eptr) {
             ++stats.writes_errors.get_ep_stat(coordinator);
-            p->got_failure_response(response_id, coordinator, forward_size + 1, stdx::nullopt);
+            p->got_failure_response(response_id, coordinator, forward_size + 1, std::nullopt);
             try {
                 std::rethrow_exception(eptr);
             } catch(rpc::closed_error&) {
@@ -1989,144 +1716,12 @@ size_t storage_proxy::hint_to_dead_endpoints(std::unique_ptr<mutation_holder>& m
     }
 }
 
-#if 0
-    /**
-     * Handle counter mutation on the coordinator host.
-     *
-     * A counter mutation needs to first be applied to a replica (that we'll call the leader for the mutation) before being
-     * replicated to the other endpoint. To achieve so, there is two case:
-     *   1) the coordinator host is a replica: we proceed to applying the update locally and replicate throug
-     *   applyCounterMutationOnCoordinator
-     *   2) the coordinator is not a replica: we forward the (counter)mutation to a chosen replica (that will proceed through
-     *   applyCounterMutationOnLeader upon receive) and wait for its acknowledgment.
-     *
-     * Implementation note: We check if we can fulfill the CL on the coordinator host even if he is not a replica to allow
-     * quicker response and because the WriteResponseHandlers don't make it easy to send back an error. We also always gather
-     * the write latencies at the coordinator node to make gathering point similar to the case of standard writes.
-     */
-    public static AbstractWriteResponseHandler mutateCounter(CounterMutation cm, String localDataCenter) throws UnavailableException, OverloadedException
-    {
-        InetAddress endpoint = findSuitableEndpoint(cm.getKeyspaceName(), cm.key(), localDataCenter, cm.consistency());
-
-        if (endpoint.equals(FBUtilities.getBroadcastAddress()))
-        {
-            return applyCounterMutationOnCoordinator(cm, localDataCenter);
-        }
-        else
-        {
-            // Exit now if we can't fulfill the CL here instead of forwarding to the leader replica
-            String keyspaceName = cm.getKeyspaceName();
-            AbstractReplicationStrategy rs = Keyspace.open(keyspaceName).getReplicationStrategy();
-            Token tk = StorageService.getPartitioner().getToken(cm.key());
-            List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspaceName, tk);
-            Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspaceName);
-
-            rs.getWriteResponseHandler(naturalEndpoints, pendingEndpoints, cm.consistency(), null, WriteType.COUNTER).assureSufficientLiveNodes();
-
-            // Forward the actual update to the chosen leader replica
-            AbstractWriteResponseHandler responseHandler = new WriteResponseHandler(endpoint, WriteType.COUNTER);
-
-            Tracing.trace("Enqueuing counter update to {}", endpoint);
-            MessagingService.instance().sendRR(cm.makeMutationMessage(), endpoint, responseHandler, false);
-            return responseHandler;
-        }
-    }
-
-    /**
-     * Find a suitable replica as leader for counter update.
-     * For now, we pick a random replica in the local DC (or ask the snitch if
-     * there is no replica alive in the local DC).
-     * TODO: if we track the latency of the counter writes (which makes sense
-     * contrarily to standard writes since there is a read involved), we could
-     * trust the dynamic snitch entirely, which may be a better solution. It
-     * is unclear we want to mix those latencies with read latencies, so this
-     * may be a bit involved.
-     */
-    private static InetAddress findSuitableEndpoint(String keyspaceName, ByteBuffer key, String localDataCenter, ConsistencyLevel cl) throws UnavailableException
-    {
-        Keyspace keyspace = Keyspace.open(keyspaceName);
-        IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
-        List<InetAddress> endpoints = StorageService.instance.getLiveNaturalEndpoints(keyspace, key);
-        if (endpoints.isEmpty())
-            // TODO have a way to compute the consistency level
-            throw new UnavailableException(cl, cl.blockFor(keyspace), 0);
-
-        List<InetAddress> localEndpoints = new ArrayList<InetAddress>();
-        for (InetAddress endpoint : endpoints)
-        {
-            if (snitch.getDatacenter(endpoint).equals(localDataCenter))
-                localEndpoints.add(endpoint);
-        }
-        if (localEndpoints.isEmpty())
-        {
-            // No endpoint in local DC, pick the closest endpoint according to the snitch
-            snitch.sortByProximity(FBUtilities.getBroadcastAddress(), endpoints);
-            return endpoints.get(0);
-        }
-        else
-        {
-            return localEndpoints.get(ThreadLocalRandom.current().nextInt(localEndpoints.size()));
-        }
-    }
-
-    // Must be called on a replica of the mutation. This replica becomes the
-    // leader of this mutation.
-    public static AbstractWriteResponseHandler applyCounterMutationOnLeader(CounterMutation cm, String localDataCenter, Runnable callback)
-    throws UnavailableException, OverloadedException
-    {
-        return performWrite(cm, cm.consistency(), localDataCenter, counterWritePerformer, callback, WriteType.COUNTER);
-    }
-
-    // Same as applyCounterMutationOnLeader but must with the difference that it use the MUTATION stage to execute the write (while
-    // applyCounterMutationOnLeader assumes it is on the MUTATION stage already)
-    public static AbstractWriteResponseHandler applyCounterMutationOnCoordinator(CounterMutation cm, String localDataCenter)
-    throws UnavailableException, OverloadedException
-    {
-        return performWrite(cm, cm.consistency(), localDataCenter, counterWriteOnCoordinatorPerformer, null, WriteType.COUNTER);
-    }
-
-    private static Runnable counterWriteTask(final IMutation mutation,
-                                             final Iterable<InetAddress> targets,
-                                             final AbstractWriteResponseHandler responseHandler,
-                                             final String localDataCenter)
-    {
-        return new DroppableRunnable(MessagingService.Verb.COUNTER_MUTATION)
-        {
-            @Override
-            public void runMayThrow() throws OverloadedException, WriteTimeoutException
-            {
-                IMutation processed = SinkManager.processWriteRequest(mutation);
-                if (processed == null)
-                    return;
-
-                assert processed instanceof CounterMutation;
-                CounterMutation cm = (CounterMutation) processed;
-
-                Mutation result = cm.apply();
-                responseHandler.response(null);
-
-                Set<InetAddress> remotes = Sets.difference(ImmutableSet.copyOf(targets),
-                            ImmutableSet.of(FBUtilities.getBroadcastAddress()));
-                if (!remotes.isEmpty())
-                    sendToHintedEndpoints(result, remotes, responseHandler, localDataCenter);
-            }
-        };
-    }
-
-    private static boolean systemKeyspaceQuery(List<ReadCommand> cmds)
-    {
-        for (ReadCommand cmd : cmds)
-            if (!cmd.ksName.equals(SystemKeyspace.NAME))
-                return false;
-        return true;
-    }
-#endif
-
-future<> storage_proxy::schedule_repair(std::unordered_map<dht::token, std::unordered_map<gms::inet_address, std::experimental::optional<mutation>>> diffs, db::consistency_level cl, tracing::trace_state_ptr trace_state) {
+future<> storage_proxy::schedule_repair(std::unordered_map<dht::token, std::unordered_map<gms::inet_address, std::optional<mutation>>> diffs, db::consistency_level cl, tracing::trace_state_ptr trace_state,
+                                        service_permit permit) {
     if (diffs.empty()) {
         return make_ready_future<>();
     }
-    return mutate_internal(diffs | boost::adaptors::map_values, cl, false, std::move(trace_state));
+    return mutate_internal(diffs | boost::adaptors::map_values, cl, false, std::move(trace_state), std::move(permit));
 }
 
 class abstract_read_resolver {
@@ -2296,10 +1891,10 @@ class data_read_resolver : public abstract_read_resolver {
     };
     struct version {
         gms::inet_address from;
-        stdx::optional<partition> par;
+        std::optional<partition> par;
         bool reached_end;
         bool reached_partition_end;
-        version(gms::inet_address from_, stdx::optional<partition> par_, bool reached_end, bool reached_partition_end)
+        version(gms::inet_address from_, std::optional<partition> par_, bool reached_end, bool reached_partition_end)
                 : from(std::move(from_)), par(std::move(par_)), reached_end(reached_end), reached_partition_end(reached_partition_end) {}
     };
     struct mutation_and_live_row_count {
@@ -2360,7 +1955,7 @@ class data_read_resolver : public abstract_read_resolver {
     bool _all_reached_end = true;
     query::short_read _is_short_read;
     std::vector<reply> _data_results;
-    std::unordered_map<dht::token, std::unordered_map<gms::inet_address, std::experimental::optional<mutation>>> _diffs;
+    std::unordered_map<dht::token, std::unordered_map<gms::inet_address, std::optional<mutation>>> _diffs;
 private:
     void on_timeout() override {
         fail_request(std::make_exception_ptr(read_timeout_exception(_schema->ks_name(), _schema->cf_name(), _cl, response_count(), _targets_count, response_count() != 0)));
@@ -2416,7 +2011,7 @@ private:
         const partition* last_partition = nullptr;
         // Versions are in the reversed order.
         for (auto&& pv : versions) {
-            const stdx::optional<partition>& p = pv[replica].par;
+            const std::optional<partition>& p = pv[replica].par;
             if (p) {
                 last_partition = &p.value();
                 break;
@@ -2462,7 +2057,7 @@ private:
                                                       const std::vector<std::vector<version>>& versions, bool is_reversed) {
         bool short_reads_allowed = cmd.slice.options.contains<query::partition_slice::option::allow_short_read>();
         primary_key::less_compare cmp(s, is_reversed);
-        stdx::optional<primary_key> shortest_read;
+        std::optional<primary_key> shortest_read;
         auto num_replicas = versions[0].size();
         for (uint32_t i = 0; i < num_replicas; ++i) {
             if (versions.front()[i].reached_end) {
@@ -2589,7 +2184,7 @@ public:
     bool all_reached_end() const {
         return _all_reached_end;
     }
-    stdx::optional<reconcilable_result> resolve(schema_ptr schema, const query::read_command& cmd, uint32_t original_row_limit, uint32_t original_per_partition_limit,
+    std::optional<reconcilable_result> resolve(schema_ptr schema, const query::read_command& cmd, uint32_t original_row_limit, uint32_t original_per_partition_limit,
             uint32_t original_partition_limit) {
         assert(_data_results.size());
 
@@ -2648,7 +2243,7 @@ public:
                     r.result->partitions().pop_back();
                 } else {
                     // put empty partition for destination without result
-                    v.emplace_back(r.from, stdx::optional<partition>(), r.reached_end, true);
+                    v.emplace_back(r.from, std::optional<partition>(), r.reached_end, true);
                 }
             }
 
@@ -2689,7 +2284,7 @@ public:
                           ? m.partition().difference(schema, v.par->mut().unfreeze(schema).partition())
                           : mutation_partition(*schema, m.partition());
                 auto it = _diffs[m.token()].find(v.from);
-                std::experimental::optional<mutation> mdiff;
+                std::optional<mutation> mdiff;
                 if (!diff.empty()) {
                     has_diff = true;
                     mdiff = mutation(schema, m.decorated_key(), std::move(diff));
@@ -2716,7 +2311,7 @@ public:
             }
             // filter out partitions with empty diffs
             for (auto it = _diffs.begin(); it != _diffs.end();) {
-                if (boost::algorithm::none_of(it->second | boost::adaptors::map_values, std::mem_fn(&std::experimental::optional<mutation>::operator bool))) {
+                if (boost::algorithm::none_of(it->second | boost::adaptors::map_values, std::mem_fn(&std::optional<mutation>::operator bool))) {
                     it = _diffs.erase(it);
                 } else {
                     ++it;
@@ -2737,8 +2332,8 @@ public:
 
         // build reconcilable_result from reconciled data
         // traverse backwards since large keys are at the start
-        std::vector<partition> vec;
-        auto r = boost::accumulate(reconciled_partitions | boost::adaptors::reversed, std::ref(vec), [] (std::vector<partition>& a, const mutation_and_live_row_count& m_a_rc) {
+        utils::chunked_vector<partition> vec;
+        auto r = boost::accumulate(reconciled_partitions | boost::adaptors::reversed, std::ref(vec), [] (utils::chunked_vector<partition>& a, const mutation_and_live_row_count& m_a_rc) {
             a.emplace_back(partition(m_a_rc.live_row_count, freeze(m_a_rc.mut)));
             return std::ref(a);
         });
@@ -2780,6 +2375,8 @@ protected:
     tracing::trace_state_ptr _trace_state;
     lw_shared_ptr<column_family> _cf;
     bool _foreground = true;
+    service_permit _permit; // holds admission permit until operation completes
+
 private:
     void on_read_resolved() noexcept {
         // We could have !_foreground if this is called on behalf of background reconciliation.
@@ -2788,9 +2385,9 @@ private:
     }
 public:
     abstract_read_executor(schema_ptr s, lw_shared_ptr<column_family> cf, shared_ptr<storage_proxy> proxy, lw_shared_ptr<query::read_command> cmd, dht::partition_range pr, db::consistency_level cl, size_t block_for,
-            std::vector<gms::inet_address> targets, tracing::trace_state_ptr trace_state) :
+            std::vector<gms::inet_address> targets, tracing::trace_state_ptr trace_state, service_permit permit) :
                            _schema(std::move(s)), _proxy(std::move(proxy)), _cmd(std::move(cmd)), _partition_range(std::move(pr)), _cl(cl), _block_for(block_for), _targets(std::move(targets)), _trace_state(std::move(trace_state)),
-                           _cf(std::move(cf)) {
+                           _cf(std::move(cf)), _permit(std::move(permit)) {
         _proxy->_stats.reads++;
         _proxy->_stats.foreground_reads++;
     }
@@ -2922,9 +2519,11 @@ protected:
         data_resolver_ptr data_resolver = ::make_shared<data_read_resolver>(_schema, cl, _targets.size(), timeout);
         auto exec = shared_from_this();
 
-        make_mutation_data_requests(cmd, data_resolver, _targets.begin(), _targets.end(), timeout).finally([exec]{});
+        // Waited on indirectly.
+        (void)make_mutation_data_requests(cmd, data_resolver, _targets.begin(), _targets.end(), timeout).finally([exec]{});
 
-        data_resolver->done().then_wrapped([this, exec, data_resolver, cmd = std::move(cmd), cl, timeout] (future<> f) {
+        // Waited on indirectly.
+        (void)data_resolver->done().then_wrapped([this, exec, data_resolver, cmd = std::move(cmd), cl, timeout] (future<> f) {
             try {
                 f.get();
                 auto rr_opt = data_resolver->resolve(_schema, *cmd, original_row_limit(), original_per_partition_row_limit(), original_partition_limit()); // reconciliation happens here
@@ -2941,7 +2540,8 @@ protected:
                     // wait for write to complete before returning result to prevent multiple concurrent read requests to
                     // trigger repair multiple times and to prevent quorum read to return an old value, even after a quorum
                     // another read had returned a newer value (but the newer value had not yet been sent to the other replicas)
-                    _proxy->schedule_repair(data_resolver->get_diffs_for_repair(), _cl, _trace_state).then([this, result = std::move(result)] () mutable {
+                    // Waited on indirectly.
+                    (void)_proxy->schedule_repair(data_resolver->get_diffs_for_repair(), _cl, _trace_state, _permit).then([this, result = std::move(result)] () mutable {
                         _result_promise.set_value(std::move(result));
                         on_read_resolved();
                     }).handle_exception([this, exec] (std::exception_ptr eptr) {
@@ -3006,11 +2606,13 @@ public:
                 db::is_datacenter_local(_cl) ? db::count_local_endpoints(_targets): _targets.size(), timeout);
         auto exec = shared_from_this();
 
-        make_requests(digest_resolver, timeout).finally([exec]() {
+        // Waited on indirectly.
+        (void)make_requests(digest_resolver, timeout).finally([exec]() {
             // hold on to executor until all queries are complete
         });
 
-        digest_resolver->has_cl().then_wrapped([exec, digest_resolver, timeout] (future<foreign_ptr<lw_shared_ptr<query::result>>, bool> f) mutable {
+        // Waited on indirectly.
+        (void)digest_resolver->has_cl().then_wrapped([exec, digest_resolver, timeout] (future<foreign_ptr<lw_shared_ptr<query::result>>, bool> f) mutable {
             bool background_repair_check = false;
             try {
                 exec->got_cl();
@@ -3044,7 +2646,8 @@ public:
                 exec->on_read_resolved();
             }
 
-            digest_resolver->done().then([exec, digest_resolver, timeout, background_repair_check] () mutable {
+            // Waited on indirectly.
+            (void)digest_resolver->done().then([exec, digest_resolver, timeout, background_repair_check] () mutable {
                 if (background_repair_check && !digest_resolver->digests_match()) {
                     exec->_proxy->_stats.read_repair_repaired_background++;
                     exec->_result_promise = promise<foreign_ptr<lw_shared_ptr<query::result>>>();
@@ -3068,8 +2671,9 @@ public:
 
 class never_speculating_read_executor : public abstract_read_executor {
 public:
-    never_speculating_read_executor(schema_ptr s, lw_shared_ptr<column_family> cf, shared_ptr<storage_proxy> proxy, lw_shared_ptr<query::read_command> cmd, dht::partition_range pr, db::consistency_level cl, std::vector<gms::inet_address> targets, tracing::trace_state_ptr trace_state) :
-                                        abstract_read_executor(std::move(s), std::move(cf), std::move(proxy), std::move(cmd), std::move(pr), cl, 0, std::move(targets), std::move(trace_state)) {
+    never_speculating_read_executor(schema_ptr s, lw_shared_ptr<column_family> cf, shared_ptr<storage_proxy> proxy, lw_shared_ptr<query::read_command> cmd, dht::partition_range pr, db::consistency_level cl, std::vector<gms::inet_address> targets, tracing::trace_state_ptr trace_state,
+                                    service_permit permit) :
+                                        abstract_read_executor(std::move(s), std::move(cf), std::move(proxy), std::move(cmd), std::move(pr), cl, 0, std::move(targets), std::move(trace_state), std::move(permit)) {
         _block_for = _targets.size();
     }
 };
@@ -3106,7 +2710,8 @@ public:
                         return make_data_requests(resolver, _targets.end() - 1, _targets.end(), timeout, true);
                     }
                 };
-                send_request(resolver->has_data()).finally([exec = shared_from_this()]{});
+                // Waited on indirectly.
+                (void)send_request(resolver->has_data()).finally([exec = shared_from_this()]{});
             }
         });
         auto& sr = _schema->speculative_retry();
@@ -3169,13 +2774,21 @@ db::read_repair_decision storage_proxy::new_read_repair_decision(const schema& s
         db::consistency_level cl,
         db::read_repair_decision repair_decision,
         tracing::trace_state_ptr trace_state,
-        const std::vector<gms::inet_address>& preferred_endpoints) {
+        const std::vector<gms::inet_address>& preferred_endpoints,
+        bool& is_read_non_local,
+        service_permit permit) {
     const dht::token& token = pr.start()->value().token();
     keyspace& ks = _db.local().find_keyspace(schema->ks_name());
     speculative_retry::type retry_type = schema->speculative_retry().get_type();
     gms::inet_address extra_replica;
 
     std::vector<gms::inet_address> all_replicas = get_live_sorted_endpoints(ks, token);
+    // Check for a non-local read before heat-weighted load balancing
+    // reordering of endpoints happens. The local endpoint, if
+    // present, is always first in the list, as get_live_sorted_endpoints()
+    // orders the list by proximity to the local endpoint.
+    is_read_non_local |= all_replicas.front() != utils::fb_utilities::get_broadcast_address();
+
     auto cf = _db.local().find_column_family(schema).shared_from_this();
     std::vector<gms::inet_address> target_replicas = db::filter_for_query(cl, ks, all_replicas, preferred_endpoints, repair_decision,
             retry_type == speculative_retry::type::NONE ? nullptr : &extra_replica,
@@ -3197,30 +2810,26 @@ db::read_repair_decision storage_proxy::new_read_repair_decision(const schema& s
         _stats.read_repair_attempts++;
     }
 
-#if 0
-    ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.cfName);
-#endif
-
     size_t block_for = db::block_for(ks, cl);
     auto p = shared_from_this();
     // Speculative retry is disabled *OR* there are simply no extra replicas to speculate.
     if (retry_type == speculative_retry::type::NONE || block_for == all_replicas.size()
             || (repair_decision == db::read_repair_decision::DC_LOCAL && is_datacenter_local(cl) && block_for == target_replicas.size())) {
-        return ::make_shared<never_speculating_read_executor>(schema, cf, p, cmd, std::move(pr), cl, std::move(target_replicas), std::move(trace_state));
+        return ::make_shared<never_speculating_read_executor>(schema, cf, p, cmd, std::move(pr), cl, std::move(target_replicas), std::move(trace_state), std::move(permit));
     }
 
     if (target_replicas.size() == all_replicas.size()) {
         // CL.ALL, RRD.GLOBAL or RRD.DC_LOCAL and a single-DC.
         // We are going to contact every node anyway, so ask for 2 full data requests instead of 1, for redundancy
         // (same amount of requests in total, but we turn 1 digest request into a full blown data request).
-        return ::make_shared<always_speculating_read_executor>(schema, cf, p, cmd, std::move(pr), cl, block_for, std::move(target_replicas), std::move(trace_state));
+        return ::make_shared<always_speculating_read_executor>(schema, cf, p, cmd, std::move(pr), cl, block_for, std::move(target_replicas), std::move(trace_state), std::move(permit));
     }
 
     // RRD.NONE or RRD.DC_LOCAL w/ multiple DCs.
     if (target_replicas.size() == block_for) { // If RRD.DC_LOCAL extra replica may already be present
         if (is_datacenter_local(cl) && !db::is_local(extra_replica)) {
             slogger.trace("read executor no extra target to speculate");
-            return ::make_shared<never_speculating_read_executor>(schema, cf, p, cmd, std::move(pr), cl, std::move(target_replicas), std::move(trace_state));
+            return ::make_shared<never_speculating_read_executor>(schema, cf, p, cmd, std::move(pr), cl, std::move(target_replicas), std::move(trace_state), std::move(permit));
         } else {
             target_replicas.push_back(extra_replica);
             slogger.trace("creating read executor with extra target {}", extra_replica);
@@ -3228,9 +2837,9 @@ db::read_repair_decision storage_proxy::new_read_repair_decision(const schema& s
     }
 
     if (retry_type == speculative_retry::type::ALWAYS) {
-        return ::make_shared<always_speculating_read_executor>(schema, cf, p, cmd, std::move(pr), cl, block_for, std::move(target_replicas), std::move(trace_state));
+        return ::make_shared<always_speculating_read_executor>(schema, cf, p, cmd, std::move(pr), cl, block_for, std::move(target_replicas), std::move(trace_state), std::move(permit));
     } else {// PERCENTILE or CUSTOM.
-        return ::make_shared<speculating_read_executor>(schema, cf, p, cmd, std::move(pr), cl, block_for, std::move(target_replicas), std::move(trace_state));
+        return ::make_shared<speculating_read_executor>(schema, cf, p, cmd, std::move(pr), cl, block_for, std::move(target_replicas), std::move(trace_state), std::move(permit));
     }
 }
 
@@ -3248,7 +2857,7 @@ storage_proxy::query_result_local(schema_ptr s, lw_shared_ptr<query::read_comman
     if (pr.is_singular()) {
         unsigned shard = _db.local().shard_of(pr.start()->value().token());
         _stats.replica_cross_shard_ops += shard != engine().cpu_id();
-        return _db.invoke_on(shard, [max_size, gs = global_schema_ptr(s), prv = dht::partition_range_vector({pr}) /* FIXME: pr is copied */, cmd, opts, timeout, gt = tracing::global_trace_state_ptr(std::move(trace_state))] (database& db) mutable {
+        return _db.invoke_on(shard, _read_smp_service_group, [max_size, gs = global_schema_ptr(s), prv = dht::partition_range_vector({pr}) /* FIXME: pr is copied */, cmd, opts, timeout, gt = tracing::global_trace_state_ptr(std::move(trace_state))] (database& db) mutable {
             auto trace_state = gt.get();
             tracing::trace(trace_state, "Start querying the token range that starts with {}", seastar::value_of([&prv] { return prv.begin()->start()->value().token(); }));
             return db.query(gs, *cmd, opts, prv, trace_state, max_size, timeout).then([trace_state](auto&& f, cache_temperature ht) {
@@ -3257,6 +2866,7 @@ storage_proxy::query_result_local(schema_ptr s, lw_shared_ptr<query::read_comman
             });
         });
     } else {
+        // FIXME: adjust multishard_mutation_query to accept an smp_service_group and propagate it there
         return query_nonsingular_mutations_locally(s, cmd, {pr}, std::move(trace_state), max_size, timeout).then([s, cmd, opts] (foreign_ptr<lw_shared_ptr<reconcilable_result>>&& r, cache_temperature&& ht) {
             return make_ready_future<foreign_ptr<lw_shared_ptr<query::result>>, cache_temperature>(
                     ::make_foreign(::make_lw_shared(to_data_query_result(*r, s, cmd->slice,  cmd->row_limit, cmd->partition_limit, opts))), ht);
@@ -3292,6 +2902,10 @@ storage_proxy::query_singular(lw_shared_ptr<query::read_command> cmd,
     db::read_repair_decision repair_decision = query_options.read_repair_decision
         ? *query_options.read_repair_decision : new_read_repair_decision(*schema);
 
+    // Update reads_coordinator_outside_replica_set once per request,
+    // not once per partition.
+    bool is_read_non_local = false;
+
     for (auto&& pr: partition_ranges) {
         if (!pr.is_singular()) {
             throw std::runtime_error("mixed singular and non singular range are not supported");
@@ -3302,8 +2916,14 @@ storage_proxy::query_singular(lw_shared_ptr<query::read_command> cmd,
         const auto replicas = it == query_options.preferred_replicas.end()
             ? std::vector<gms::inet_address>{} : replica_ids_to_endpoints(it->second);
 
-        exec.emplace_back(get_read_executor(cmd, schema, std::move(pr), cl, repair_decision, query_options.trace_state, replicas),
-                std::move(token_range));
+        auto read_executor = get_read_executor(cmd, schema, std::move(pr), cl, repair_decision,
+                                               query_options.trace_state, replicas, is_read_non_local,
+                                               query_options.permit);
+
+        exec.emplace_back(read_executor, std::move(token_range));
+    }
+    if (is_read_non_local) {
+        _stats.reads_coordinator_outside_replica_set++;
     }
 
     query::result_merger merger(cmd->row_limit, cmd->partition_limit);
@@ -3347,17 +2967,16 @@ storage_proxy::query_partition_key_range_concurrent(storage_proxy::clock_type::t
         std::vector<foreign_ptr<lw_shared_ptr<query::result>>>&& results,
         lw_shared_ptr<query::read_command> cmd,
         db::consistency_level cl,
-        dht::partition_range_vector::iterator&& i,
-        dht::partition_range_vector&& ranges,
+        query_ranges_to_vnodes_generator&& ranges_to_vnodes,
         int concurrency_factor,
         tracing::trace_state_ptr trace_state,
         uint32_t remaining_row_count,
         uint32_t remaining_partition_count,
-        replicas_per_token_range preferred_replicas) {
+        replicas_per_token_range preferred_replicas,
+        service_permit permit) {
     schema_ptr schema = local_schema_registry().get(cmd->schema_version);
     keyspace& ks = _db.local().find_keyspace(schema->ks_name());
     std::vector<::shared_ptr<abstract_read_executor>> exec;
-    auto concurrent_fetch_starting_index = i;
     auto p = shared_from_this();
     auto& cf= _db.local().find_column_family(schema);
     auto pcf = _db.local().get_config().cache_hit_rate_read_balancing() ? &cf : nullptr;
@@ -3369,7 +2988,16 @@ storage_proxy::query_partition_key_range_concurrent(storage_proxy::clock_type::t
     };
     const auto to_token_range = [] (const dht::partition_range& r) { return r.transform(std::mem_fn(&dht::ring_position::token)); };
 
-    while (i != ranges.end() && std::distance(concurrent_fetch_starting_index, i) < concurrency_factor) {
+    dht::partition_range_vector ranges = ranges_to_vnodes(concurrency_factor);
+    dht::partition_range_vector::iterator i = ranges.begin();
+
+    // query_ranges_to_vnodes_generator can return less results than requested. If the number of results
+    // is small enough or there are a lot of results - concurrentcy_factor which is increased by shifting left can
+    // eventualy zero out resulting in an infinite recursion. This line makes sure that concurrency factor is never
+    // get stuck on 0 and never increased too much if the number of results remains small.
+    concurrency_factor = std::max(size_t(1), ranges.size());
+
+    while (i != ranges.end()) {
         dht::partition_range& range = *i;
         std::vector<gms::inet_address> live_endpoints = get_live_sorted_endpoints(ks, end_token(range));
         std::vector<gms::inet_address> merged_preferred_replicas = preferred_replicas_for_range(*i);
@@ -3449,7 +3077,7 @@ storage_proxy::query_partition_key_range_concurrent(storage_proxy::clock_type::t
             throw;
         }
 
-        exec.push_back(::make_shared<range_slice_read_executor>(schema, cf.shared_from_this(), p, cmd, std::move(range), cl, std::move(filtered_endpoints), trace_state));
+        exec.push_back(::make_shared<range_slice_read_executor>(schema, cf.shared_from_this(), p, cmd, std::move(range), cl, std::move(filtered_endpoints), trace_state, permit));
         ranges_per_exec.emplace(exec.back().get(), std::move(merged_ranges));
     }
 
@@ -3463,8 +3091,7 @@ storage_proxy::query_partition_key_range_concurrent(storage_proxy::clock_type::t
     return f.then([p,
             exec = std::move(exec),
             results = std::move(results),
-            i = std::move(i),
-            ranges = std::move(ranges),
+            ranges_to_vnodes = std::move(ranges_to_vnodes),
             cl,
             cmd,
             concurrency_factor,
@@ -3473,12 +3100,13 @@ storage_proxy::query_partition_key_range_concurrent(storage_proxy::clock_type::t
             remaining_partition_count,
             trace_state = std::move(trace_state),
             preferred_replicas = std::move(preferred_replicas),
-            ranges_per_exec = std::move(ranges_per_exec)] (foreign_ptr<lw_shared_ptr<query::result>>&& result) mutable {
+            ranges_per_exec = std::move(ranges_per_exec),
+            permit = std::move(permit)] (foreign_ptr<lw_shared_ptr<query::result>>&& result) mutable {
         result->ensure_counts();
         remaining_row_count -= result->row_count().value();
         remaining_partition_count -= result->partition_count().value();
         results.emplace_back(std::move(result));
-        if (i == ranges.end() || !remaining_row_count || !remaining_partition_count) {
+        if (ranges_to_vnodes.empty() || !remaining_row_count || !remaining_partition_count) {
             auto used_replicas = replicas_per_token_range();
             for (auto& e : exec) {
                 // We add used replicas in separate per-vnode entries even if
@@ -3495,8 +3123,8 @@ storage_proxy::query_partition_key_range_concurrent(storage_proxy::clock_type::t
         } else {
             cmd->row_limit = remaining_row_count;
             cmd->partition_limit = remaining_partition_count;
-            return p->query_partition_key_range_concurrent(timeout, std::move(results), cmd, cl, std::move(i), std::move(ranges),
-                    concurrency_factor * 2, std::move(trace_state), remaining_row_count, remaining_partition_count, std::move(preferred_replicas));
+            return p->query_partition_key_range_concurrent(timeout, std::move(results), cmd, cl, std::move(ranges_to_vnodes),
+                    concurrency_factor * 2, std::move(trace_state), remaining_row_count, remaining_partition_count, std::move(preferred_replicas), std::move(permit));
         }
     }).handle_exception([p] (std::exception_ptr eptr) {
         p->handle_read_error(eptr, true);
@@ -3511,37 +3139,18 @@ storage_proxy::query_partition_key_range(lw_shared_ptr<query::read_command> cmd,
         storage_proxy::coordinator_query_options query_options) {
     schema_ptr schema = local_schema_registry().get(cmd->schema_version);
     keyspace& ks = _db.local().find_keyspace(schema->ks_name());
-    dht::partition_range_vector ranges;
 
     // when dealing with LocalStrategy keyspaces, we can skip the range splitting and merging (which can be
     // expensive in clusters with vnodes)
-    if (ks.get_replication_strategy().get_type() == locator::replication_strategy_type::local) {
-        ranges = std::move(partition_ranges);
-    } else {
-        for (auto&& r : partition_ranges) {
-            auto restricted_ranges = get_restricted_ranges(*schema, std::move(r));
-            std::move(restricted_ranges.begin(), restricted_ranges.end(), std::back_inserter(ranges));
-        }
-    }
+    query_ranges_to_vnodes_generator ranges_to_vnodes(schema, std::move(partition_ranges), ks.get_replication_strategy().get_type() == locator::replication_strategy_type::local);
 
-    // estimate_result_rows_per_range() is currently broken, and this is not needed
-    // when paging is available in any case
-#if 0
-    // our estimate of how many result rows there will be per-range
-    float result_rows_per_range = estimate_result_rows_per_range(cmd, ks);
-    // underestimate how many rows we will get per-range in order to increase the likelihood that we'll
-    // fetch enough rows in the first round
-    result_rows_per_range -= result_rows_per_range * CONCURRENT_SUBREQUESTS_MARGIN;
-    int concurrency_factor = result_rows_per_range == 0.0 ? 1 : std::max(1, std::min(int(ranges.size()), int(std::ceil(cmd->row_limit / result_rows_per_range))));
-#else
     int result_rows_per_range = 0;
     int concurrency_factor = 1;
-#endif
 
     std::vector<foreign_ptr<lw_shared_ptr<query::result>>> results;
-    results.reserve(ranges.size()/concurrency_factor + 1);
-    slogger.debug("Estimated result rows per range: {}; requested rows: {}, ranges.size(): {}; concurrent range requests: {}",
-            result_rows_per_range, cmd->row_limit, ranges.size(), concurrency_factor);
+
+    slogger.debug("Estimated result rows per range: {}; requested rows: {}, concurrent range requests: {}",
+            result_rows_per_range, cmd->row_limit, concurrency_factor);
 
     // The call to `query_partition_key_range_concurrent()` below
     // updates `cmd` directly when processing the results. Under
@@ -3560,13 +3169,13 @@ storage_proxy::query_partition_key_range(lw_shared_ptr<query::read_command> cmd,
             std::move(results),
             cmd,
             cl,
-            ranges.begin(),
-            std::move(ranges),
+            std::move(ranges_to_vnodes),
             concurrency_factor,
             std::move(query_options.trace_state),
             cmd->row_limit,
             cmd->partition_limit,
-            std::move(query_options.preferred_replicas)).then([row_limit, partition_limit] (
+            std::move(query_options.preferred_replicas),
+            std::move(query_options.permit)).then([row_limit, partition_limit] (
                     std::vector<foreign_ptr<lw_shared_ptr<query::result>>> results,
                     replicas_per_token_range used_replicas) {
         query::result_merger merger(row_limit, partition_limit);
@@ -3656,78 +3265,12 @@ storage_proxy::do_query(schema_ptr s,
     });
 }
 
-#if 0
-    private static List<Row> readWithPaxos(List<ReadCommand> commands, ConsistencyLevel consistencyLevel, ClientState state)
-    throws InvalidRequestException, UnavailableException, ReadTimeoutException
-    {
-        assert state != null;
-
-        long start = System.nanoTime();
-        List<Row> rows = null;
-
-        try
-        {
-            // make sure any in-progress paxos writes are done (i.e., committed to a majority of replicas), before performing a quorum read
-            if (commands.size() > 1)
-                throw new InvalidRequestException("SERIAL/LOCAL_SERIAL consistency may only be requested for one row at a time");
-            ReadCommand command = commands.get(0);
-
-            CFMetaData metadata = Schema.instance.getCFMetaData(command.ksName, command.cfName);
-            Pair<List<InetAddress>, Integer> p = getPaxosParticipants(command.ksName, command.key, consistencyLevel);
-            List<InetAddress> liveEndpoints = p.left;
-            int requiredParticipants = p.right;
-
-            // does the work of applying in-progress writes; throws UAE or timeout if it can't
-            final ConsistencyLevel consistencyForCommitOrFetch = consistencyLevel == ConsistencyLevel.LOCAL_SERIAL
-                                                                                   ? ConsistencyLevel.LOCAL_QUORUM
-                                                                                   : ConsistencyLevel.QUORUM;
-            try
-            {
-                final Pair<UUID, Integer> pair = beginAndRepairPaxos(start, command.key, metadata, liveEndpoints, requiredParticipants, consistencyLevel, consistencyForCommitOrFetch, false, state);
-                if (pair.right > 0)
-                    casReadMetrics.contention.update(pair.right);
-            }
-            catch (WriteTimeoutException e)
-            {
-                throw new ReadTimeoutException(consistencyLevel, 0, consistencyLevel.blockFor(Keyspace.open(command.ksName)), false);
-            }
-
-            rows = fetchRows(commands, consistencyForCommitOrFetch);
-        }
-        catch (UnavailableException e)
-        {
-            readMetrics.unavailables.mark();
-            ClientRequestMetrics.readUnavailables.inc();
-            casReadMetrics.unavailables.mark();
-            throw e;
-        }
-        catch (ReadTimeoutException e)
-        {
-            readMetrics.timeouts.mark();
-            ClientRequestMetrics.readTimeouts.inc();
-            casReadMetrics.timeouts.mark();
-            throw e;
-        }
-        finally
-        {
-            long latency = System.nanoTime() - start;
-            readMetrics.addNano(latency);
-            casReadMetrics.addNano(latency);
-            // TODO avoid giving every command the same latency number.  Can fix this in CASSADRA-5329
-            for (ReadCommand command : commands)
-                Keyspace.open(command.ksName).getColumnFamilyStore(command.cfName).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
-        }
-
-        return rows;
-    }
-#endif
-
 std::vector<gms::inet_address> storage_proxy::get_live_endpoints(keyspace& ks, const dht::token& token) {
     auto& rs = ks.get_replication_strategy();
     std::vector<gms::inet_address> eps = rs.get_natural_endpoints(token);
-    auto itend = boost::range::remove_if(eps, std::not1(std::bind1st(std::mem_fn(&gms::failure_detector::is_alive), &gms::get_local_failure_detector())));
+    auto itend = boost::range::remove_if(eps, std::not1(std::bind1st(std::mem_fn(&gms::gossiper::is_alive), &gms::get_local_gossiper())));
     eps.erase(itend, eps.end());
-    return std::move(eps);
+    return eps;
 }
 
 std::vector<gms::inet_address> storage_proxy::get_live_sorted_endpoints(keyspace& ks, const dht::token& token) {
@@ -3750,108 +3293,61 @@ std::vector<gms::inet_address> storage_proxy::intersection(const std::vector<gms
     return inter;
 }
 
-/**
- * Estimate the number of result rows (either cql3 rows or storage rows, as called for by the command) per
- * range in the ring based on our local data.  This assumes that ranges are uniformly distributed across the cluster
- * and that the queried data is also uniformly distributed.
- */
-float storage_proxy::estimate_result_rows_per_range(lw_shared_ptr<query::read_command> cmd, keyspace& ks)
-{
-    return 1.0;
-#if 0
-    ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.columnFamily);
-    float resultRowsPerRange = Float.POSITIVE_INFINITY;
-    if (command.rowFilter != null && !command.rowFilter.isEmpty())
-    {
-        List<SecondaryIndexSearcher> searchers = cfs.indexManager.getIndexSearchersForQuery(command.rowFilter);
-        if (searchers.isEmpty())
-        {
-            resultRowsPerRange = calculateResultRowsUsingEstimatedKeys(cfs);
-        }
-        else
-        {
-            // Secondary index query (cql3 or otherwise).  Estimate result rows based on most selective 2ary index.
-            for (SecondaryIndexSearcher searcher : searchers)
-            {
-                // use our own mean column count as our estimate for how many matching rows each node will have
-                SecondaryIndex highestSelectivityIndex = searcher.highestSelectivityIndex(command.rowFilter);
-                resultRowsPerRange = Math.min(resultRowsPerRange, highestSelectivityIndex.estimateResultRows());
-            }
-        }
-    }
-    else if (!command.countCQL3Rows())
-    {
-        // non-cql3 query
-        resultRowsPerRange = cfs.estimateKeys();
-    }
-    else
-    {
-        resultRowsPerRange = calculateResultRowsUsingEstimatedKeys(cfs);
-    }
+query_ranges_to_vnodes_generator::query_ranges_to_vnodes_generator(schema_ptr s, dht::partition_range_vector ranges, bool local) :
+        query_ranges_to_vnodes_generator(get_local_storage_service().get_token_metadata(), std::move(s), std::move(ranges), local) {}
+query_ranges_to_vnodes_generator::query_ranges_to_vnodes_generator(locator::token_metadata& tm, schema_ptr s, dht::partition_range_vector ranges, bool local) :
+        _s(s), _ranges(std::move(ranges)), _i(_ranges.begin()), _local(local), _tm(tm) {}
 
-    // adjust resultRowsPerRange by the number of tokens this node has and the replication factor for this ks
-    return (resultRowsPerRange / DatabaseDescriptor.getNumTokens()) / keyspace.getReplicationStrategy().getReplicationFactor();
-#endif
+dht::partition_range_vector query_ranges_to_vnodes_generator::operator()(size_t n) {
+    n = std::min(n, size_t(1024));
+
+    dht::partition_range_vector result;
+    result.reserve(n);
+    while (_i != _ranges.end() && result.size() != n) {
+        process_one_range(n, result);
+    }
+    return result;
 }
 
-#if 0
-    private static float calculateResultRowsUsingEstimatedKeys(ColumnFamilyStore cfs)
-    {
-        if (cfs.metadata.comparator.isDense())
-        {
-            // one storage row per result row, so use key estimate directly
-            return cfs.estimateKeys();
-        }
-        else
-        {
-            float resultRowsPerStorageRow = ((float) cfs.getMeanColumns()) / cfs.metadata.regularColumns().size();
-            return resultRowsPerStorageRow * (cfs.estimateKeys());
-        }
-    }
-
-    private static List<Row> trim(AbstractRangeCommand command, List<Row> rows)
-    {
-        // When maxIsColumns, we let the caller trim the result.
-        if (command.countCQL3Rows())
-            return rows;
-        else
-            return rows.size() > command.limit() ? rows.subList(0, command.limit()) : rows;
-    }
-#endif
+bool query_ranges_to_vnodes_generator::empty() const {
+    return _ranges.end() == _i;
+}
 
 /**
  * Compute all ranges we're going to query, in sorted order. Nodes can be replica destinations for many ranges,
  * so we need to restrict each scan to the specific range we want, or else we'd get duplicate results.
  */
-dht::partition_range_vector
-storage_proxy::get_restricted_ranges(const schema& s, dht::partition_range range) {
-    locator::token_metadata& tm = get_local_storage_service().get_token_metadata();
-    return service::get_restricted_ranges(tm, s, std::move(range));
-}
+void query_ranges_to_vnodes_generator::process_one_range(size_t n, dht::partition_range_vector& ranges) {
+    dht::ring_position_comparator cmp(*_s);
+    dht::partition_range& cr = *_i;
 
-dht::partition_range_vector
-get_restricted_ranges(locator::token_metadata& tm, const schema& s, dht::partition_range range) {
-    dht::ring_position_comparator cmp(s);
+    auto get_remainder = [this, &cr] {
+        _i++;
+       return std::move(cr);
+    };
 
-    // special case for bounds containing exactly 1 token
-    if (start_token(range) == end_token(range)) {
-        if (start_token(range).is_minimum()) {
-            return {};
-        }
-        return dht::partition_range_vector({std::move(range)});
-    }
-
-    dht::partition_range_vector ranges;
-
-    auto add_range = [&ranges, &cmp] (dht::partition_range&& r) {
+    auto add_range = [&ranges] (dht::partition_range&& r) {
         ranges.emplace_back(std::move(r));
     };
 
+    if (_local) { // if the range is local no need to divide to vnodes
+        add_range(get_remainder());
+        return;
+    }
+
+    // special case for bounds containing exactly 1 token
+    if (start_token(cr) == end_token(cr)) {
+        if (start_token(cr).is_minimum()) {
+            _i++; // empty range? Move to the next one
+            return;
+        }
+        add_range(get_remainder());
+        return;
+    }
+
     // divide the queryRange into pieces delimited by the ring
-    auto ring_iter = tm.ring_range(range.start(), false);
-    dht::partition_range remainder = std::move(range);
-    for (const dht::token& upper_bound_token : ring_iter)
-    {
+    auto ring_iter = _tm.ring_range(cr.start(), false);
+    for (const dht::token& upper_bound_token : ring_iter) {
         /*
          * remainder can be a range/bounds of token _or_ keys and we want to split it with a token:
          *   - if remainder is tokens, then we'll just split using the provided token.
@@ -3864,27 +3360,31 @@ get_restricted_ranges(locator::token_metadata& tm, const schema& s, dht::partiti
          */
 
         dht::ring_position split_point(upper_bound_token, dht::ring_position::token_bound::end);
-        if (!remainder.contains(split_point, cmp)) {
+        if (!cr.contains(split_point, cmp)) {
             break; // no more splits
         }
 
-        {
-            // We shouldn't attempt to split on upper bound, because it may result in
-            // an ambiguous range of the form (x; x]
-            if (end_token(remainder) == upper_bound_token) {
-                break;
-            }
 
-            std::pair<dht::partition_range, dht::partition_range> splits =
-                remainder.split(split_point, cmp);
+        // We shouldn't attempt to split on upper bound, because it may result in
+        // an ambiguous range of the form (x; x]
+        if (end_token(cr) == upper_bound_token) {
+            break;
+        }
 
-            add_range(std::move(splits.first));
-            remainder = std::move(splits.second);
+        std::pair<dht::partition_range, dht::partition_range> splits =
+                cr.split(split_point, cmp);
+
+        add_range(std::move(splits.first));
+        cr = std::move(splits.second);
+        if (ranges.size() == n) {
+            // we have enough ranges
+            break;
         }
     }
-    add_range(std::move(remainder));
 
-    return ranges;
+    if (ranges.size() < n) {
+        add_range(get_remainder());
+    }
 }
 
 bool storage_proxy::hints_enabled(db::write_type type) noexcept {
@@ -3932,184 +3432,9 @@ future<> storage_proxy::truncate_blocking(sstring keyspace, sstring cfname) {
     });
 }
 
-#if 0
-    public interface WritePerformer
-    {
-        public void apply(IMutation mutation,
-                          Iterable<InetAddress> targets,
-                          AbstractWriteResponseHandler responseHandler,
-                          String localDataCenter,
-                          ConsistencyLevel consistencyLevel) throws OverloadedException;
-    }
-
-    /**
-     * A Runnable that aborts if it doesn't start running before it times out
-     */
-    private static abstract class DroppableRunnable implements Runnable
-    {
-        private final long constructionTime = System.nanoTime();
-        private final MessagingService.Verb verb;
-
-        public DroppableRunnable(MessagingService.Verb verb)
-        {
-            this.verb = verb;
-        }
-
-        public final void run()
-        {
-
-            if (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - constructionTime) > DatabaseDescriptor.getTimeout(verb))
-            {
-                MessagingService.instance().incrementDroppedMessages(verb);
-                return;
-            }
-            try
-            {
-                runMayThrow();
-            } catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-
-        abstract protected void runMayThrow() throws Exception;
-    }
-
-    /**
-     * Like DroppableRunnable, but if it aborts, it will rerun (on the mutation stage) after
-     * marking itself as a hint in progress so that the hint backpressure mechanism can function.
-     */
-    private static abstract class LocalMutationRunnable implements Runnable
-    {
-        private final long constructionTime = System.currentTimeMillis();
-
-        public final void run()
-        {
-            if (System.currentTimeMillis() > constructionTime + DatabaseDescriptor.getTimeout(MessagingService.Verb.MUTATION))
-            {
-                MessagingService.instance().incrementDroppedMessages(MessagingService.Verb.MUTATION);
-                HintRunnable runnable = new HintRunnable(FBUtilities.getBroadcastAddress())
-                {
-                    protected void runMayThrow() throws Exception
-                    {
-                        LocalMutationRunnable.this.runMayThrow();
-                    }
-                };
-                submitHint(runnable);
-                return;
-            }
-
-            try
-            {
-                runMayThrow();
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-
-        abstract protected void runMayThrow() throws Exception;
-    }
-
-    /**
-     * HintRunnable will decrease totalHintsInProgress and targetHints when finished.
-     * It is the caller's responsibility to increment them initially.
-     */
-    private abstract static class HintRunnable implements Runnable
-    {
-        public final InetAddress target;
-
-        protected HintRunnable(InetAddress target)
-        {
-            this.target = target;
-        }
-
-        public void run()
-        {
-            try
-            {
-                runMayThrow();
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-            finally
-            {
-                StorageMetrics.totalHintsInProgress.dec();
-                getHintsInProgressFor(target).decrementAndGet();
-            }
-        }
-
-        abstract protected void runMayThrow() throws Exception;
-    }
-
-    public long getTotalHints()
-    {
-        return StorageMetrics.totalHints.count();
-    }
-
-    public int getMaxHintsInProgress()
-    {
-        return maxHintsInProgress;
-    }
-
-    public void setMaxHintsInProgress(int qs)
-    {
-        maxHintsInProgress = qs;
-    }
-
-    public int getHintsInProgress()
-    {
-        return (int) StorageMetrics.totalHintsInProgress.count();
-    }
-
-    public void verifyNoHintsInProgress()
-    {
-        if (getHintsInProgress() > 0)
-            slogger.warn("Some hints were not written before shutdown.  This is not supposed to happen.  You should (a) run repair, and (b) file a bug report");
-    }
-
-    public Long getRpcTimeout() { return DatabaseDescriptor.getRpcTimeout(); }
-    public void setRpcTimeout(Long timeoutInMillis) { DatabaseDescriptor.setRpcTimeout(timeoutInMillis); }
-
-    public Long getReadRpcTimeout() { return DatabaseDescriptor.getReadRpcTimeout(); }
-    public void setReadRpcTimeout(Long timeoutInMillis) { DatabaseDescriptor.setReadRpcTimeout(timeoutInMillis); }
-
-    public Long getWriteRpcTimeout() { return DatabaseDescriptor.getWriteRpcTimeout(); }
-    public void setWriteRpcTimeout(Long timeoutInMillis) { DatabaseDescriptor.setWriteRpcTimeout(timeoutInMillis); }
-
-    public Long getCounterWriteRpcTimeout() { return DatabaseDescriptor.getCounterWriteRpcTimeout(); }
-    public void setCounterWriteRpcTimeout(Long timeoutInMillis) { DatabaseDescriptor.setCounterWriteRpcTimeout(timeoutInMillis); }
-
-    public Long getCasContentionTimeout() { return DatabaseDescriptor.getCasContentionTimeout(); }
-    public void setCasContentionTimeout(Long timeoutInMillis) { DatabaseDescriptor.setCasContentionTimeout(timeoutInMillis); }
-
-    public Long getRangeRpcTimeout() { return DatabaseDescriptor.getRangeRpcTimeout(); }
-    public void setRangeRpcTimeout(Long timeoutInMillis) { DatabaseDescriptor.setRangeRpcTimeout(timeoutInMillis); }
-
-    public Long getTruncateRpcTimeout() { return DatabaseDescriptor.getTruncateRpcTimeout(); }
-    public void setTruncateRpcTimeout(Long timeoutInMillis) { DatabaseDescriptor.setTruncateRpcTimeout(timeoutInMillis); }
-    public void reloadTriggerClasses() { TriggerExecutor.instance.reloadClasses(); }
-
-
-    public long getReadRepairAttempted() {
-        return ReadRepairMetrics.attempted.count();
-    }
-
-    public long getReadRepairRepairedBlocking() {
-        return ReadRepairMetrics.repairedBlocking.count();
-    }
-
-    public long getReadRepairRepairedBackground() {
-        return ReadRepairMetrics.repairedBackground.count();
-    }
-#endif
-
 void storage_proxy::init_messaging_service() {
     auto& ms = netw::get_local_messaging_service();
-    ms.register_counter_mutation([] (const rpc::client_info& cinfo, rpc::opt_time_point t, std::vector<frozen_mutation> fms, db::consistency_level cl, stdx::optional<tracing::trace_info> trace_info) {
+    ms.register_counter_mutation([] (const rpc::client_info& cinfo, rpc::opt_time_point t, std::vector<frozen_mutation> fms, db::consistency_level cl, std::optional<tracing::trace_info> trace_info) {
         auto src_addr = netw::messaging_service::get_source(cinfo);
 
         tracing::trace_state_ptr trace_state_ptr;
@@ -4129,11 +3454,11 @@ void storage_proxy::init_messaging_service() {
                 });
             }).then([trace_state_ptr = std::move(trace_state_ptr), &mutations, cl, timeout] {
                 auto sp = get_local_shared_storage_proxy();
-                return sp->mutate_counters_on_leader(std::move(mutations), cl, timeout, std::move(trace_state_ptr));
+                return sp->mutate_counters_on_leader(std::move(mutations), cl, timeout, std::move(trace_state_ptr), /* FIXME: rpc should also pass a permit down to callbacks */ empty_service_permit());
             });
         });
     });
-    ms.register_mutation([] (const rpc::client_info& cinfo, rpc::opt_time_point t, frozen_mutation in, std::vector<gms::inet_address> forward, gms::inet_address reply_to, unsigned shard, storage_proxy::response_id_type response_id, rpc::optional<std::experimental::optional<tracing::trace_info>> trace_info) {
+    ms.register_mutation([] (const rpc::client_info& cinfo, rpc::opt_time_point t, frozen_mutation in, std::vector<gms::inet_address> forward, gms::inet_address reply_to, unsigned shard, storage_proxy::response_id_type response_id, rpc::optional<std::optional<tracing::trace_info>> trace_info) {
         tracing::trace_state_ptr trace_state_ptr;
         auto src_addr = netw::messaging_service::get_source(cinfo);
 
@@ -4230,7 +3555,7 @@ void storage_proxy::init_messaging_service() {
     ms.register_mutation_done([this] (const rpc::client_info& cinfo, unsigned shard, storage_proxy::response_id_type response_id, rpc::optional<db::view::update_backlog> backlog) {
         auto& from = cinfo.retrieve_auxiliary<gms::inet_address>("baddr");
         _stats.replica_cross_shard_ops += shard != engine().cpu_id();
-        return get_storage_proxy().invoke_on(shard, [from, response_id, backlog = std::move(backlog)] (storage_proxy& sp) mutable {
+        return get_storage_proxy().invoke_on(shard, _write_ack_smp_service_group, [from, response_id, backlog = std::move(backlog)] (storage_proxy& sp) mutable {
             sp.got_response(response_id, from, std::move(backlog));
             return netw::messaging_service::no_wait();
         });
@@ -4238,7 +3563,7 @@ void storage_proxy::init_messaging_service() {
     ms.register_mutation_failed([this] (const rpc::client_info& cinfo, unsigned shard, storage_proxy::response_id_type response_id, size_t num_failed, rpc::optional<db::view::update_backlog> backlog) {
         auto& from = cinfo.retrieve_auxiliary<gms::inet_address>("baddr");
         _stats.replica_cross_shard_ops += shard != engine().cpu_id();
-        return get_storage_proxy().invoke_on(shard, [from, response_id, num_failed, backlog = std::move(backlog)] (storage_proxy& sp) mutable {
+        return get_storage_proxy().invoke_on(shard, _write_ack_smp_service_group, [from, response_id, num_failed, backlog = std::move(backlog)] (storage_proxy& sp) mutable {
             sp.got_failure_response(response_id, from, num_failed, std::move(backlog));
             return netw::messaging_service::no_wait();
         });
@@ -4327,10 +3652,10 @@ void storage_proxy::init_messaging_service() {
             });
         });
     });
-    ms.register_truncate([](sstring ksname, sstring cfname) {
+    ms.register_truncate([this](sstring ksname, sstring cfname) {
         return do_with(utils::make_joinpoint([] { return db_clock::now();}),
-                        [ksname, cfname](auto& tsf) {
-            return get_storage_proxy().invoke_on_all([ksname, cfname, &tsf](storage_proxy& sp) {
+                        [this, ksname, cfname](auto& tsf) {
+            return get_storage_proxy().invoke_on_all(_write_smp_service_group, [ksname, cfname, &tsf](storage_proxy& sp) {
                 return sp._db.local().truncate(ksname, cfname, [&tsf] { return tsf.value(); });
             });
         });
@@ -4338,6 +3663,7 @@ void storage_proxy::init_messaging_service() {
 
     ms.register_get_schema_version([this] (unsigned shard, table_schema_version v) {
         _stats.replica_cross_shard_ops += shard != engine().cpu_id();
+        // FIXME: should this get an smp_service_group? Probably one separate from reads and writes.
         return get_storage_proxy().invoke_on(shard, [v] (auto&& sp) {
             slogger.debug("Schema version request for {}", v);
             return local_schema_registry().get_frozen(v);
@@ -4363,7 +3689,7 @@ storage_proxy::query_mutations_locally(schema_ptr s, lw_shared_ptr<query::read_c
     if (pr.is_singular()) {
         unsigned shard = _db.local().shard_of(pr.start()->value().token());
         _stats.replica_cross_shard_ops += shard != engine().cpu_id();
-        return _db.invoke_on(shard, [max_size, cmd, &pr, gs=global_schema_ptr(s), timeout, gt = tracing::global_trace_state_ptr(std::move(trace_state))] (database& db) mutable {
+        return _db.invoke_on(shard, _read_smp_service_group, [max_size, cmd, &pr, gs=global_schema_ptr(s), timeout, gt = tracing::global_trace_state_ptr(std::move(trace_state))] (database& db) mutable {
           return db.get_result_memory_limiter().new_mutation_read(max_size).then([&] (query::result_memory_accounter ma) {
             return db.query_mutations(gs, *cmd, pr, std::move(ma), gt, timeout).then([] (reconcilable_result&& result, cache_temperature ht) {
                 return make_ready_future<foreign_ptr<lw_shared_ptr<reconcilable_result>>, cache_temperature>(make_foreign(make_lw_shared(std::move(result))), ht);
@@ -4407,8 +3733,37 @@ void storage_proxy::allow_replaying_hints() noexcept {
     return _hints_resource_manager.allow_replaying();
 }
 
-future<> storage_proxy::stop_hints_manager() {
-    return _hints_resource_manager.stop();
+void storage_proxy::on_join_cluster(const gms::inet_address& endpoint) {};
+
+void storage_proxy::on_leave_cluster(const gms::inet_address& endpoint) {};
+
+void storage_proxy::on_up(const gms::inet_address& endpoint) {};
+
+void storage_proxy::on_down(const gms::inet_address& endpoint) {
+    assert(thread::running_in_thread());
+    auto it = _view_update_handlers_list->begin();
+    while (it != _view_update_handlers_list->end()) {
+        auto guard = it->shared_from_this();
+        if (it->get_targets().count(endpoint) > 0) {
+            it->timeout_cb();
+        }
+        ++it;
+        if (seastar::thread::should_yield()) {
+            view_update_handlers_list::iterator_guard ig{*_view_update_handlers_list, it};
+            seastar::thread::yield();
+        }
+    }
+};
+
+future<> storage_proxy::drain_on_shutdown() {
+    return do_with(::shared_ptr<abstract_write_response_handler>(), [this] (::shared_ptr<abstract_write_response_handler>& intrusive_list_guard) {
+        return do_for_each(*_view_update_handlers_list, [&intrusive_list_guard] (abstract_write_response_handler& handler) {
+            intrusive_list_guard = handler.shared_from_this();
+            handler.timeout_cb();
+        });
+    }).then([this] {
+        return _hints_resource_manager.stop();
+    });
 }
 
 future<>

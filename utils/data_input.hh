@@ -23,7 +23,7 @@
 #define UTILS_DATA_INPUT_HH_
 
 #include "bytes.hh"
-#include "net/byteorder.hh"
+#include <seastar/net/byteorder.hh>
 
 class data_input {
 public:
@@ -44,7 +44,7 @@ public:
         }
     }
     template<typename T>
-    data_input(const std::experimental::basic_string_view<T>& view)
+    data_input(const std::basic_string_view<T>& view)
             : data_input(
                     bytes_view(reinterpret_cast<const int8_t *>(view.data()),
                             view.size() * sizeof(T))) {
@@ -52,7 +52,7 @@ public:
     template<typename T>
     data_input(const temporary_buffer<T>& buf)
             : data_input(
-                    std::experimental::basic_string_view<T>(buf.get(), buf.size())) {
+                    std::basic_string_view<T>(buf.get(), buf.size())) {
     }
     data_input(data_input&&) = default;
     data_input(const data_input&) = default;

@@ -20,10 +20,10 @@
  */
 
 #include <chrono>
-#include <core/distributed.hh>
-#include <core/app-template.hh>
-#include <core/sstring.hh>
-#include <core/thread.hh>
+#include <seastar/core/distributed.hh>
+#include <seastar/core/app-template.hh>
+#include <seastar/core/sstring.hh>
+#include <seastar/core/thread.hh>
 #include <seastar/core/weak_ptr.hh>
 
 #include "utils/managed_bytes.hh"
@@ -138,7 +138,7 @@ void run_test(const sstring& name, schema_ptr s, MutationGenerator&& gen) {
         auto prev_rows_merged_from_memtable = tracker.get_stats().rows_merged_from_memtable;
         auto prev_rows_dropped_from_memtable = tracker.get_stats().rows_dropped_from_memtable;
 
-        std::cout << sprint("cache: %d/%d [MB], memtable: %d/%d [MB], alloc/comp: %d/%d [MB] (amp: %.3f)\n",
+        std::cout << format("cache: {:d}/{:d} [MB], memtable: {:d}/{:d} [MB], alloc/comp: {:d}/{:d} [MB] (amp: {:.3f})\n",
             tracker.region().occupancy().used_space() / MB,
             tracker.region().occupancy().total_space() / MB,
             mt->occupancy().used_space() / MB,
@@ -174,7 +174,7 @@ void run_test(const sstring& name, schema_ptr s, MutationGenerator&& gen) {
         auto compacted = logalloc::memory_compacted() - prev_compacted;
         auto allocated = logalloc::memory_allocated() - prev_allocated;
 
-        std::cout << sprint("update: %.6f [ms], stall: %s, cache: %d/%d [MB], alloc/comp: %d/%d [MB] (amp: %.3f), pr/me/dr %d/%d/%d\n",
+        std::cout << format("update: {:.6f} [ms], preemption: {}, cache: {:d}/{:d} [MB], alloc/comp: {:d}/{:d} [MB] (amp: {:.3f}), pr/me/dr {:d}/{:d}/{:d}\n",
             d.count() * 1000,
             slm,
             tracker.region().occupancy().used_space() / MB,
@@ -185,11 +185,14 @@ void run_test(const sstring& name, schema_ptr s, MutationGenerator&& gen) {
             tracker.get_stats().rows_dropped_from_memtable - prev_rows_dropped_from_memtable);
     }
 
+    scheduling_latency_measurer invalidate_slm;
+    invalidate_slm.start();
     auto d = duration_in_seconds([&] {
         cache.invalidate([] {}).get();
     });
+    invalidate_slm.stop();
 
-    std::cout << sprint("invalidation: %.6f [ms]", d.count() * 1000) << "\n";
+    std::cout << format("invalidation: {:.6f} [ms], preemption: {}", d.count() * 1000, invalidate_slm) << "\n";
 }
 
 void test_small_partitions() {

@@ -44,6 +44,8 @@
 #include <algorithm>
 #include <chrono>
 #include <random>
+#include <string_view>
+#include <optional>
 
 #include <boost/algorithm/cxx11/all_of.hpp>
 #include <seastar/core/reactor.hh>
@@ -56,6 +58,7 @@
 #include "log.hh"
 #include "service/migration_manager.hh"
 #include "utils/class_registrator.hh"
+#include "database.hh"
 
 namespace auth {
 
@@ -93,8 +96,7 @@ static bool has_salted_hash(const cql3::untyped_result_set_row& row) {
     return !row.get_or<sstring>(SALTED_HASH, "").empty();
 }
 
-static const sstring update_row_query = sprint(
-        "UPDATE %s SET %s = ? WHERE %s = ?",
+static const sstring update_row_query = format("UPDATE {} SET {} = ? WHERE {} = ?",
         meta::roles_table::qualified_name(),
         SALTED_HASH,
         meta::roles_table::role_col_name);
@@ -102,12 +104,12 @@ static const sstring update_row_query = sprint(
 static const sstring legacy_table_name{"credentials"};
 
 bool password_authenticator::legacy_metadata_exists() const {
-    return _qp.db().local().has_schema(meta::AUTH_KS, legacy_table_name);
+    return _qp.db().has_schema(meta::AUTH_KS, legacy_table_name);
 }
 
 future<> password_authenticator::migrate_legacy_metadata() const {
     plogger.info("Starting migration of legacy authentication metadata.");
-    static const sstring query = sprint("SELECT * FROM %s.%s", meta::AUTH_KS, legacy_table_name);
+    static const sstring query = format("SELECT * FROM {}.{}", meta::AUTH_KS, legacy_table_name);
 
     return _qp.process(
             query,
@@ -157,7 +159,7 @@ future<> password_authenticator::start() {
 
          _stopped = do_after_system_ready(_as, [this] {
              return async([this] {
-                 wait_for_schema_agreement(_migration_manager, _qp.db().local(), _as).get0();
+                 wait_for_schema_agreement(_migration_manager, _qp.db(), _as).get0();
 
                  if (any_nondefault_role_row_satisfies(_qp, &has_salted_hash).get0()) {
                      if (legacy_metadata_exists()) {
@@ -185,7 +187,7 @@ future<> password_authenticator::stop() {
     return _stopped.handle_exception_type([] (const sleep_aborted&) { }).handle_exception_type([](const abort_requested_exception&) {});
 }
 
-db::consistency_level password_authenticator::consistency_for_user(stdx::string_view role_name) {
+db::consistency_level password_authenticator::consistency_for_user(std::string_view role_name) {
     if (role_name == DEFAULT_USER_NAME) {
         return db::consistency_level::QUORUM;
     }
@@ -211,10 +213,10 @@ authentication_option_set password_authenticator::alterable_options() const {
 future<authenticated_user> password_authenticator::authenticate(
                 const credentials_map& credentials) const {
     if (!credentials.count(USERNAME_KEY)) {
-        throw exceptions::authentication_exception(sprint("Required key '%s' is missing", USERNAME_KEY));
+        throw exceptions::authentication_exception(format("Required key '{}' is missing", USERNAME_KEY));
     }
     if (!credentials.count(PASSWORD_KEY)) {
-        throw exceptions::authentication_exception(sprint("Required key '%s' is missing", PASSWORD_KEY));
+        throw exceptions::authentication_exception(format("Required key '{}' is missing", PASSWORD_KEY));
     }
 
     auto& username = credentials.at(USERNAME_KEY);
@@ -226,8 +228,7 @@ future<authenticated_user> password_authenticator::authenticate(
     // Rely on query processing caching statements instead, and lets assume
     // that a map lookup string->statement is not gonna kill us much.
     return futurize_apply([this, username, password] {
-        static const sstring query = sprint(
-                "SELECT %s FROM %s WHERE %s = ?",
+        static const sstring query = format("SELECT {} FROM {} WHERE {} = ?",
                 SALTED_HASH,
                 meta::roles_table::qualified_name(),
                 meta::roles_table::role_col_name);
@@ -241,7 +242,7 @@ future<authenticated_user> password_authenticator::authenticate(
     }).then_wrapped([=](future<::shared_ptr<cql3::untyped_result_set>> f) {
         try {
             auto res = f.get0();
-            auto salted_hash = std::experimental::optional<sstring>();
+            auto salted_hash = std::optional<sstring>();
             if (!res->empty()) {
                 salted_hash = res->one().get_opt<sstring>(SALTED_HASH);
             }
@@ -253,13 +254,15 @@ future<authenticated_user> password_authenticator::authenticate(
             std::throw_with_nested(exceptions::authentication_exception("Could not verify password"));
         } catch (exceptions::request_execution_exception& e) {
             std::throw_with_nested(exceptions::authentication_exception(e.what()));
+        } catch (exceptions::authentication_exception& e) {
+            std::throw_with_nested(e);
         } catch (...) {
             std::throw_with_nested(exceptions::authentication_exception("authentication failed"));
         }
     });
 }
 
-future<> password_authenticator::create(stdx::string_view role_name, const authentication_options& options) const {
+future<> password_authenticator::create(std::string_view role_name, const authentication_options& options) const {
     if (!options.password) {
         return make_ready_future<>();
     }
@@ -271,13 +274,12 @@ future<> password_authenticator::create(stdx::string_view role_name, const authe
             {passwords::hash(*options.password, rng_for_salt), sstring(role_name)}).discard_result();
 }
 
-future<> password_authenticator::alter(stdx::string_view role_name, const authentication_options& options) const {
+future<> password_authenticator::alter(std::string_view role_name, const authentication_options& options) const {
     if (!options.password) {
         return make_ready_future<>();
     }
 
-    static const sstring query = sprint(
-            "UPDATE %s SET %s = ? WHERE %s = ?",
+    static const sstring query = format("UPDATE {} SET {} = ? WHERE {} = ?",
             meta::roles_table::qualified_name(),
             SALTED_HASH,
             meta::roles_table::role_col_name);
@@ -289,9 +291,8 @@ future<> password_authenticator::alter(stdx::string_view role_name, const authen
             {passwords::hash(*options.password, rng_for_salt), sstring(role_name)}).discard_result();
 }
 
-future<> password_authenticator::drop(stdx::string_view name) const {
-    static const sstring query = sprint(
-            "DELETE %s FROM %s WHERE %s = ?",
+future<> password_authenticator::drop(std::string_view name) const {
+    static const sstring query = format("DELETE {} FROM {} WHERE {} = ?",
             SALTED_HASH,
             meta::roles_table::qualified_name(),
             meta::roles_table::role_col_name);
@@ -302,7 +303,7 @@ future<> password_authenticator::drop(stdx::string_view name) const {
             {sstring(name)}).discard_result();
 }
 
-future<custom_options> password_authenticator::query_custom_options(stdx::string_view role_name) const {
+future<custom_options> password_authenticator::query_custom_options(std::string_view role_name) const {
     return make_ready_future<custom_options>();
 }
 
@@ -311,75 +312,13 @@ const resource_set& password_authenticator::protected_resources() const {
     return resources;
 }
 
-::shared_ptr<authenticator::sasl_challenge> password_authenticator::new_sasl_challenge() const {
-    class plain_text_password_challenge : public sasl_challenge {
-        const password_authenticator& _self;
-
-    public:
-        plain_text_password_challenge(const password_authenticator& self) : _self(self) {
-        }
-
-        /**
-         * SASL PLAIN mechanism specifies that credentials are encoded in a
-         * sequence of UTF-8 bytes, delimited by 0 (US-ASCII NUL).
-         * The form is : {code}authzId<NUL>authnId<NUL>password<NUL>{code}
-         * authzId is optional, and in fact we don't care about it here as we'll
-         * set the authzId to match the authnId (that is, there is no concept of
-         * a user being authorized to act on behalf of another).
-         *
-         * @param bytes encoded credentials string sent by the client
-         * @return map containing the username/password pairs in the form an IAuthenticator
-         * would expect
-         * @throws javax.security.sasl.SaslException
-         */
-        bytes evaluate_response(bytes_view client_response) override {
-            plogger.debug("Decoding credentials from client token");
-
-            sstring username, password;
-
-            auto b = client_response.crbegin();
-            auto e = client_response.crend();
-            auto i = b;
-
-            while (i != e) {
-                if (*i == 0) {
-                    sstring tmp(i.base(), b.base());
-                    if (password.empty()) {
-                        password = std::move(tmp);
-                    } else if (username.empty()) {
-                        username = std::move(tmp);
-                    }
-                    b = ++i;
-                    continue;
-                }
-                ++i;
-            }
-
-            if (username.empty()) {
-                throw exceptions::authentication_exception("Authentication ID must not be null");
-            }
-            if (password.empty()) {
-                throw exceptions::authentication_exception("Password must not be null");
-            }
-
-            _credentials[USERNAME_KEY] = std::move(username);
-            _credentials[PASSWORD_KEY] = std::move(password);
-            _complete = true;
-            return {};
-        }
-
-        bool is_complete() const override {
-            return _complete;
-        }
-
-        future<authenticated_user> get_authenticated_user() const override {
-            return _self.authenticate(_credentials);
-        }
-    private:
-        credentials_map _credentials;
-        bool _complete = false;
-    };
-    return ::make_shared<plain_text_password_challenge>(*this);
+::shared_ptr<sasl_challenge> password_authenticator::new_sasl_challenge() const {
+    return ::make_shared<plain_sasl_challenge>([this](std::string_view username, std::string_view password) {
+        credentials_map credentials{};
+        credentials[USERNAME_KEY] = sstring(username);
+        credentials[PASSWORD_KEY] = sstring(password);
+        return this->authenticate(credentials);
+    });
 }
 
 }

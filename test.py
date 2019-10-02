@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 #
 # Copyright (C) 2015 ScyllaDB
 #
@@ -23,11 +24,10 @@ import os
 import sys
 import argparse
 import subprocess
-import signal
-import shlex
-import threading
 import concurrent.futures
 import io
+import multiprocessing
+import xml.etree.ElementTree as ET
 
 boost_tests = [
     'bytes_ostream_test',
@@ -44,6 +44,7 @@ boost_tests = [
     'serialized_action_test',
     'cql_query_test',
     'secondary_index_test',
+    'json_cql_query_test',
     'filtering_test',
     'storage_proxy_test',
     'schema_change_test',
@@ -111,33 +112,50 @@ boost_tests = [
     'querier_cache',
     'limiting_data_source_test',
     'sstable_test',
+    'sstable_datafile_test',
+    'broken_sstable_test',
     'sstable_3_x_test',
     'meta_test',
     'reusable_buffer_test',
-    'multishard_writer_test',
+    'mutation_writer_test',
     'observable_test',
     'transport_test',
     'fragmented_temporary_buffer_test',
     'auth_passwords_test',
     'multishard_mutation_query_test',
+    'top_k_test',
+    'utf8_test',
+    'small_vector_test',
+    'data_listeners_test',
+    'truncation_migration_test',
+    'like_matcher_test',
 ]
 
 other_tests = [
     'memory_footprint',
 ]
 
+CONCOLORS = {'green': '\033[1;32m', 'red': '\033[1;31m', 'nocolor': '\033[0m'}
+
+def colorformat(msg, **kwargs):
+    fmt = dict(CONCOLORS)
+    fmt.update(kwargs)
+    return msg.format(**fmt)
+
+def status_to_string(success):
+    if success:
+        status = colorformat("{green}PASSED{nocolor}") if os.isatty(sys.stdout.fileno()) else "PASSED"
+    else:
+        status = colorformat("{red}FAILED{nocolor}") if os.isatty(sys.stdout.fileno()) else "FAILED"
+
+    return status
 
 def print_progress_succint(test_path, test_args, success, cookie):
     if type(cookie) is int:
         cookie = (0, 1, cookie)
 
     last_len, n, n_total = cookie
-    if success:
-        status = "PASSED"
-    else:
-        status = "FAILED"
-
-    msg = "[{}/{}] {} {} {}".format(n, n_total, status, test_path, ' '.join(test_args))
+    msg = "[{}/{}] {} {} {}".format(n, n_total, status_to_string(success), test_path, ' '.join(test_args))
     if sys.stdout.isatty():
         print('\r' + ' ' * last_len, end='')
         last_len = len(msg)
@@ -153,12 +171,7 @@ def print_status_verbose(test_path, test_args, success, cookie):
         cookie = (1, cookie)
 
     n, n_total = cookie
-    if success:
-        status = "PASSED"
-    else:
-        status = "FAILED"
-
-    msg = "[{}/{}] {} {} {}".format(n, n_total, status, test_path, ' '.join(test_args))
+    msg = "[{}/{}] {} {} {}".format(n, n_total, status_to_string(success), test_path, ' '.join(test_args))
     print(msg)
 
     return (n + 1, n_total)
@@ -171,21 +184,27 @@ class Alarm(Exception):
 def alarm_handler(signum, frame):
     raise Alarm
 
+
 if __name__ == "__main__":
-    all_modes = ['debug', 'release']
+    all_modes = ['debug', 'release', 'dev', 'sanitize']
 
     sysmem = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
     testmem = 2e9
-    default_num_jobs = ((sysmem - 4e9) // testmem)
+    cpus_per_test_job = 1
+    default_num_jobs_mem = ((sysmem - 4e9) // testmem)
+    default_num_jobs_cpu = multiprocessing.cpu_count() // cpus_per_test_job
+    default_num_jobs = min(default_num_jobs_mem, default_num_jobs_cpu)
 
     parser = argparse.ArgumentParser(description="Scylla test runner")
-    parser.add_argument('--fast',  action="store_true",
+    parser.add_argument('--fast', action="store_true",
                         help="Run only fast tests")
-    parser.add_argument('--name',  action="store",
+    parser.add_argument('--name', action="store",
                         help="Run only test whose name contains given string")
-    parser.add_argument('--mode', choices=all_modes,
-                        help="Run only tests for given build mode")
-    parser.add_argument('--timeout', action="store", default="300", type=int,
+    parser.add_argument('--mode', choices=all_modes, action="append", dest="modes",
+                        help="Run only tests for given build mode(s)")
+    parser.add_argument('--repeat', action="store", default="1", type=int,
+                        help="number of times to repeat test execution")
+    parser.add_argument('--timeout', action="store", default="3000", type=int,
                         help="timeout value for test execution")
     parser.add_argument('--jenkins', action="store",
                         help="jenkins output file prefix")
@@ -193,51 +212,57 @@ if __name__ == "__main__":
                         help='Verbose reporting')
     parser.add_argument('--jobs', '-j', action="store", default=default_num_jobs, type=int,
                         help="Number of jobs to use for running the tests")
+    parser.add_argument('--xunit', action="store",
+                        help="Name of a file to write results of non-boost tests to in xunit format")
     args = parser.parse_args()
 
     print_progress = print_status_verbose if args.verbose else print_progress_succint
 
     custom_seastar_args = {
-        "sstable_test": ['-c1'],
-        "sstable_3_x_test": ['-c1'],
+        "sstable_test": ['-c1', '-m2G'],
+        'sstable_datafile_test': ['-c1', '-m2G'],
+        "sstable_3_x_test": ['-c1', '-m2G'],
         "mutation_reader_test": ['-c{}'.format(min(os.cpu_count(), 3)), '-m2G'],
     }
 
     test_to_run = []
-    modes_to_run = all_modes if not args.mode else [args.mode]
+    modes_to_run =  ['debug', 'release', 'dev'] if not args.modes else args.modes
     for mode in modes_to_run:
         prefix = os.path.join('build', mode, 'tests')
-        standard_args =  '--overprovisioned --unsafe-bypass-fsync 1 --blocked-reactor-notify-ms 2000000'.split()
+        standard_args = '--overprovisioned --unsafe-bypass-fsync 1 --blocked-reactor-notify-ms 2000000'.split()
         seastar_args = '-c2 -m2G'.split()
         for test in other_tests:
             test_to_run.append((os.path.join(prefix, test), 'other', custom_seastar_args.get(test, seastar_args) + standard_args))
         for test in boost_tests:
             test_to_run.append((os.path.join(prefix, test), 'boost', custom_seastar_args.get(test, seastar_args) + standard_args))
 
-    if 'release' in modes_to_run:
-        test_to_run.append(('build/release/tests/lsa_async_eviction_test', 'other',
-                            '-c1 -m200M --size 1024 --batch 3000 --count 2000000'.split() + standard_args))
-        test_to_run.append(('build/release/tests/lsa_sync_eviction_test', 'other',
-                            '-c1 -m100M --count 10 --standard-object-size 3000000'.split() + standard_args))
-        test_to_run.append(('build/release/tests/lsa_sync_eviction_test', 'other',
-                            '-c1 -m100M --count 24000 --standard-object-size 2048'.split() + standard_args))
-        test_to_run.append(('build/release/tests/lsa_sync_eviction_test', 'other',
-                            '-c1 -m1G --count 4000000 --standard-object-size 128'.split() + standard_args))
-        test_to_run.append(('build/release/tests/row_cache_alloc_stress', 'other',
-                            '-c1 -m2G'.split() + standard_args))
-        test_to_run.append(('build/release/tests/row_cache_stress_test', 'other', '-c1 -m1G --seconds 10'.split() + standard_args))
+    for m in ['release', 'dev']:
+        if m in modes_to_run:
+            test_to_run.append(('build/' + m + '/tests/lsa_async_eviction_test', 'other',
+                                '-c1 -m200M --size 1024 --batch 3000 --count 2000000'.split() + standard_args))
+            test_to_run.append(('build/' + m + '/tests/lsa_sync_eviction_test', 'other',
+                                '-c1 -m100M --count 10 --standard-object-size 3000000'.split() + standard_args))
+            test_to_run.append(('build/' + m + '/tests/lsa_sync_eviction_test', 'other',
+                                '-c1 -m100M --count 24000 --standard-object-size 2048'.split() + standard_args))
+            test_to_run.append(('build/' + m + '/tests/lsa_sync_eviction_test', 'other',
+                                '-c1 -m1G --count 4000000 --standard-object-size 128'.split() + standard_args))
+            test_to_run.append(('build/' + m + '/tests/row_cache_alloc_stress', 'other',
+                                '-c1 -m2G'.split() + standard_args))
+            test_to_run.append(('build/' + m + '/tests/row_cache_stress_test', 'other', '-c1 -m1G --seconds 10'.split() + standard_args))
 
     if args.name:
         test_to_run = [t for t in test_to_run if args.name in t[0]]
+        if not test_to_run:
+            print("Test {} not found".format(args.name))
+            sys.exit(1)
 
     failed_tests = []
 
     n_total = len(test_to_run)
     env = os.environ
-    # disable false positive due to new (with_alignment(...)) ...
-    env['ASAN_OPTIONS'] = 'alloc_dealloc_mismatch=0'
     env['UBSAN_OPTIONS'] = 'print_stacktrace=1'
     env['BOOST_TEST_CATCH_SYSTEM_ERRORS'] = 'no'
+
     def run_test(path, type, exec_args):
         boost_args = []
         # avoid modifying in-place, it will change test_to_run
@@ -247,49 +272,53 @@ if __name__ == "__main__":
             mode = 'release'
             if path.startswith(os.path.join('build', 'debug')):
                 mode = 'debug'
-            xmlout = (args.jenkins + "." + mode + "." +
-                      os.path.basename(path.split()[0]) + ".boost.xml")
+            xmlout = (args.jenkins + "." + mode + "." + os.path.basename(path.split()[0]) + ".boost.xml")
             boost_args += ['--report_level=no', '--logger=HRF,test_suite:XML,test_suite,' + xmlout]
         if type == 'boost':
             boost_args += ['--']
-        def report_error(out, report_subcause):
-            report_subcause()
+
+        def report_error(exc, out, report_subcause):
+            report_subcause(exc)
             if out:
                 print('=== stdout START ===', file=file)
                 print(out, file=file)
                 print('=== stdout END ===', file=file)
-        out = None
         success = False
         try:
-            out = subprocess.check_output([path] + boost_args + exec_args,
-                                stderr=subprocess.STDOUT,
-                                timeout=args.timeout,
-                                env=env, preexec_fn=os.setsid)
+            subprocess.check_output([path] + boost_args + exec_args,
+                                    stderr=subprocess.STDOUT,
+                                    timeout=args.timeout,
+                                    env=env, preexec_fn=os.setsid)
             success = True
         except subprocess.TimeoutExpired as e:
-            def report_subcause():
+            def report_subcause(e):
                 print('  timed out', file=file)
-            report_error(e.output.decode(encoding='UTF-8'), report_subcause=report_subcause)
+            report_error(e, e.output.decode(encoding='UTF-8'), report_subcause=report_subcause)
         except subprocess.CalledProcessError as e:
-            def report_subcause():
+            def report_subcause(e):
                 print('  with error code {code}\n'.format(code=e.returncode), file=file)
-            report_error(e.output.decode(encoding='UTF-8'), report_subcause=report_subcause)
+            report_error(e, e.output.decode(encoding='UTF-8'), report_subcause=report_subcause)
         except Exception as e:
-            def report_subcause():
+            def report_subcause(e):
                 print('  with error {e}\n'.format(e=e), file=file)
-            report_error(e, report_subcause=report_subcause)
-        return (path, boost_args + exec_args, success, file.getvalue())
+            report_error(e, e, report_subcause=report_subcause)
+        return (path, boost_args + exec_args, type, success, file.getvalue())
+
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs)
     futures = []
     for n, test in enumerate(test_to_run):
         path = test[0]
         test_type = test[1]
         exec_args = test[2] if len(test) >= 3 else []
-        futures.append(executor.submit(run_test, path, test_type, exec_args))
+        for _ in range(args.repeat):
+            futures.append(executor.submit(run_test, path, test_type, exec_args))
 
-    cookie = n_total
+    results = []
+    cookie = len(futures)
     for future in concurrent.futures.as_completed(futures):
-        test_path, test_args, success, out = future.result()
+        result = future.result()
+        results.append(result)
+        test_path, test_args, _, success, out = result
         cookie = print_progress(test_path, test_args, success, cookie)
         if not success:
             failed_tests.append((test_path, test_args, out))
@@ -298,10 +327,27 @@ if __name__ == "__main__":
         print('\nOK.')
     else:
         print('\n\nOutput of the failed tests:')
-        for test, args, out in failed_tests:
-            print("Test {} {} failed:\n{}".format(test, ' '.join(args), out))
+        for test, test_args, out in failed_tests:
+            print("Test {} {} failed:\n{}".format(test, ' '.join(test_args), out))
         print('\n\nThe following test(s) have failed:')
-        for test, args, _ in failed_tests:
-            print('  {} {}'.format(test, ' '.join(args)))
-        print('\nSummary: {} of the total {} tests failed'.format(len(failed_tests), len(test_to_run)))
+        for test, test_args, _ in failed_tests:
+            print('  {} {}'.format(test, ' '.join(test_args)))
+        print('\nSummary: {} of the total {} tests failed'.format(len(failed_tests), len(results)))
+
+    if args.xunit:
+        other_results = [r for r in results if r[2] != 'boost']
+        num_other_failed = sum(1 for r in other_results if not r[3])
+
+        xml_results = ET.Element('testsuite', name='non-boost tests',
+                tests=str(len(other_results)), failures=str(num_other_failed), errors='0')
+
+        for test_path, test_args, _, success, out in other_results:
+            xml_res = ET.SubElement(xml_results, 'testcase', name=test_path)
+            if not success:
+                xml_fail = ET.SubElement(xml_res, 'failure')
+                xml_fail.text = "Test {} {} failed:\n{}".format(test_path, ' '.join(test_args), out)
+        with open(args.xunit, "w") as f:
+            ET.ElementTree(xml_results).write(f, encoding="unicode")
+
+    if failed_tests:
         sys.exit(1)

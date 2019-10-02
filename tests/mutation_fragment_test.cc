@@ -21,7 +21,7 @@
 
 
 #include <seastar/core/thread.hh>
-#include <seastar/tests/test-utils.hh>
+#include <seastar/testing/test_case.hh>
 
 #include "mutation_source_test.hh"
 #include "mutation_fragment.hh"
@@ -39,8 +39,7 @@ class fragment_scatterer {
     std::vector<mutation>& _mutations;
     size_t _next = 0;
 private:
-    template<typename Func>
-    void for_each_target(Func&& func) {
+    void for_each_target(noncopyable_function<void (mutation&)> func) {
         // round-robin
         func(_mutations[_next % _mutations.size()]);
         ++_next;
@@ -326,7 +325,7 @@ SEASTAR_TEST_CASE(test_ordering_of_position_in_partition_and_composite_view_in_a
             .set_is_dense(true)
             .build();
 
-        auto make_ck = [&] (int ck1, stdx::optional<int> ck2 = stdx::nullopt) {
+        auto make_ck = [&] (int ck1, std::optional<int> ck2 = std::nullopt) {
             std::vector<data_value> cells;
             cells.push_back(data_value(ck1));
             if (ck2) {

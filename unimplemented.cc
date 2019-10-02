@@ -21,8 +21,8 @@
 
 #include <unordered_map>
 #include "unimplemented.hh"
-#include "core/sstring.hh"
-#include "core/enum.hh"
+#include <seastar/core/sstring.hh>
+#include <seastar/core/enum.hh>
 #include "log.hh"
 #include "seastarx.hh"
 
@@ -75,7 +75,7 @@ void warn(cause c) {
 }
 
 void fail(cause c) {
-    throw std::runtime_error(sprint("Not implemented: %s", c));
+    throw std::runtime_error(format("Not implemented: {}", c));
 }
 
 }

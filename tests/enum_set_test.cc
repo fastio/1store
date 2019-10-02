@@ -79,6 +79,13 @@ BOOST_AUTO_TEST_CASE(set_contains) {
     BOOST_REQUIRE(!fs.contains(fruit::pear));
 }
 
+BOOST_AUTO_TEST_CASE(full_set) {
+    const auto fs = fruit_set::full();
+    BOOST_REQUIRE(fs.contains(fruit::apple));
+    BOOST_REQUIRE(fs.contains(fruit::pear));
+    BOOST_REQUIRE(fs.contains(fruit::banana));
+}
+
 BOOST_AUTO_TEST_CASE(set_from_mask) {
     const auto fs = fruit_set::of<fruit::apple, fruit::banana>();
     BOOST_REQUIRE_EQUAL(fs.mask(), fruit_set::from_mask(fs.mask()).mask());
@@ -125,4 +132,21 @@ BOOST_AUTO_TEST_CASE(set_iterator) {
     std::copy(fs2.begin(), fs2.end(), std::inserter(us2, us2.begin()));
 
     BOOST_REQUIRE(us2.empty());
+}
+
+BOOST_AUTO_TEST_CASE(set_add) {
+    auto fs0 = fruit_set();
+    auto fs1 = fruit_set::of<fruit::pear>();
+    auto fs2 = fruit_set::of<fruit::apple, fruit::banana>();
+    auto fs3 = fruit_set::of<fruit::apple>();
+    fs1.add(fs2);
+    fs3.add(fs2);
+    BOOST_REQUIRE(fs1.contains(fruit::pear) && fs1.contains(fruit::apple) && fs1.contains(fruit::banana));
+    BOOST_REQUIRE(!fs3.contains(fruit::pear) && fs3.contains(fruit::apple) && fs3.contains(fruit::banana));
+    fs1.add(fs0);
+    fs3.add(fs0);
+    BOOST_REQUIRE(fs1.contains(fruit::pear) && fs1.contains(fruit::apple) && fs1.contains(fruit::banana));
+    BOOST_REQUIRE(!fs3.contains(fruit::pear) && fs3.contains(fruit::apple) && fs3.contains(fruit::banana));
+    fs0.add(fruit_set::of<fruit::apple>());
+    BOOST_REQUIRE(!fs0.contains(fruit::pear) && fs0.contains(fruit::apple) && !fs0.contains(fruit::banana));
 }

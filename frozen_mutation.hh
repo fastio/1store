@@ -65,6 +65,9 @@ public:
     partition_key_view key(const schema& s) const;
     dht::decorated_key decorated_key(const schema& s) const;
     mutation_partition_view partition() const;
+    // The supplied schema must be of the same version as the schema of
+    // the mutation which was used to create this instance.
+    // throws schema_mismatch_error otherwise.
     mutation unfreeze(schema_ptr s) const;
 
     struct printer {
@@ -73,6 +76,7 @@ public:
         friend std::ostream& operator<<(std::ostream&, const printer&);
     };
 
+    // Same requirements about the schema as unfreeze().
     printer pretty_printer(schema_ptr) const;
 };
 
@@ -90,7 +94,7 @@ class streamed_mutation_freezer {
     bool _reversed;
 
     tombstone _partition_tombstone;
-    stdx::optional<static_row> _sr;
+    std::optional<static_row> _sr;
     std::deque<clustering_row> _crs;
     range_tombstone_list _rts;
 public:

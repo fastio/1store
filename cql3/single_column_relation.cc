@@ -45,6 +45,8 @@
 #include "cql3/cql3_type.hh"
 #include "cql3/lists.hh"
 #include "unimplemented.hh"
+#include "types/map.hh"
+#include "types/list.hh"
 
 using namespace cql3::restrictions;
 
@@ -86,7 +88,23 @@ single_column_relation::new_IN_restriction(database& db, schema_ptr schema, ::sh
         return make_shared<single_column_restriction::IN_with_marker>(column_def, dynamic_pointer_cast<lists::marker>(term));
     }
     auto terms = to_terms(receivers, _in_values, db, schema->ks_name(), bound_names);
+    // Convert a single-item IN restriction to an EQ restriction
+    if (terms.size() == 1) {
+        return ::make_shared<single_column_restriction::EQ>(column_def, std::move(terms[0]));
+    }
     return ::make_shared<single_column_restriction::IN_with_values>(column_def, std::move(terms));
+}
+
+::shared_ptr<restrictions::restriction>
+single_column_relation::new_LIKE_restriction(
+        database& db, schema_ptr schema, ::shared_ptr<variable_specifications> bound_names) {
+    const column_definition& column_def = to_column_definition(schema, _entity);
+    if (!column_def.type->is_string()) {
+        throw exceptions::invalid_request_exception(
+                format("LIKE is allowed only on string types, which {} is not", column_def.name_as_text()));
+    }
+    auto term = to_term(to_receivers(schema, column_def), _value, db, schema->ks_name(), bound_names);
+    return ::make_shared<single_column_restriction::LIKE>(column_def, std::move(term));
 }
 
 std::vector<::shared_ptr<column_specification>>
@@ -96,28 +114,16 @@ single_column_relation::to_receivers(schema_ptr schema, const column_definition&
     auto receiver = column_def.column_specification;
 
     if (schema->is_dense() && column_def.is_regular()) {
-        throw exceptions::invalid_request_exception(sprint(
-            "Predicates on the non-primary-key column (%s) of a COMPACT table are not yet supported", column_def.name_as_text()));
-    }
-
-    if (is_IN()) {
-        // We only allow IN on the row key and the clustering key so far, never on non-PK columns, and this even if
-        // there's an index
-        // Note: for backward compatibility reason, we conside a IN of 1 value the same as a EQ, so we let that
-        // slide.
-        if (!column_def.is_primary_key() && !can_have_only_one_value()) {
-            throw exceptions::invalid_request_exception(sprint(
-                   "IN predicates on non-primary-key columns (%s) is not yet supported", column_def.name_as_text()));
-        }
+        throw exceptions::invalid_request_exception(format("Predicates on the non-primary-key column ({}) of a COMPACT table are not yet supported", column_def.name_as_text()));
     }
 
     if (is_contains() && !receiver->type->is_collection()) {
-        throw exceptions::invalid_request_exception(sprint("Cannot use CONTAINS on non-collection column \"%s\"", receiver->name));
+        throw exceptions::invalid_request_exception(format("Cannot use CONTAINS on non-collection column \"{}\"", receiver->name));
     }
 
     if (is_contains_key()) {
         if (!dynamic_cast<const map_type_impl*>(receiver->type.get())) {
-            throw exceptions::invalid_request_exception(sprint("Cannot use CONTAINS KEY on non-map column %s", receiver->name));
+            throw exceptions::invalid_request_exception(format("Cannot use CONTAINS KEY on non-map column {}", receiver->name));
         }
     }
 

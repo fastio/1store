@@ -66,6 +66,7 @@
 #include "cql3/untyped_result_set.hh"
 #include "cql3/util.hh"
 #include "utils/joinpoint.hh"
+#include "types/user.hh"
 
 static seastar::logger mlogger("legacy_schema_migrator");
 
@@ -78,8 +79,8 @@ class migrator {
 public:
     static const std::unordered_set<sstring> legacy_schema_tables;
 
-    migrator(sharded<service::storage_proxy>& sp, cql3::query_processor& qp)
-                    : _sp(sp), _qp(qp) {
+    migrator(sharded<service::storage_proxy>& sp, sharded<database>& db, cql3::query_processor& qp)
+                    : _sp(sp), _db(db), _qp(qp) {
     }
     migrator(migrator&&) = default;
 
@@ -230,7 +231,7 @@ public:
                      * in which case it should not be dense. However, we can limit our margin of error by assuming we are
                      * in the latter case only if the comparator is exactly CompositeType(UTF8Type).
                      */
-                    stdx::optional<column_id> max_cl_idx;
+                    std::optional<column_id> max_cl_idx;
                     const cql3::untyped_result_set::row * regular = nullptr;
                     for (auto& row : *columns) {
                         auto kind_str = row.get_as<sstring>("type");
@@ -324,7 +325,7 @@ public:
                     }
                 }
 
-                stdx::optional<index_metadata_kind> index_kind;
+                std::optional<index_metadata_kind> index_kind;
                 sstring index_name;
                 index_options_map options;
                 if (row.has("index_type")) {
@@ -360,7 +361,7 @@ public:
                 }
                 if (index_kind) {
                     // Origin assumes index_name is always set, so let's do the same
-                    builder.with_index(index_metadata(index_name, options, *index_kind));
+                    builder.with_index(index_metadata(index_name, options, *index_kind, index_metadata::is_local_index::no));
                 }
 
                 data_type column_name_type = [&] {
@@ -374,7 +375,7 @@ public:
                         return column_name_type->from_string(name);
                     } catch (marshal_exception&) {
                         // #2597: Scylla < 2.0 writes names in serialized form, try to recover
-                        column_name_type->validate(to_bytes_view(name));
+                        column_name_type->validate(to_bytes_view(name), cql_serialization_format::latest());
                         return to_bytes(name);
                     }
                 }();
@@ -410,7 +411,7 @@ public:
                 builder.set_caching_options(caching_options::from_sstring(td.get_as<sstring>("caching")));
             }
             if (td.has("default_time_to_live")) {
-                builder.set_default_time_to_live(gc_clock::duration(td.get_as<gc_clock::rep>("default_time_to_live")));
+                builder.set_default_time_to_live(gc_clock::duration(td.get_as<int32_t>("default_time_to_live")));
             }
             if (td.has("speculative_retry")) {
                 builder.set_speculative_retry(td.get_as<sstring>("speculative_retry"));
@@ -563,7 +564,7 @@ public:
         return parallel_for_each(legacy_schema_tables, [this](const sstring& cfname) {
             return do_with(utils::make_joinpoint([] { return db_clock::now();}),[this, cfname](auto& tsf) {
                 auto with_snapshot = !_keyspaces.empty();
-                return _qp.db().invoke_on_all([&tsf, cfname, with_snapshot](database& db) {
+                return _db.invoke_on_all([&tsf, cfname, with_snapshot](database& db) {
                     return db.drop_column_family(db::system_keyspace::NAME, cfname, [&tsf] { return tsf.value(); }, with_snapshot);
                 });
             });
@@ -598,7 +599,7 @@ public:
 
     future<> flush_schemas() {
         return _qp.proxy().get_db().invoke_on_all([this] (database& db) {
-            return parallel_for_each(db::schema_tables::ALL, [this, &db](const sstring& cf_name) {
+            return parallel_for_each(db::schema_tables::all_table_names(schema_features::full()), [this, &db](const sstring& cf_name) {
                 auto& cf = db.find_column_family(db::schema_tables::NAME, cf_name);
                 return cf.flush();
             });
@@ -616,6 +617,7 @@ public:
     }
 
     sharded<service::storage_proxy>& _sp;
+    sharded<database>& _db;
     cql3::query_processor& _qp;
     std::vector<keyspace> _keyspaces;
 };
@@ -634,7 +636,7 @@ const std::unordered_set<sstring> migrator::legacy_schema_tables = {
 }
 
 future<>
-db::legacy_schema_migrator::migrate(sharded<service::storage_proxy>& sp, cql3::query_processor& qp) {
-    return do_with(migrator(sp, qp), std::bind(&migrator::migrate, std::placeholders::_1));
+db::legacy_schema_migrator::migrate(sharded<service::storage_proxy>& sp, sharded<database>& db, cql3::query_processor& qp) {
+    return do_with(migrator(sp, db, qp), std::bind(&migrator::migrate, std::placeholders::_1));
 }
 

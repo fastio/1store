@@ -25,33 +25,62 @@ https://github.com/scylladb/scylla-grafana-monitoring on how to install and
 use it. The scylla-grafana-monitoring project allows you to continuously
 collect metrics from several Scylla nodes into a Prometheus metric-collection
 server, and then to visualize these metrics using Grafana and a web browser.
+Prometheus and Grafana will be described in separate sections below.
 
-## Metric labels: instance and shard
+## Metric labels: shard, instance and type
 Different Scylla nodes will have different values for each metric (e.g.,
 `scylla_cql_reads`, the total number of CQL read requests). Moreover, Scylla
 is sharded, meaning that inside each node each core works on its own data
 and keeps its own separate metrics. So in the metrics output, each metric
-identifier contains, beyond the metric's name, also additional labels to
-qualify which node and which shard this metric comes from. For example:
+identifier contains, beyond the metric's name, also an additional label to
+qualify which shard this metric comes from. For example:
 ```
-scylla_cql_reads{instance="sid",shard="0",type="derive"} 20
+scylla_cql_reads{shard="0",type="derive"} 20
 ```
-In this case, the metric comes from a node (which we call "instance") whose
-name is "sid", and from shard 0.
+In this example, this measurement comes from shard 0 (the first shard) of
+the node which returned this metric.
 
-The appearance of the instance and shard ids on each metric is what allows
-a single server (e.g. the Prometheus server mentioned above) to collect
-metrics from many Scylla nodes and their shards. The visualization tool
-(e.g., Grafana) can then show the metrics of different nodes and shards
-separately, or to calculate and display various sums - e.g., the sum
-on all shards of each node, or the total sum of all shards and all nodes.
+When Prometheus collects measurements from multiple nodes, it further adds
+an "instance" label to each measurement to remember from which node this
+measurement came. The "instance" label has the form `ip_address:port` - see
+https://prometheus.io/docs/concepts/jobs_instances/ for more information.
+Note again that the instance label is not present in the metrics exposed by
+Scylla (`http://scyllanode:9180/metrics`) but added later by Prometheus.
 
-The "instance" label is superflous for this goal - the Prometheus server
-knows which node it got each metric from - so we plan to remove it in the
-future - see https://github.com/scylladb/seastar/issues/477
+Saving instance and shard ids on each metric is what allows a single
+Prometheus server to collect metrics from many Scylla nodes and their shards.
+The visualization tool (such as Prometheus itself, or Grafana) can then show
+the metrics of different nodes and shards separately, or to calculate and
+display various sums - e.g., the sum on all shards of each node, or the total
+sum of all shards and all nodes.
 
 The "type" label should be ignored - it appears for historic reasons
 (it was used by collectd) and is planned to be removed in the future.
+
+## Additional metric labels
+In some cases, we have several metrics which measure the same thing but for
+different cases. For example, Scylla has about a dozen _scheduling groups_
+(see isolation.md), and we would like to get some statistics - e.g. the
+scheduler queue length - separately for each of these scheduling groups.
+
+One option is to have a dozen different metrics with different names, e.g.,
+`scylla_scheduler_queue_length_main`, `scylla_scheduler_queue_length_statement`
+for the two scheduling groups called "main" and "statement".
+
+However, there is a second option - which we chose in this case. The second
+option is to have just one metric name, and qualify it by a **label** with
+a value. In this case, we have one metric name `scylla_scheduler_queue_length`,
+and metrics on different scheduling groups differ by the `group` label:
+`scylla_scheduler_queue_length{group="main"}` and
+`scylla_scheduler_queue_length{group="statement"}`.
+
+Each metric reported by Scylla often has multiple labels, e.g.,
+```
+scylla_scheduler_queue_length{group="main",shard="0",type="gauge"} 0.000000
+```
+This metric has the `group` label, saying to which scheduling group this
+measurement pertains, and also `shard` and `type` labels which we described
+in the previous section.
 
 ## Per-table metrics
 Most of Scylla's metrics are global (in each shard). Scylla also supports
@@ -81,11 +110,11 @@ contains the "ks" (*keyspace*) and "cf" (*column family* - the old name
 for table) as labels. For example,
 
 ```
-scylla_column_family_pending_compaction{instance="sid",cf="IndexInfo",ks="system",shard="0",type="gauge"} 0.000000
+scylla_column_family_pending_compaction{cf="IndexInfo",ks="system",shard="0",type="gauge"} 0.000000
 ```
 
 Here we can see the "scylla_column_family_pending_compactions" metric
-measured in shard 0 of node "sid", for the table "IndexInfo" in keyspace
+measured in shard 0 of this node, for the table "IndexInfo" in keyspace
 "system".
 
 ## Types of metrics
@@ -146,3 +175,59 @@ way to see the list of metrics currently exposed by Scylla, because it
 includes a textual description in a comment above each metric.
 
 TODO: mention source files in which a developer should add new metrics.
+
+# Prometheus
+So far, we described Scylla's internal metric-retrieval recapability,
+a REST API for retrieving the current values of all metrics from a single
+node. But in production, as well as more advanced debugging sessions, one
+usually wants to collect metrics from multiple Scylla nodes, and to collect
+and to graph a history of each metric over time. As already mentioned above,
+we provide a separate project "scylla-grafana-monitoring" which does exactly
+this using the Prometheus time-series database.
+
+Prometheus is installed on a separate monitoring node (which we shall call
+below "monitornode"). It connects to several Scylla nodes, and saves their
+metrics into a time-series database. Prometheus then allows querying,
+analyzing, and and graphing this data, via a Web interface at:
+
+    http://monitornode:9090/
+
+Through this Web interface, a user can search for a metric name (type
+a word and see the list of all metrics with this word as part of their
+name), and then see the current value of this metric over all shards and
+nodes (the "Console" tab), and also see a graph of the value of this
+metric over time (the "Graph" tab).
+
+Prometheus allows querying and graphing not only the metric itself, but
+also various functions and aggregates of these metrics. For example, if
+a user asks to graph some metric `xyz` the result is a graph with multiple
+lines, one line for each shard and node. The syntax `xyz{instance="..."}`
+will limit the lines to all shards of just one node (given the node's IP
+address), and the syntax `xyz{instance="...",shard="0"}` will show only
+one shard of one node. The syntax `xyz{group=~"memtable.*"}` will show
+only metrics where the `group` label matches the given regular expression.
+
+The syntax `sum(xyz)` will plot just one line, with the total of the metric
+`xyz` over all shards in all nodes. It's also possible to plot partial sums -
+for example `sum(xyz) by (group)` generates a separate sum (and plot line)
+for each value of the label `group`.
+
+The expression `irate(xyz[1m])` graphs the rate of change (i.e.,
+the derivative) of the metric `xyz`. In this last example, the "1m"
+selector is ignored by the `irate()` function, but some duration is required
+by the Prometheus syntax.
+
+Prometheus supports many more functions and aggregations, which are described
+in its documentation:
+https://prometheus.io/docs/prometheus/latest/querying/basics/
+
+# Grafana
+While Prometheus already allows analyzing and graphing metric data, Grafana
+is a more advanced user interface which allows displaying many of these graphs
+in professional-looking "dashboards" which are more convenient for end-users
+who don't know which metrics Scylla has and what they mean, and want to see
+pre-canned dashboards of graphs that are useful for particular purposes.
+
+The Grafana user interface is available in:
+
+    http://monitornode:3000/

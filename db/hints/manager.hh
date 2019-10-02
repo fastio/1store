@@ -37,6 +37,7 @@
 #include "service/endpoint_lifecycle_subscriber.hh"
 #include "db/commitlog/commitlog.hh"
 #include "utils/loading_shared_values.hh"
+#include "utils/fragmented_temporary_buffer.hh"
 #include "db/hints/resource_manager.hh"
 
 namespace service {
@@ -60,10 +61,11 @@ private:
         uint64_t dropped = 0;
         uint64_t sent = 0;
         uint64_t discarded = 0;
+        uint64_t corrupted_files = 0;
     };
 
     // map: shard -> segments
-    using hints_ep_segments_map = std::unordered_map<unsigned, std::list<lister::path>>;
+    using hints_ep_segments_map = std::unordered_map<unsigned, std::list<fs::path>>;
     // map: IP -> map: shard -> segments
     using hints_segments_map = std::unordered_map<sstring, hints_ep_segments_map>;
 
@@ -84,13 +86,13 @@ public:
 
             enum class state {
                 stopping,               // stop() was called
-                ep_state_is_not_normal, // destination Node state is not NORMAL - usually means that it has been decommissioned
+                ep_state_left_the_ring, // destination Node is not a part of the ring anymore - usually means that it has been decommissioned
                 draining,               // try to send everything out and ignore errors
             };
 
             using state_set = enum_set<super_enum<state,
                 state::stopping,
-                state::ep_state_is_not_normal,
+                state::ep_state_left_the_ring,
                 state::draining>>;
 
             enum class send_state {
@@ -204,7 +206,7 @@ public:
             /// \param secs_since_file_mod last modification time stamp (in seconds since Epoch) of the current hints file
             /// \param fname name of the hints file this hint was read from
             /// \return future that resolves when next hint may be sent
-            future<> send_one_hint(lw_shared_ptr<send_one_file_ctx> ctx_ptr, temporary_buffer<char> buf, db::replay_position rp, gc_clock::duration secs_since_file_mod, const sstring& fname);
+            future<> send_one_hint(lw_shared_ptr<send_one_file_ctx> ctx_ptr, fragmented_temporary_buffer buf, db::replay_position rp, gc_clock::duration secs_since_file_mod, const sstring& fname);
 
             /// \brief Send all hint from a single file and delete it after it has been successfully sent.
             /// Send all hints from the given file. If we failed to send the current segment we will pick up in the next
@@ -222,7 +224,7 @@ public:
             /// \param ctx_ptr pointer to the send context
             /// \param buf hints file entry
             /// \return The mutation object representing the original mutation stored in the hints file.
-            frozen_mutation_and_schema get_mutation(lw_shared_ptr<send_one_file_ctx> ctx_ptr, temporary_buffer<char>& buf);
+            frozen_mutation_and_schema get_mutation(lw_shared_ptr<send_one_file_ctx> ctx_ptr, fragmented_temporary_buffer& buf);
 
             /// \brief Get a reference to the column_mapping object for a given frozen mutation.
             /// \param ctx_ptr pointer to the send context
@@ -288,7 +290,7 @@ public:
             state::stopped>>;
 
         state_set _state;
-        const boost::filesystem::path _hints_dir;
+        const fs::path _hints_dir;
         uint64_t _hints_in_progress = 0;
         sender _sender;
 
@@ -380,7 +382,7 @@ public:
             return _file_update_mutex;
         }
 
-        const boost::filesystem::path& hints_dir() const noexcept {
+        const fs::path& hints_dir() const noexcept {
             return _hints_dir;
         }
 
@@ -430,8 +432,9 @@ public:
     static const std::chrono::seconds hint_file_write_timeout;
 
 private:
+    static constexpr uint64_t max_size_of_hints_in_progress = 10 * 1024 * 1024; // 10MB
     state_set _state;
-    const boost::filesystem::path _hints_dir;
+    const fs::path _hints_dir;
     dev_t _hints_dir_device_id = 0;
 
     node_to_hint_store_factory_type _store_factory;
@@ -451,9 +454,6 @@ private:
     stats _stats;
     seastar::metrics::metric_groups _metrics;
     std::unordered_set<ep_key_type> _eps_with_pending_hints;
-
-    size_t _max_backlog_size = 1;
-    size_t _backlog_size = 0;
 
 public:
     manager(sstring hints_directory, std::vector<sstring> hinted_dcs, int64_t max_hint_window_ms, resource_manager&res_manager, distributed<database>& db);
@@ -524,7 +524,7 @@ public:
         return _ep_managers.size();
     }
 
-    const boost::filesystem::path& hints_dir() const {
+    const fs::path& hints_dir() const {
         return _hints_dir;
     }
 
@@ -535,14 +535,6 @@ public:
     void allow_hints();
     void forbid_hints();
     void forbid_hints_for_eps_with_pending_hints();
-
-    size_t max_backlog_size() const {
-        return _max_backlog_size;
-    }
-
-    size_t backlog_size() const {
-        return _backlog_size;
-    }
 
     void allow_replaying() noexcept {
         _state.set(state::replay_allowed);
@@ -608,7 +600,7 @@ private:
             size_t segments_per_shard,
             const sstring& hints_directory,
             hints_ep_segments_map& ep_segments,
-            std::list<lister::path>& segments_to_move);
+            std::list<fs::path>& segments_to_move);
 
     /// \brief Rebalance all present hints segments.
     ///

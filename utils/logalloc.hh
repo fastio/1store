@@ -236,7 +236,7 @@ class region_group {
     // there are region_groups waiting on us, we broadcast these messages to the waiters and they
     // will then decide whether they can now run or if they have to wait on us again (or potentially
     // a different ancestor)
-    std::experimental::optional<shared_promise<>> _descendant_blocked_requests = {};
+    std::optional<shared_promise<>> _descendant_blocked_requests = {};
 
     condition_variable _relief;
     future<> _releaser;
@@ -434,7 +434,7 @@ private:
     memory::reclaimer _reclaimer;
     friend class region;
     friend class region_impl;
-    memory::reclaiming_result reclaim();
+    memory::reclaiming_result reclaim(seastar::memory::reclaimer::request);
 public:
     tracker();
     ~tracker();
@@ -547,8 +547,10 @@ public:
 class basic_region_impl : public allocation_strategy {
 protected:
     bool _reclaiming_enabled = true;
+    seastar::shard_id _cpu = seastar::local_engine->cpu_id();
 public:
     void set_reclaiming_enabled(bool enabled) {
+        assert(seastar::local_engine->cpu_id() == _cpu);
         _reclaiming_enabled = enabled;
     }
 
@@ -717,6 +719,7 @@ public:
         while (true) {
             try {
                 logalloc::reclaim_lock _(r);
+                memory::disable_abort_on_alloc_failure_temporarily dfg;
                 return fn();
             } catch (const std::bad_alloc&) {
                 on_alloc_failure(r);

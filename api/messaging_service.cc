@@ -21,7 +21,7 @@
 
 #include "messaging_service.hh"
 #include "message/messaging_service.hh"
-#include "rpc/rpc_types.hh"
+#include <seastar/rpc/rpc_types.hh>
 #include "api/api-doc/messaging_service.json.hh"
 #include <iostream>
 #include <sstream>
@@ -76,7 +76,7 @@ future_json_function get_server_getter(std::function<uint64_t(const rpc::stats&)
         auto get_shard_map = [f](messaging_service& ms) {
             std::unordered_map<gms::inet_address, unsigned long> map;
             ms.foreach_server_connection_stats([&map, f] (const rpc::client_info& info, const rpc::stats& stats) mutable {
-                map[gms::inet_address(net::ipv4_address(info.addr))] = f(stats);
+                map[gms::inet_address(info.addr.addr())] = f(stats);
             });
             return map;
         };
@@ -139,7 +139,7 @@ void set_messaging_service(http_context& ctx, routes& r) {
                 messaging_verb v = i; // for type safety we use messaging_verb values
                 auto idx = static_cast<uint32_t>(v);
                 if (idx >= map->size()) {
-                    throw std::runtime_error(sprint("verb index out of bounds: %lu, map size: %lu", idx, map->size()));
+                    throw std::runtime_error(format("verb index out of bounds: {:d}, map size: {:d}", idx, map->size()));
                 }
                 if ((*map)[idx] > 0) {
                     c.count = (*map)[idx];

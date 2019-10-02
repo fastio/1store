@@ -27,13 +27,15 @@
 #include "mutation_fragment.hh"
 
 std::ostream&
-operator<<(std::ostream& os, const clustering_row& row) {
-    return os << "{clustering_row: ck " << row._ck << " t " << row._t << " row_marker " << row._marker << " cells " << row._cells << "}";
+operator<<(std::ostream& os, const clustering_row::printer& p) {
+    auto& row = p._clustering_row;
+    return os << "{clustering_row: ck " << row._ck << " t " << row._t << " row_marker " << row._marker << " cells "
+              << row::printer(p._schema, column_kind::regular_column, row._cells) << "}";
 }
 
 std::ostream&
-operator<<(std::ostream& os, const static_row& row) {
-    return os << "{static_row: "<< row._cells << "}";
+operator<<(std::ostream& os, const static_row::printer& p) {
+    return os << "{static_row: "<< row::printer(p._schema, column_kind::static_column, p._static_row._cells) << "}";
 }
 
 std::ostream&
@@ -63,7 +65,7 @@ std::ostream& operator<<(std::ostream& out, position_in_partition_view pos) {
     } else {
         out << "null";
     }
-    return out << "," << pos._bound_weight << "}";
+    return out << "," << int32_t(pos._bound_weight) << "}";
 }
 
 std::ostream& operator<<(std::ostream& out, const position_in_partition& pos) {
@@ -145,7 +147,7 @@ const clustering_key_prefix& mutation_fragment::key() const
 void mutation_fragment::apply(const schema& s, mutation_fragment&& mf)
 {
     assert(mergeable_with(mf));
-    _data->_size_in_bytes = stdx::nullopt;
+    _data->_size_in_bytes = std::nullopt;
     switch (_kind) {
     case mutation_fragment::kind::partition_start:
         _data->_partition_start.partition_tombstone().apply(mf._data->_partition_start.partition_tombstone());
@@ -202,11 +204,14 @@ std::ostream& operator<<(std::ostream& os, mutation_fragment::kind k)
     abort();
 }
 
-std::ostream& operator<<(std::ostream& os, const mutation_fragment& mf) {
+std::ostream& operator<<(std::ostream& os, const mutation_fragment::printer& p) {
+    auto& mf = p._mutation_fragment;
     os << "{mutation_fragment: " << mf._kind << " " << mf.position() << " ";
-    mf.visit([&os] (const auto& what) -> void {
-       os << what;
-    });
+    mf.visit(make_visitor(
+        [&] (const clustering_row& cr) { os << clustering_row::printer(p._schema, cr); },
+        [&] (const static_row& sr) { os << static_row::printer(p._schema, sr); },
+        [&] (const auto& what) -> void { os << what; }
+    ));
     os << "}";
     return os;
 }
@@ -258,9 +263,12 @@ void range_tombstone_stream::forward_to(position_in_partition_view pos) {
     });
 }
 
-void range_tombstone_stream::apply(const range_tombstone_list& list, const query::clustering_range& range) {
-    for (const range_tombstone& rt : list.slice(_schema, range)) {
-        _list.apply(_schema, rt);
+void range_tombstone_stream::apply(const range_tombstone_list& list, const query::clustering_range& range, bool trim_front) {
+    for (range_tombstone rt : list.slice(_schema, range)) {
+        if (trim_front) {
+            rt.trim_front(_schema, position_in_partition_view::for_range_start(range));
+        }
+        _list.apply(_schema, std::move(rt));
     }
 }
 

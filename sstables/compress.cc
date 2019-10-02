@@ -31,7 +31,6 @@
 #include "../compress.hh"
 #include "compress.hh"
 #include "unimplemented.hh"
-#include "stdx.hh"
 #include "segmented_compress_params.hh"
 #include "utils/class_registrator.hh"
 
@@ -127,7 +126,7 @@ void compression::segmented_offsets::write(uint64_t bucket_index, uint64_t offse
     value <<= displacement.shift;
 
     if ((~displacement.mask | value) != ~displacement.mask) {
-        throw std::invalid_argument(sprint("{}: to-be-written value would overflow the allocated bits", __FUNCTION__));
+        throw std::invalid_argument(format("{}: to-be-written value would overflow the allocated bits", __FUNCTION__));
     }
 
     old_value &= displacement.mask;
@@ -188,7 +187,7 @@ void compression::segmented_offsets::init(uint32_t chunk_size) {
 
 uint64_t compression::segmented_offsets::at(std::size_t i, compression::segmented_offsets::state& s) const {
     if (i >= _size) {
-        throw std::out_of_range(sprint("{}: index {} is out of range", __FUNCTION__, i));
+        throw std::out_of_range(format("{}: index {} is out of range", __FUNCTION__, i));
     }
 
     s.update_position_trackers(i, _segment_size_bits, _segments_per_bucket, _grouped_offsets);
@@ -254,6 +253,9 @@ public:
     operator bool() const {
         return _compressor != nullptr;
     }
+    const compressor_ptr& compressor() const {
+        return _compressor;
+    }
 };
 
 local_compression::local_compression(compressor_ptr p)
@@ -264,8 +266,8 @@ local_compression::local_compression(const compression& c)
     : _compressor([&c] {
         sstring n(c.name.value.begin(), c.name.value.end());
         return compressor::create(n, [&c, &n](const sstring& key) -> compressor::opt_string {
-            if (key == compression_parameters::CHUNK_LENGTH_KB) {
-                return to_sstring(c.chunk_len);
+            if (key == compression_parameters::CHUNK_LENGTH_KB || key == compression_parameters::CHUNK_LENGTH_KB_ERR) {
+                return to_sstring(c.chunk_len / 1024);
             }
             if (key == compression_parameters::SSTABLE_COMPRESSION) {
                 return n;
@@ -275,7 +277,7 @@ local_compression::local_compression(const compression& c)
                     return sstring(o.value.value.begin(), o.value.value.end());
                 }
             }
-            return std::experimental::nullopt;
+            return std::nullopt;
         });
     }())
 {}
@@ -317,6 +319,9 @@ void compression::update(uint64_t compressed_file_length) {
     _compressed_file_length = compressed_file_length;
 }
 
+compressor_ptr get_sstable_compressor(const compression& c) {
+    return local_compression(c).compressor();
+}
 
 // locate() takes a byte position in the uncompressed stream, and finds the
 // the location of the compressed chunk on disk which contains it, and the
@@ -343,7 +348,7 @@ GCC6_CONCEPT(
     requires ChecksumUtils<ChecksumType>
 )
 class compressed_file_data_source_impl : public data_source_impl {
-    stdx::optional<input_stream<char>> _input_stream;
+    std::optional<input_stream<char>> _input_stream;
     sstables::compression* _compression_metadata;
     sstables::compression::segmented_offsets::accessor _offsets;
     sstables::local_compression _compression;

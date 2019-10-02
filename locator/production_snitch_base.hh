@@ -40,13 +40,12 @@
 
 #include <unordered_map>
 #include <utility>
-#include <experimental/optional>
+#include <optional>
 #include <unordered_set>
-#include <boost/filesystem.hpp>
 
 #include "gms/endpoint_state.hh"
 #include "locator/token_metadata.hh"
-#include "core/sstring.hh"
+#include <seastar/core/sstring.hh>
 #include "snitch_base.hh"
 
 namespace locator {
@@ -104,7 +103,7 @@ protected:
 
 protected:
     promise<> _io_is_stopped;
-    std::experimental::optional<addr2dc_rack_map> _saved_endpoints;
+    std::optional<addr2dc_rack_map> _saved_endpoints;
     distributed<snitch_ptr>* _my_distributed = nullptr;
     std::string _prop_file_contents;
     sstring _prop_file_name;

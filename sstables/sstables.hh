@@ -24,25 +24,25 @@
 
 #include "version.hh"
 #include "shared_sstable.hh"
-#include "core/file.hh"
-#include "core/fstream.hh"
-#include "core/future.hh"
-#include "core/sstring.hh"
-#include "core/enum.hh"
-#include "core/shared_ptr.hh"
-#include "core/distributed.hh"
-#include <seastar/core/shared_ptr_incomplete.hh>
+#include <seastar/core/file.hh>
+#include <seastar/core/fstream.hh>
+#include <seastar/core/future.hh>
+#include <seastar/core/sstring.hh>
+#include <seastar/core/enum.hh>
+#include <seastar/core/shared_ptr.hh>
+#include <seastar/core/distributed.hh>
 #include <unordered_set>
 #include <unordered_map>
+#include <variant>
 #include "types.hh"
 #include "clustering_key_filter.hh"
-#include "core/enum.hh"
+#include <seastar/core/enum.hh>
 #include "compress.hh"
 #include "dht/i_partitioner.hh"
 #include "schema.hh"
 #include "mutation.hh"
 #include "utils/i_filter.hh"
-#include "core/stream.hh"
+#include <seastar/core/stream.hh>
 #include "metadata_collector.hh"
 #include "encoding_stats.hh"
 #include "filter.hh"
@@ -57,10 +57,14 @@
 #include "utils/phased_barrier.hh"
 #include "component_type.hh"
 #include "sstable_version.hh"
-#include "db/large_partition_handler.hh"
+#include "db/large_data_handler.hh"
 #include "column_translation.hh"
+#include "stats.hh"
+#include "utils/observable.hh"
+#include "sstables/shareable_components.hh"
 
 #include <seastar/util/optimized_optional.hh>
+#include <boost/intrusive/list.hpp>
 
 class sstable_assertions;
 
@@ -71,6 +75,8 @@ namespace sstables {
 namespace mc {
 class writer;
 }
+
+namespace fs = std::filesystem;
 
 extern logging::logger sstlog;
 class key;
@@ -104,58 +110,44 @@ class data_consume_context;
 class index_reader;
 
 bool supports_correct_non_compound_range_tombstones();
+bool supports_correct_static_compact_in_mc();
 
 struct sstable_writer_config {
-    std::experimental::optional<size_t> promoted_index_block_size;
+    std::optional<size_t> promoted_index_block_size;
     uint64_t max_sstable_size = std::numeric_limits<uint64_t>::max();
     bool backup = false;
     bool leave_unsealed = false;
-    stdx::optional<db::replay_position> replay_position;
+    std::optional<db::replay_position> replay_position;
     write_monitor* monitor = &default_write_monitor();
     bool correctly_serialize_non_compound_range_tombstones = supports_correct_non_compound_range_tombstones();
-    db::large_partition_handler* large_partition_handler;
+    bool correctly_serialize_static_compact_in_mc = supports_correct_static_compact_in_mc();
+    utils::UUID run_identifier = utils::make_random_uuid();
 };
 
-static constexpr inline size_t default_sstable_buffer_size() {
-    return 128 * 1024;
-}
-
-shared_sstable make_sstable(schema_ptr schema, sstring dir, int64_t generation, sstable_version_types v, sstable_format_types f, gc_clock::time_point now = gc_clock::now(),
-            io_error_handler_gen error_handler_gen = default_io_error_handler_gen(), size_t buffer_size = default_sstable_buffer_size());
+class sstable_tracker;
 
 class sstable : public enable_lw_shared_from_this<sstable> {
     friend ::sstable_assertions;
+    friend sstable_tracker;
 public:
     using version_types = sstable_version_types;
     using format_types = sstable_format_types;
-    static const size_t default_buffer_size = default_sstable_buffer_size();
+    using tracker_link_type = bi::list_member_hook<bi::link_mode<bi::auto_unlink>>;
 public:
-    sstable(schema_ptr schema, sstring dir, int64_t generation, version_types v, format_types f, gc_clock::time_point now = gc_clock::now(),
-            io_error_handler_gen error_handler_gen = default_io_error_handler_gen(), size_t buffer_size = default_buffer_size)
-        : sstable_buffer_size(buffer_size)
-        , _schema(std::move(schema))
-        , _dir(std::move(dir))
-        , _generation(generation)
-        , _version(v)
-        , _format(f)
-        , _now(now)
-        , _read_error_handler(error_handler_gen(sstable_read_error))
-        , _write_error_handler(error_handler_gen(sstable_write_error))
-    { }
+    sstable(schema_ptr schema,
+            sstring dir,
+            int64_t generation,
+            version_types v,
+            format_types f,
+            db::large_data_handler& large_data_handler,
+            gc_clock::time_point now,
+            io_error_handler_gen error_handler_gen,
+            size_t buffer_size);
     sstable& operator=(const sstable&) = delete;
     sstable(const sstable&) = delete;
-    sstable(sstable&&) = default;
+    sstable(sstable&&) = delete;
 
     ~sstable();
-
-    // Read one or few rows at the given byte range from the data file,
-    // feeding them into the consumer. This function reads the entire given
-    // byte range at once into memory, so it should not be used for iterating
-    // over all the rows in the data file (see the next function for that.
-    // The function returns a future which completes after all the data has
-    // been fed into the consumer. The caller needs to ensure the "consumer"
-    // object lives until then (e.g., using the do_with() idiom).
-    future<> data_consume_rows_at_once(const schema& s, row_consumer& consumer, uint64_t pos, uint64_t end);
 
     // disk_read_range describes a byte ranges covering part of an sstable
     // row that we need to read from disk. Usually this is the whole byte
@@ -178,10 +170,14 @@ public:
     static component_type component_from_sstring(version_types version, sstring& s);
     static version_types version_from_sstring(sstring& s);
     static format_types format_from_sstring(sstring& s);
-    static const sstring filename(sstring dir, sstring ks, sstring cf, version_types version, int64_t generation,
-                                  format_types format, component_type component);
-    static const sstring filename(sstring dir, sstring ks, sstring cf, version_types version, int64_t generation,
-                                  format_types format, sstring component);
+    static sstring component_basename(const sstring& ks, const sstring& cf, version_types version, int64_t generation,
+                                      format_types format, component_type component);
+    static sstring component_basename(const sstring& ks, const sstring& cf, version_types version, int64_t generation,
+                                      format_types format, sstring component);
+    static sstring filename(const sstring& dir, const sstring& ks, const sstring& cf, version_types version, int64_t generation,
+                            format_types format, component_type component);
+    static sstring filename(const sstring& dir, const sstring& ks, const sstring& cf, version_types version, int64_t generation,
+                            format_types format, sstring component);
     // WARNING: it should only be called to remove components of a sstable with
     // a temporary TOC file.
     static future<> remove_sstable_with_temp_toc(sstring ks, sstring cf, sstring dir, int64_t generation,
@@ -261,7 +257,7 @@ public:
             uint64_t estimated_partitions,
             schema_ptr schema,
             const sstable_writer_config&,
-            encoding_stats stats = {},
+            encoding_stats stats,
             const io_priority_class& pc = default_priority_class());
 
     sstable_writer get_writer(const schema& s,
@@ -270,6 +266,8 @@ public:
         encoding_stats enc_stats,
         const io_priority_class& pc = default_priority_class(),
         shard_id shard = engine().cpu_id());
+
+    encoding_stats get_encoding_stats_for_compaction() const;
 
     future<> seal_sstable(bool backup);
 
@@ -295,11 +293,11 @@ public:
     // guaranteed that all of its on-disk files will be deleted as soon as
     // the in-memory object is destroyed.
     void mark_for_deletion() {
-        _marked_for_deletion = true;
+        _marked_for_deletion = mark_for_deletion::marked;
     }
 
     bool marked_for_deletion() const {
-        return _marked_for_deletion;
+        return _marked_for_deletion == mark_for_deletion::marked;
     }
 
     void add_ancestor(int64_t generation) {
@@ -356,15 +354,61 @@ public:
     // Return values are those of a trichotomic comparison.
     int compare_by_max_timestamp(const sstable& other) const;
 
-    const sstring get_filename() const {
+    sstring component_basename(component_type f) const {
+        return component_basename(_schema->ks_name(), _schema->cf_name(), _version, _generation, _format, f);
+    }
+
+    sstring filename(const sstring& dir, component_type f) const {
+        return filename(dir, _schema->ks_name(), _schema->cf_name(), _version, _generation, _format, f);
+    }
+
+    sstring filename(component_type f) const {
+        return filename(get_dir(), f);
+    }
+
+    sstring temp_filename(component_type f) const {
+        return filename(get_temp_dir(), f);
+    }
+
+    sstring get_filename() const {
         return filename(component_type::Data);
     }
+
+    sstring toc_filename() const {
+        return filename(component_type::TOC);
+    }
+
+    static sstring sst_dir_basename(unsigned long gen) {
+        return fmt::format("{:016d}.sstable", gen);
+    }
+
+    static sstring temp_sst_dir(const sstring& dir, unsigned long gen) {
+        return dir + "/" + sst_dir_basename(gen);
+    }
+
+    static bool is_temp_dir(const fs::path& dirpath)
+    {
+        return dirpath.extension().string() == ".sstable";
+    }
+
+    static sstring pending_delete_dir_basename() {
+        return "pending_delete";
+    }
+
+    static bool is_pending_delete_dir(const fs::path& dirpath)
+    {
+        return dirpath.filename().string() == pending_delete_dir_basename().c_str();
+    }
+
     const sstring& get_dir() const {
         return _dir;
     }
-    sstring toc_filename() const;
 
-    bool is_staging() const;
+    const sstring get_temp_dir() const {
+        return temp_sst_dir(_dir, _generation);
+    }
+
+    bool requires_view_building() const;
 
     metadata_collector& get_metadata_collector() {
         return _collector;
@@ -372,10 +416,17 @@ public:
 
     std::vector<std::pair<component_type, sstring>> all_components() const;
 
-    future<> create_links(sstring dir, int64_t generation) const;
+    future<> create_links(const sstring& dir, int64_t generation) const;
 
-    future<> create_links(sstring dir) const {
+    future<> create_links(const sstring& dir) const {
         return create_links(dir, _generation);
+    }
+
+    // Delete the sstable by unlinking all sstable files
+    future<> unlink();
+
+    db::large_data_handler& get_large_data_handler() {
+        return _large_data_handler;
     }
 
     /**
@@ -388,21 +439,23 @@ public:
     }
     std::vector<sstring> component_filenames() const;
 
+    utils::observer<sstable&> add_on_closed_handler(std::function<void (sstable&)> on_closed_handler) noexcept {
+        return _on_closed.observe(on_closed_handler);
+    }
+
     template<typename Func, typename... Args>
     auto sstable_write_io_check(Func&& func, Args&&... args) const {
         return do_io_check(_write_error_handler, func, std::forward<Args>(args)...);
     }
 
-    // Immutable components that can be shared among shards.
-    struct shareable_components {
-        sstables::compression compression;
-        utils::filter_ptr filter;
-        sstables::summary summary;
-        sstables::statistics statistics;
-        stdx::optional<sstables::scylla_metadata> scylla_metadata;
-    };
+    // required since touch_directory has an optional parameter
+    auto sstable_touch_directory_io_check(sstring name) const {
+        return do_io_check(_write_error_handler, [name = std::move(name)] () mutable {
+            return touch_directory(std::move(name));
+        });
+    }
 private:
-    size_t sstable_buffer_size = default_buffer_size;
+    size_t sstable_buffer_size;
 
     static std::unordered_map<version_types, sstring, enum_hash<version_types>> _version_string;
     static std::unordered_map<format_types, sstring, enum_hash<format_types>> _format_string;
@@ -413,6 +466,7 @@ private:
     foreign_ptr<lw_shared_ptr<shareable_components>> _components = make_foreign(make_lw_shared<shareable_components>());
     column_translation _column_translation;
     bool _shared = true;  // across shards; safe default
+    bool _open = false;
     // NOTE: _collector and _c_stats are used to generation of statistics file
     // when writing a new sstable.
     metadata_collector _collector;
@@ -426,8 +480,10 @@ private:
     db_clock::time_point _data_file_write_time;
     std::vector<nonwrapping_range<bytes_view>> _clustering_components_ranges;
     std::vector<unsigned> _shards;
-    stdx::optional<dht::decorated_key> _first;
-    stdx::optional<dht::decorated_key> _last;
+    std::optional<dht::decorated_key> _first;
+    std::optional<dht::decorated_key> _last;
+    utils::UUID _run_identifier;
+    utils::observable<sstable&> _on_closed;
 
     lw_shared_ptr<file_input_stream_history> _single_partition_history = make_lw_shared<file_input_stream_history>();
     lw_shared_ptr<file_input_stream_history> _partition_range_history = make_lw_shared<file_input_stream_history>();
@@ -448,7 +504,7 @@ private:
         uint64_t block_next_start_offset;
         bytes block_first_colname;
         bytes block_last_colname;
-        std::experimental::optional<range_tombstone_accumulator> tombstone_accumulator;
+        std::optional<range_tombstone_accumulator> tombstone_accumulator;
         const schema* schemap;
         size_t desired_block_size;
     } _pi_write;
@@ -464,22 +520,32 @@ private:
 
     schema_ptr _schema;
     sstring _dir;
+    std::optional<sstring> _temp_dir; // Valid while the sstable is being created, until sealed
     unsigned long _generation = 0;
     version_types _version;
     format_types _format;
 
     filter_tracker _filter_tracker;
 
-    bool _marked_for_deletion = false;
+    enum class mark_for_deletion {
+        implicit = -1,
+        none = 0,
+        marked = 1
+    } _marked_for_deletion = mark_for_deletion::none;
 
     gc_clock::time_point _now;
 
     io_error_handler _read_error_handler;
     io_error_handler _write_error_handler;
 
-    const bool has_component(component_type f) const;
+    db::large_data_handler& _large_data_handler;
 
-    const sstring filename(component_type f) const;
+    sstables_stats _stats;
+    tracker_link_type _tracker_link;
+
+public:
+    const bool has_component(component_type f) const;
+private:
     future<file> open_file(component_type, open_flags, file_open_options = {});
 
     template <component_type Type, typename T>
@@ -491,8 +557,11 @@ private:
     void write_crc(const checksum& c);
     void write_digest(uint32_t full_checksum);
 
-    future<file> new_sstable_component_file(const io_error_handler& error_handler, sstring name, open_flags flags, file_open_options options = {});
-    future<file> new_sstable_component_file_non_checked(sstring name, open_flags flags, file_open_options options = {});
+    future<file> rename_new_sstable_component_file(sstring from_file, sstring to_file, file fd);
+    future<file> new_sstable_component_file(const io_error_handler& error_handler, component_type f, open_flags flags, file_open_options options = {});
+
+    future<> touch_temp_dir();
+    future<> remove_temp_dir();
 
     void generate_toc(compressor_ptr c, double filter_fp_chance);
     void write_toc(const io_priority_class& pc);
@@ -502,7 +571,7 @@ private:
     void write_compression(const io_priority_class& pc);
 
     future<> read_scylla_metadata(const io_priority_class& pc);
-    void write_scylla_metadata(const io_priority_class& pc, shard_id shard, sstable_enabled_features features);
+    void write_scylla_metadata(const io_priority_class& pc, shard_id shard, sstable_enabled_features features, run_identifier identifier);
 
     future<> read_filter(const io_priority_class& pc);
 
@@ -532,6 +601,7 @@ private:
     // sstable that doesn't contain scylla component may contain wrong metadata,
     // and so max_local_deletion_time should be discarded for those.
     void validate_max_local_deletion_time();
+    void validate_partitioner();
 
     void set_first_and_last_keys();
 
@@ -585,7 +655,7 @@ private:
             const std::vector<bytes_view>& column_names,
             composite::eoc marker = composite::eoc::none);
 
-    stdx::optional<std::pair<uint64_t, uint64_t>> get_sample_indexes_for_range(const dht::token_range& range);
+    std::optional<std::pair<uint64_t, uint64_t>> get_sample_indexes_for_range(const dht::token_range& range);
 
     std::vector<unsigned> compute_shards_for_this_sstable() const;
     template <typename Components>
@@ -622,6 +692,17 @@ public:
 
     bool has_shadowable_tombstones() const {
         return has_scylla_component() && _components->scylla_metadata->has_feature(sstable_feature::ShadowableTombstones);
+    }
+
+    sstable_enabled_features features() const {
+        if (!has_scylla_component()) {
+            return {};
+        }
+        return _components->scylla_metadata->get_features();
+    }
+
+    utils::UUID run_identifier() const {
+        return _run_identifier;
     }
 
     bool has_correct_max_deletion_time() const {
@@ -716,15 +797,15 @@ public:
 
     double get_compression_ratio() const;
 
+    const sstables::compression& get_compression() const {
+        return _components->compression;
+    }
+
     future<> mutate_sstable_level(uint32_t);
 
     const summary& get_summary() const {
         return _components->summary;
     }
-
-    // Return sstable key range as range<partition_key> reading only the summary component.
-    future<range<partition_key>>
-    get_sstable_key_range(const schema& s);
 
     const std::vector<nonwrapping_range<bytes_view>>& clustering_components_ranges() const;
 
@@ -737,8 +818,13 @@ public:
     future<foreign_sstable_open_info> get_open_info() &;
 
     // returns all info needed for a sstable to be shared with other shards.
-    static future<sstable_open_info> load_shared_components(const schema_ptr& s, sstring dir, int generation, version_types v, format_types f,
-        const io_priority_class& pc = default_priority_class());
+    future<sstable_open_info> load_shared_components();
+
+    sstables_stats& get_stats() {
+        return _stats;
+    }
+
+    void update_stats_on_end_of_stream();
 
     // Allow the test cases from sstable_test.cc to test private methods. We use
     // a placeholder to avoid cluttering this class too much. The sstable_test class
@@ -764,17 +850,17 @@ struct entry_descriptor {
     sstring sstdir;
     sstring ks;
     sstring cf;
-    sstable::version_types version;
     int64_t generation;
+    sstable::version_types version;
     sstable::format_types format;
     component_type component;
 
     static entry_descriptor make_descriptor(sstring sstdir, sstring fname);
 
-    entry_descriptor(sstring sstdir, sstring ks, sstring cf, sstable::version_types version,
-                     int64_t generation, sstable::format_types format,
+    entry_descriptor(sstring sstdir, sstring ks, sstring cf, int64_t generation,
+                     sstable::version_types version, sstable::format_types format,
                      component_type component)
-        : sstdir(sstdir), ks(ks), cf(cf), version(version), generation(generation), format(format), component(component) {}
+        : sstdir(sstdir), ks(ks), cf(cf), generation(generation), version(version), format(format), component(component) {}
 };
 
 // Waits for all prior tasks started on current shard related to sstable management to finish.
@@ -799,7 +885,8 @@ future<> await_background_jobs_on_all_shards();
 // until all shards agree it can be deleted.
 //
 // This function only solves the second problem for now.
-future<> delete_atomically(std::vector<shared_sstable> ssts, const db::large_partition_handler& large_partition_handler);
+future<> delete_atomically(std::vector<shared_sstable> ssts);
+future<> replay_pending_delete_log(sstring log_file);
 
 struct index_sampling_state {
     static constexpr size_t default_summary_byte_cost = 2000;
@@ -837,7 +924,7 @@ public:
 // contains data for loading a sstable using components shared by a single shard;
 // can be moved across shards
 struct foreign_sstable_open_info {
-    foreign_ptr<lw_shared_ptr<sstable::shareable_components>> components;
+    foreign_ptr<lw_shared_ptr<shareable_components>> components;
     std::vector<shard_id> owners;
     seastar::file_handle data;
     seastar::file_handle index;
@@ -848,7 +935,7 @@ struct foreign_sstable_open_info {
 
 // can only be used locally
 struct sstable_open_info {
-    lw_shared_ptr<sstable::shareable_components> components;
+    lw_shared_ptr<shareable_components> components;
     std::vector<shard_id> owners;
     file data;
     file index;
@@ -862,6 +949,15 @@ class file_io_extension {
 public:
     virtual ~file_io_extension() {}
     virtual future<file> wrap_file(sstable&, component_type, file, open_flags flags) = 0;
+    // optionally return a map of attributes for a given sstable,
+    // suitable for "describe".
+    // This would preferably be interesting info on what/why the extension did
+    // to this table.
+    using attr_value_type = std::variant<sstring, std::map<sstring, sstring>>;
+    using attr_value_map = std::map<sstring, attr_value_type>;
+    virtual attr_value_map get_attributes(const sstable&) const {
+        return {};
+    }
 };
 
 }

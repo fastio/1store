@@ -41,9 +41,9 @@
 
 #pragma once
 
-#include "cql3/restrictions/abstract_restriction.hh"
+#include "cql3/restrictions/restriction.hh"
 #include "cql3/term.hh"
-#include "core/shared_ptr.hh"
+#include <seastar/core/shared_ptr.hh>
 #include "to_string.hh"
 #include "exceptions/exceptions.hh"
 
@@ -136,7 +136,7 @@ public:
         static auto print_term = [] (::shared_ptr<term> t) -> sstring {
             return t ? t->to_string() : "null";
         };
-        return sprint("(%s %s, %s %s)",
+        return format("({} {}, {} {})",
             _bounds[0].inclusive ? ">=" : ">", print_term(_bounds[0].t),
             _bounds[1].inclusive ? "<=" : "<", print_term(_bounds[1].t));
     }

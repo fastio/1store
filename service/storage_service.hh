@@ -45,33 +45,46 @@
 #include "locator/token_metadata.hh"
 #include "gms/gossiper.hh"
 #include "utils/UUID_gen.hh"
-#include "core/distributed.hh"
+#include <seastar/core/distributed.hh>
 #include "dht/i_partitioner.hh"
 #include "dht/token_range_endpoints.hh"
-#include "core/sleep.hh"
+#include <seastar/core/sleep.hh>
 #include "gms/application_state.hh"
 #include "db/system_distributed_keyspace.hh"
-#include "core/semaphore.hh"
+#include <seastar/core/semaphore.hh>
 #include "utils/fb_utilities.hh"
 #include "utils/serialized_action.hh"
-#include "database.hh"
+#include "database_fwd.hh"
+#include "db/schema_features.hh"
 #include "streaming/stream_state.hh"
 #include "streaming/stream_plan.hh"
 #include <seastar/core/distributed.hh>
 #include "disk-error-handler.hh"
 #include "gms/feature.hh"
 #include <seastar/core/metrics_registration.hh>
+#include <seastar/core/rwlock.hh>
+#include "sstables/version.hh"
 
 namespace cql_transport {
     class cql_server;
-}
-namespace redis_transport {
-    class redis_server;
 }
 class thrift_server;
 
 namespace dht {
 class boot_strapper;
+}
+
+namespace gms {
+class feature_service;
+class gossiper;
+};
+
+namespace redis_transport {
+    class redis_server;
+}
+
+namespace redis {
+    class query_processor;
 }
 
 namespace service {
@@ -93,6 +106,23 @@ enum class disk_error { regular, commit };
 
 struct bind_messaging_port_tag {};
 using bind_messaging_port = bool_class<bind_messaging_port_tag>;
+
+class feature_enabled_listener : public gms::feature::listener {
+    storage_service& _s;
+    seastar::semaphore& _sem;
+    sstables::sstable_version_types _format;
+public:
+    feature_enabled_listener(storage_service& s, seastar::semaphore& sem, sstables::sstable_version_types format)
+        : _s(s)
+        , _sem(sem)
+        , _format(format)
+    { }
+    void on_enabled() override;
+};
+
+struct storage_service_config {
+    size_t available_memory;
+};
 
 /**
  * This abstraction contains the token/identifier of this node
@@ -123,8 +153,12 @@ private:
     /* JMX notification serial number counter */
     private final AtomicLong notificationSerialNumber = new AtomicLong();
 #endif
+    abort_source& _abort_source;
+    gms::feature_service& _feature_service;
     distributed<database>& _db;
+    gms::gossiper& _gossiper;
     sharded<auth::service>& _auth_service;
+    sharded<cql3::cql_config>& _cql_config;
     int _update_jobs{0};
     // Note that this is obviously only valid for the current shard. Users of
     // this facility should elect a shard to be the coordinator based on any
@@ -135,17 +169,23 @@ private:
     bool _loading_new_sstables = false;
     shared_ptr<load_broadcaster> _lb;
     shared_ptr<distributed<cql_transport::cql_server>> _cql_server;
-    shared_ptr<distributed<redis_transport::redis_server>> _redis_server;
     shared_ptr<distributed<thrift_server>> _thrift_server;
+    shared_ptr<distributed<redis_transport::redis_server>> _redis_server;
     sstring _operation_in_progress;
     bool _force_remove_completion = false;
     bool _ms_stopped = false;
     bool _stream_manager_stopped = false;
     seastar::metrics::metric_groups _metrics;
+    std::set<sstring> _disabled_features;
+    size_t _service_memory_total;
+    semaphore _service_memory_limiter;
 public:
-    storage_service(distributed<database>& db, sharded<auth::service>&, sharded<db::system_distributed_keyspace>&);
+    storage_service(abort_source& as, distributed<database>& db, gms::gossiper& gossiper, sharded<auth::service>&, sharded<cql3::cql_config>& cql_config, sharded<db::system_distributed_keyspace>&, sharded<db::view::view_update_generator>&, gms::feature_service& feature_service, storage_service_config config, /* only for tests */ bool for_testing = false, /* only for tests */ std::set<sstring> disabled_features = {});
     void isolate_on_error();
     void isolate_on_commit_error();
+
+    // only for tests
+    void set_disabled_features(std::set<sstring> = {});
 
     // Needed by distributed<>
     future<> stop();
@@ -226,7 +266,7 @@ private:
 
     std::unordered_set<inet_address> _replicating_nodes;
 
-    std::experimental::optional<inet_address> _removing_node;
+    std::optional<inet_address> _removing_node;
 
     /* Are we starting this node in bootstrap mode? */
     bool _is_bootstrap_mode;
@@ -239,11 +279,20 @@ private:
 
     bool _joined = false;
 
+    seastar::rwlock _snapshot_lock;
+
+    template <typename Func>
+    static std::result_of_t<Func()> run_snapshot_modify_operation(Func&&);
+
+    template <typename Func>
+    static std::result_of_t<Func()> run_snapshot_list_operation(Func&&);
 public:
     enum class mode { STARTING, NORMAL, JOINING, LEAVING, DECOMMISSIONED, MOVING, DRAINING, DRAINED };
 private:
     mode _operation_mode = mode::STARTING;
     friend std::ostream& operator<<(std::ostream& os, const mode& mode);
+    friend future<> read_sstables_format(distributed<storage_service>&);
+    friend class feature_enabled_listener;
 #if 0
     /* the probability for tracing any particular request, 0 disables tracing and 1 enables for all */
     private double traceProbability = 0.0;
@@ -294,24 +343,21 @@ private:
     gms::feature _la_sstable_feature;
     gms::feature _stream_with_rpc_stream_feature;
     gms::feature _mc_sstable_feature;
+    gms::feature _row_level_repair_feature;
+    gms::feature _truncation_table;
+    gms::feature _correct_static_compact_in_mc;
+    gms::feature _unbounded_range_tombstones_feature;
+    gms::feature _view_virtual_columns;
+    gms::feature _digest_insensitive_to_expiry;
+    gms::feature _computed_columns;
+
+    sstables::sstable_version_types _sstables_format = sstables::sstable_version_types::ka;
+    seastar::semaphore _feature_listeners_sem = {1};
+    feature_enabled_listener _la_feature_listener;
+    feature_enabled_listener _mc_feature_listener;
 public:
-    void enable_all_features() {
-        _range_tombstones_feature.enable();
-        _large_partitions_feature.enable();
-        _materialized_views_feature.enable();
-        _counters_feature.enable();
-        _indexes_feature.enable();
-        _digest_multipartition_read_feature.enable();
-        _correct_counter_order_feature.enable();
-        _schema_tables_v3.enable();
-        _correct_non_compound_range_tombstones.enable();
-        _write_failure_reply_feature.enable();
-        _xxhash_feature.enable();
-        _roles_feature.enable();
-        _la_sstable_feature.enable();
-        _stream_with_rpc_stream_feature.enable();
-        _mc_sstable_feature.enable();
-    }
+    sstables::sstable_version_types sstables_format() const { return _sstables_format; }
+    void enable_all_features();
 
     void finish_bootstrapping() {
         _is_bootstrap_mode = false;
@@ -353,19 +399,18 @@ public:
     future<> stop_native_transport();
 
     future<bool> is_native_transport_running();
-    
-    future<> start_redis_transport();
+
+    future<> start_redis_transport(distributed<redis::query_processor>& qp);
 
     future<> stop_redis_transport();
 
     future<bool> is_redis_transport_running();
-
 private:
     future<> do_stop_rpc_server();
     future<> do_stop_native_transport();
-    future<> do_stop_redis_transport();
     future<> do_stop_ms();
     future<> do_stop_stream_manager();
+    future<> do_stop_redis_transport();
 #if 0
     public void stopTransports()
     {
@@ -411,9 +456,9 @@ public:
     }
 #endif
 public:
-    future<std::unordered_set<token>> prepare_replacement_info();
+    future<std::unordered_set<token>> prepare_replacement_info(const std::unordered_map<gms::inet_address, sstring>& loaded_peer_features);
 
-    future<> check_for_endpoint_collision();
+    future<> check_for_endpoint_collision(const std::unordered_map<gms::inet_address, sstring>& loaded_peer_features);
 #if 0
 
     // for testing only
@@ -475,9 +520,10 @@ public:
 #endif
 private:
     bool should_bootstrap();
-    void prepare_to_join(std::vector<inet_address> loaded_endpoints, bind_messaging_port do_bind = bind_messaging_port::yes);
-    void register_features();
+    void prepare_to_join(std::vector<inet_address> loaded_endpoints, const std::unordered_map<gms::inet_address, sstring>& loaded_peer_features, bind_messaging_port do_bind = bind_messaging_port::yes);
     void join_token_ring(int delay);
+    void wait_for_feature_listeners_to_finish();
+    void maybe_start_sys_dist_ks();
 public:
     future<> join_ring();
     bool is_joined();
@@ -520,6 +566,7 @@ public:
 private:
     void set_mode(mode m, bool log);
     void set_mode(mode m, sstring msg, bool log);
+    void mark_existing_views_as_built();
 public:
     void bootstrap(std::unordered_set<token> tokens);
 
@@ -755,6 +802,7 @@ private:
     serialized_action _replicate_action;
     serialized_action _update_pending_ranges_action;
     sharded<db::system_distributed_keyspace>& _sys_dist_ks;
+    sharded<db::view::view_update_generator>& _view_update_generator;
 private:
     /**
      * Replicates token_metadata contents on shard0 instance to other shards.
@@ -2222,7 +2270,7 @@ public:
         return get_storage_service().invoke_on(0, [operation = std::move(operation),
                 func = std::forward<Func>(func)] (storage_service& ss) mutable {
             if (!ss._operation_in_progress.empty()) {
-                throw std::runtime_error(sprint("Operation %s is in progress, try again", ss._operation_in_progress));
+                throw std::runtime_error(format("Operation {} is in progress, try again", ss._operation_in_progress));
             }
             ss._operation_in_progress = std::move(operation);
             return func(ss).finally([&ss] {
@@ -2243,7 +2291,10 @@ private:
 public:
     utils::UUID get_local_id() { return _local_host_id; }
 
-    static sstring get_config_supported_features();
+    sstring get_config_supported_features();
+    std::set<sstring> get_config_supported_features_set();
+    sstring get_known_features();
+    std::set<sstring> get_known_features_set();
 
     bool cluster_supports_range_tombstones() {
         return bool(_range_tombstones_feature);
@@ -2304,6 +2355,34 @@ public:
     bool cluster_supports_mc_sstable() const {
         return bool(_mc_sstable_feature);
     }
+
+    bool cluster_supports_row_level_repair() const {
+        return bool(_row_level_repair_feature);
+    }
+    const gms::feature& cluster_supports_truncation_table() const {
+        return _truncation_table;
+    }
+    const gms::feature& cluster_supports_correct_static_compact_in_mc() const {
+        return _correct_static_compact_in_mc;
+    }
+    bool cluster_supports_unbounded_range_tombstones() const {
+        return bool(_unbounded_range_tombstones_feature);
+    }
+
+    const gms::feature& cluster_supports_view_virtual_columns() const {
+        return _view_virtual_columns;
+    }
+    const gms::feature& cluster_supports_digest_insensitive_to_expiry() const {
+        return _digest_insensitive_to_expiry;
+    }
+
+    bool cluster_supports_computed_columns() const {
+        return bool(_computed_columns);
+    }
+
+    // Returns schema features which all nodes in the cluster advertise as supported.
+    db::schema_features cluster_schema_features() const;
+
 private:
     future<> set_cql_ready(bool ready);
     future<> set_redis_ready(bool ready);
@@ -2315,12 +2394,11 @@ private:
     void notify_cql_change(inet_address endpoint, bool ready);
 };
 
-inline future<> init_storage_service(distributed<database>& db, sharded<auth::service>& auth_service, sharded<db::system_distributed_keyspace>& sys_dist_ks) {
-    return service::get_storage_service().start(std::ref(db), std::ref(auth_service), std::ref(sys_dist_ks));
-}
+future<> init_storage_service(sharded<abort_source>& abort_sources, distributed<database>& db, sharded<gms::gossiper>& gossiper, sharded<auth::service>& auth_service,
+        sharded<cql3::cql_config>& cql_config, sharded<db::system_distributed_keyspace>& sys_dist_ks,
+        sharded<db::view::view_update_generator>& view_update_generator, sharded<gms::feature_service>& feature_service, storage_service_config config);
+future<> deinit_storage_service();
 
-inline future<> deinit_storage_service() {
-    return service::get_storage_service().stop();
-}
+future<> read_sstables_format(distributed<storage_service>& ss);
 
 }

@@ -27,6 +27,10 @@
 #include "cql3/sets.hh"
 #include "cql3/lists.hh"
 #include "cql3/constants.hh"
+#include "database.hh"
+#include "types/map.hh"
+#include "types/set.hh"
+#include "types/list.hh"
 
 namespace cql3 {
 namespace functions {
@@ -59,17 +63,17 @@ functions::init() {
     for (auto&& type : cql3_type::values()) {
         // Note: because text and varchar ends up being synonymous, our automatic makeToBlobFunction doesn't work
         // for varchar, so we special case it below. We also skip blob for obvious reasons.
-        if (type == cql3_type::varchar || type == cql3_type::blob) {
+        if (type == cql3_type::blob) {
             continue;
         }
         // counters are not supported yet
-        if (type->is_counter()) {
+        if (type.is_counter()) {
             warn(unimplemented::cause::COUNTERS);
             continue;
         }
 
-        declare(make_to_blob_function(type->get_type()));
-        declare(make_from_blob_function(type->get_type()));
+        declare(make_to_blob_function(type.get_type()));
+        declare(make_from_blob_function(type.get_type()));
     }
     declare(aggregate_fcts::make_count_function<int8_t>());
     declare(aggregate_fcts::make_max_function<int8_t>());
@@ -111,9 +115,9 @@ functions::init() {
     declare(aggregate_fcts::make_max_function<simple_date_native_type>());
     declare(aggregate_fcts::make_min_function<simple_date_native_type>());
 
-    declare(aggregate_fcts::make_count_function<timestamp_native_type>());
-    declare(aggregate_fcts::make_max_function<timestamp_native_type>());
-    declare(aggregate_fcts::make_min_function<timestamp_native_type>());
+    declare(aggregate_fcts::make_count_function<db_clock::time_point>());
+    declare(aggregate_fcts::make_max_function<db_clock::time_point>());
+    declare(aggregate_fcts::make_min_function<db_clock::time_point>());
 
     declare(aggregate_fcts::make_count_function<timeuuid_native_type>());
     declare(aggregate_fcts::make_max_function<timeuuid_native_type>());
@@ -123,10 +127,13 @@ functions::init() {
     declare(aggregate_fcts::make_max_function<utils::UUID>());
     declare(aggregate_fcts::make_min_function<utils::UUID>());
 
-    //FIXME:
-    //declare(aggregate_fcts::make_count_function<bytes>());
-    //declare(aggregate_fcts::make_max_function<bytes>());
-    //declare(aggregate_fcts::make_min_function<bytes>());
+    declare(aggregate_fcts::make_count_function<bytes>());
+    declare(aggregate_fcts::make_max_function<bytes>());
+    declare(aggregate_fcts::make_min_function<bytes>());
+
+    declare(aggregate_fcts::make_count_function<bool>());
+    declare(aggregate_fcts::make_max_function<bool>());
+    declare(aggregate_fcts::make_min_function<bool>());
 
     // FIXME: more count/min/max
 
@@ -163,7 +170,7 @@ functions::make_arg_spec(const sstring& receiver_ks, const sstring& receiver_cf,
     std::transform(name.begin(), name.end(), name.begin(), ::tolower);
     return ::make_shared<column_specification>(receiver_ks,
                                    receiver_cf,
-                                   ::make_shared<column_identifier>(sprint("arg%d(%s)", i, name), true),
+                                   ::make_shared<column_identifier>(format("arg{:d}({})", i, name), true),
                                    fun.arg_types()[i]);
 }
 
@@ -191,7 +198,7 @@ make_from_json_function(database& db, const sstring& keyspace, data_type t) {
         if (!json_value.isNull()) {
             parsed_json_value.emplace(t->from_json_object(json_value, sf));
         }
-        return std::move(parsed_json_value);
+        return parsed_json_value;
     });
 }
 
@@ -283,13 +290,13 @@ functions::get(database& db,
 
     if (compatibles.empty()) {
         throw exceptions::invalid_request_exception(
-                sprint("Invalid call to function %s, none of its type signatures match (known type signatures: %s)",
+                format("Invalid call to function {}, none of its type signatures match (known type signatures: {})",
                                                         name, join(", ", candidates)));
     }
 
     if (compatibles.size() > 1) {
         throw exceptions::invalid_request_exception(
-                sprint("Ambiguous call to function %s (can be matched by following signatures: %s): use type casts to disambiguate",
+                format("Ambiguous call to function {} (can be matched by following signatures: {}): use type casts to disambiguate",
                     name, join(", ", compatibles)));
     }
 
@@ -328,7 +335,7 @@ functions::validate_types(database& db,
                           const sstring& receiver_cf) {
     if (provided_args.size() != fun->arg_types().size()) {
         throw exceptions::invalid_request_exception(
-                sprint("Invalid number of arguments in call to function %s: %d required but %d provided",
+                format("Invalid number of arguments in call to function {}: {:d} required but {:d} provided",
                         fun->name(), fun->arg_types().size(), provided_args.size()));
     }
 
@@ -344,7 +351,7 @@ functions::validate_types(database& db,
         auto&& expected = make_arg_spec(receiver_ks, receiver_cf, *fun, i);
         if (!is_assignable(provided->test_assignment(db, keyspace, expected))) {
             throw exceptions::invalid_request_exception(
-                    sprint("Type error: %s cannot be passed as argument %d of function %s of type %s",
+                    format("Type error: {} cannot be passed as argument {:d} of function {} of type {}",
                             provided, i, fun->name(), expected->type->as_cql3_type()));
         }
     }
@@ -419,7 +426,7 @@ function_call::bind_and_get(const query_options& options) {
         // simplify things.
         auto val = t->bind_and_get(options);
         if (!val) {
-            throw exceptions::invalid_request_exception(sprint("Invalid null value for argument to %s", *_fun));
+            throw exceptions::invalid_request_exception(format("Invalid null value for argument to {}", *_fun));
         }
         buffers.push_back(std::move(to_bytes_opt(val)));
     }
@@ -433,13 +440,13 @@ function_call::execute_internal(cql_serialization_format sf, scalar_function& fu
     try {
         // Check the method didn't lied on it's declared return type
         if (result) {
-            fun.return_type()->validate(*result);
+            fun.return_type()->validate(*result, sf);
         }
         return result;
     } catch (marshal_exception& e) {
-        throw runtime_exception(sprint("Return of function %s (%s) is not a valid value for its declared return type %s",
+        throw runtime_exception(format("Return of function {} ({}) is not a valid value for its declared return type {}",
                                        fun, to_hex(result),
-                                       *fun.return_type()->as_cql3_type()
+                                       fun.return_type()->as_cql3_type()
                                        ));
     }
 }
@@ -465,11 +472,11 @@ function_call::make_terminal(shared_ptr<function> fun, cql3::raw_value result, c
     if (result) {
         res = fragmented_temporary_buffer::view(bytes_view(*result));
     }
-    if (&ctype->_kind == &collection_type_impl::kind::list) {
+    if (ctype->get_kind() == abstract_type::kind::list) {
         return make_shared(lists::value::from_serialized(std::move(res), static_pointer_cast<const list_type_impl>(ctype), sf));
-    } else if (&ctype->_kind == &collection_type_impl::kind::set) {
+    } else if (ctype->get_kind() == abstract_type::kind::set) {
         return make_shared(sets::value::from_serialized(std::move(res), static_pointer_cast<const set_type_impl>(ctype), sf));
-    } else if (&ctype->_kind == &collection_type_impl::kind::map) {
+    } else if (ctype->get_kind() == abstract_type::kind::map) {
         return make_shared(maps::value::from_serialized(std::move(res), static_pointer_cast<const map_type_impl>(ctype), sf));
     }
     abort();
@@ -485,7 +492,7 @@ function_call::raw::prepare(database& db, const sstring& keyspace, ::shared_ptr<
     });
     auto&& fun = functions::functions::get(db, keyspace, _name, args, receiver->ks_name, receiver->cf_name, receiver);
     if (!fun) {
-        throw exceptions::invalid_request_exception(sprint("Unknown function %s called", _name));
+        throw exceptions::invalid_request_exception(format("Unknown function {} called", _name));
     }
     if (fun->is_aggregate()) {
         throw exceptions::invalid_request_exception("Aggregation function are not supported in the where clause");
@@ -497,13 +504,13 @@ function_call::raw::prepare(database& db, const sstring& keyspace, ::shared_ptr<
     // Functions.get() will complain if no function "name" type check with the provided arguments.
     // We still have to validate that the return type matches however
     if (!receiver->type->is_value_compatible_with(*scalar_fun->return_type())) {
-        throw exceptions::invalid_request_exception(sprint("Type error: cannot assign result of function %s (type %s) to %s (type %s)",
+        throw exceptions::invalid_request_exception(format("Type error: cannot assign result of function {} (type {}) to {} (type {})",
                                                     fun->name(), fun->return_type()->as_cql3_type(),
                                                     receiver->name, receiver->type->as_cql3_type()));
     }
 
     if (scalar_fun->arg_types().size() != _terms.size()) {
-        throw exceptions::invalid_request_exception(sprint("Incorrect number of arguments specified for function %s (expected %d, found %d)",
+        throw exceptions::invalid_request_exception(format("Incorrect number of arguments specified for function {} (expected {:d}, found {:d})",
                                                     fun->name(), fun->arg_types().size(), _terms.size()));
     }
 
@@ -548,7 +555,7 @@ function_call::raw::test_assignment(database& db, const sstring& keyspace, share
     // later with a more helpful error message that if we were to return false here.
     try {
         auto&& fun = functions::get(db, keyspace, _name, _terms, receiver->ks_name, receiver->cf_name, receiver);
-        if (fun && receiver->type->equals(fun->return_type())) {
+        if (fun && receiver->type == fun->return_type()) {
             return assignment_testable::test_result::EXACT_MATCH;
         } else if (!fun || receiver->type->is_value_compatible_with(*fun->return_type())) {
             return assignment_testable::test_result::WEAKLY_ASSIGNABLE;
@@ -562,7 +569,7 @@ function_call::raw::test_assignment(database& db, const sstring& keyspace, share
 
 sstring
 function_call::raw::to_string() const {
-    return sprint("%s(%s)", _name, join(", ", _terms));
+    return format("{}({})", _name, join(", ", _terms));
 }
 
 

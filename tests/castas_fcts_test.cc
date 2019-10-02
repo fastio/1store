@@ -28,11 +28,12 @@
 
 #include "utils/big_decimal.hh"
 #include "exceptions/exceptions.hh"
-#include "tests/test-utils.hh"
+#include <seastar/testing/test_case.hh>
 #include "tests/cql_test_env.hh"
 #include "tests/cql_assertions.hh"
+#include "tests/exception_utils.hh"
 
-#include "core/future-util.hh"
+#include <seastar/core/future-util.hh>
 #include "transport/messages/result_message.hh"
 
 #include "db/config.hh"
@@ -66,7 +67,7 @@ constexpr char cql_type_name<double>::value[];
 template<typename RetType, typename Type>
 auto test_explicit_type_casting_in_avg_function() {
     return do_with_cql_env_thread([] (auto& e) {
-        e.execute_cql(sprint("CREATE TABLE air_quality_data (sensor_id text, time timestamp, co_ppm %s, PRIMARY KEY (sensor_id, time));", cql_type_name<Type>::value)).get();
+        e.execute_cql(format("CREATE TABLE air_quality_data (sensor_id text, time timestamp, co_ppm {}, PRIMARY KEY (sensor_id, time));", cql_type_name<Type>::value)).get();
         e.execute_cql(
             "begin unlogged batch \n"
             "  INSERT INTO air_quality_data(sensor_id, time, co_ppm) VALUES ('my_home', '2016-08-30 07:01:00', 17); \n"
@@ -77,7 +78,7 @@ auto test_explicit_type_casting_in_avg_function() {
             "  INSERT INTO air_quality_data(sensor_id, time, co_ppm) VALUES ('my_home', '2016-08-30 07:01:05', 31); \n"
             "  INSERT INTO air_quality_data(sensor_id, time, co_ppm) VALUES ('my_home', '2016-08-30 07:01:10', 20); \n"
             "apply batch;").get();
-            auto msg = e.execute_cql(sprint("select avg(CAST(co_ppm AS %s)) from air_quality_data;", cql_type_name<RetType>::value)).get0();
+            auto msg = e.execute_cql(format("select avg(CAST(co_ppm AS {})) from air_quality_data;", cql_type_name<RetType>::value)).get0();
             assert_that(msg).is_rows().with_size(1).with_row({{data_type_for<RetType>()->decompose( RetType(17 + 18 + 19 + 20 + 30 + 31 + 20) / RetType(7) )}});
     });
 }
@@ -100,22 +101,69 @@ SEASTAR_TEST_CASE(test_explicit_type_casting_in_avg_function_double) {
 }
 
 SEASTAR_TEST_CASE(test_unsupported_conversions) {
-    auto validate_request_failure = [] (cql_test_env& env, const sstring& request, const sstring& expected_message) {
-        BOOST_REQUIRE_EXCEPTION(env.execute_cql(request).get(),
-                                exceptions::invalid_request_exception,
-                                [&expected_message](auto &&ire) {
-                                    BOOST_REQUIRE_EQUAL(expected_message, ire.what());
-                                    return true;
-                                });
-
-        return make_ready_future<>();
-    };
-
     return do_with_cql_env_thread([&] (auto& e) {
+        using ire = exceptions::invalid_request_exception;
+        using exception_predicate::message_contains;
         e.execute_cql("CREATE TABLE air_quality_data_text (sensor_id text, time timestamp, co_ppm text, PRIMARY KEY (sensor_id, time));").get();
-        validate_request_failure(e, "select CAST(co_ppm AS int) from air_quality_data_text", "org.apache.cassandra.db.marshal.UTF8Type cannot be cast to org.apache.cassandra.db.marshal.Int32Type");
+        BOOST_REQUIRE_EXCEPTION(e.execute_cql("select CAST(co_ppm AS int) from air_quality_data_text").get(), ire,
+            message_contains("UTF8Type cannot be cast to org.apache.cassandra.db.marshal.Int32Type"));
         e.execute_cql("CREATE TABLE air_quality_data_ascii (sensor_id text, time timestamp, co_ppm ascii, PRIMARY KEY (sensor_id, time));").get();
-        validate_request_failure(e, "select CAST(co_ppm AS int) from air_quality_data_ascii", "org.apache.cassandra.db.marshal.AsciiType cannot be cast to org.apache.cassandra.db.marshal.Int32Type");
+        BOOST_REQUIRE_EXCEPTION(e.execute_cql("select CAST(co_ppm AS int) from air_quality_data_ascii").get(), ire,
+            message_contains("AsciiType cannot be cast to org.apache.cassandra.db.marshal.Int32Type"));
+    });
+}
+
+SEASTAR_TEST_CASE(test_decimal_to_bigint) {
+    return do_with_cql_env_thread([&](auto& e) {
+        e.execute_cql("CREATE TABLE test (key text primary key, value decimal)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k1', 9223372036854775807)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k2', 9223372036854775808)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k3', 18446744073709551615)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k4', 18446744073709551616)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k5', 18446744073709551617)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k6', 18446744073709551617.1)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k7', 18446744073709551617.9)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k8', -1)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k9', -9223372036854775808)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k10', -9223372036854775809)").get();
+        auto v = e.execute_cql("SELECT key,CAST(value as bigint) from test").get0();
+        assert_that(v).is_rows().with_rows_ignore_order({
+            {{utf8_type->decompose("k1")}, {long_type->decompose(std::numeric_limits<int64_t>::max())}},
+            {{utf8_type->decompose("k2")}, {long_type->decompose(std::numeric_limits<int64_t>::min())}},
+            {{utf8_type->decompose("k3")}, {long_type->decompose(int64_t(-1))}},
+            {{utf8_type->decompose("k4")}, {long_type->decompose(int64_t(0))}},
+            {{utf8_type->decompose("k5")}, {long_type->decompose(int64_t(1))}},
+            {{utf8_type->decompose("k6")}, {long_type->decompose(int64_t(1))}},
+            {{utf8_type->decompose("k7")}, {long_type->decompose(int64_t(1))}},
+            {{utf8_type->decompose("k8")}, {long_type->decompose(int64_t(-1))}},
+            {{utf8_type->decompose("k9")}, {long_type->decompose(std::numeric_limits<int64_t>::min())}},
+            {{utf8_type->decompose("k10")}, {long_type->decompose(std::numeric_limits<int64_t>::max())}},
+        });
+    });
+}
+
+SEASTAR_TEST_CASE(test_varint_to_bigint) {
+    return do_with_cql_env_thread([&](auto& e) {
+        e.execute_cql("CREATE TABLE test (key text primary key, value varint)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k1', 9223372036854775807)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k2', 9223372036854775808)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k3', 18446744073709551615)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k4', 18446744073709551616)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k5', 18446744073709551617)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k6', -1)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k7', -9223372036854775808)").get();
+        e.execute_cql("INSERT INTO test (key, value) VALUES ('k8', -9223372036854775809)").get();
+        auto v = e.execute_cql("SELECT key,CAST(value as bigint) from test").get0();
+        assert_that(v).is_rows().with_rows_ignore_order({
+            {{utf8_type->decompose("k1")}, {long_type->decompose(std::numeric_limits<int64_t>::max())}},
+            {{utf8_type->decompose("k2")}, {long_type->decompose(std::numeric_limits<int64_t>::min())}},
+            {{utf8_type->decompose("k3")}, {long_type->decompose(int64_t(-1))}},
+            {{utf8_type->decompose("k4")}, {long_type->decompose(int64_t(0))}},
+            {{utf8_type->decompose("k5")}, {long_type->decompose(int64_t(1))}},
+            {{utf8_type->decompose("k6")}, {long_type->decompose(int64_t(-1))}},
+            {{utf8_type->decompose("k7")}, {long_type->decompose(std::numeric_limits<int64_t>::min())}},
+            {{utf8_type->decompose("k8")}, {long_type->decompose(std::numeric_limits<int64_t>::max())}},
+        });
     });
 }
 

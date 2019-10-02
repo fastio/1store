@@ -26,7 +26,8 @@
 #include <boost/test/unit_test.hpp>
 
 #include <seastar/core/thread.hh>
-#include <seastar/tests/test-utils.hh>
+#include <seastar/testing/test_case.hh>
+#include <seastar/testing/thread_test_case.hh>
 
 #include "sstables/sstables.hh"
 #include "sstables/compaction_manager.hh"
@@ -36,7 +37,6 @@
 #include "schema_builder.hh"
 #include "sstable_test.hh"
 #include "flat_mutation_reader_assertions.hh"
-#include "sstable_test.hh"
 #include "tests/test_services.hh"
 #include "tests/tmpdir.hh"
 #include "tests/sstable_utils.hh"
@@ -44,27 +44,34 @@
 #include "sstables/types.hh"
 #include "keys.hh"
 #include "types.hh"
+#include "types/user.hh"
 #include "partition_slice_builder.hh"
 #include "schema.hh"
 #include "utils/UUID_gen.hh"
 #include "encoding_stats.hh"
 #include "sstables/mc/writer.hh"
+#include "simple_schema.hh"
+#include "exception_utils.hh"
 
 using namespace sstables;
 
 class sstable_assertions final {
+    test_env _env;
     shared_sstable _sst;
 public:
     sstable_assertions(schema_ptr schema, const sstring& path, int generation = 1)
-        : _sst(make_sstable(std::move(schema),
+        : _env()
+        , _sst(_env.make_sstable(std::move(schema),
                             path,
                             generation,
                             sstable_version_types::mc,
                             sstable_format_types::big,
-                            gc_clock::now(),
-                            default_io_error_handler_gen(),
                             1))
     { }
+
+    test_env& get_env() {
+        return _env;
+    }
     void read_toc() {
         _sst->read_toc().get();
     }
@@ -112,7 +119,7 @@ public:
     void assert_toc(const std::set<component_type>& expected_components) {
         for (auto& expected : expected_components) {
             if(_sst->_recognized_components.count(expected) == 0) {
-                BOOST_FAIL(sprint("Expected component of TOC missing: %s\n ... in: %s",
+                BOOST_FAIL(format("Expected component of TOC missing: {}\n ... in: {}",
                                   expected,
                                   std::set<component_type>(
                                       cbegin(_sst->_recognized_components),
@@ -121,7 +128,7 @@ public:
         }
         for (auto& present : _sst->_recognized_components) {
             if (expected_components.count(present) == 0) {
-                BOOST_FAIL(sprint("Unexpected component of TOC: %s\n ... when expecting: %s",
+                BOOST_FAIL(format("Unexpected component of TOC: {}\n ... when expecting: {}",
                                   present,
                                   expected_components));
             }
@@ -1241,6 +1248,42 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_static_row_read) {
         .produces_end_of_stream();
 }
 
+// Following tests run on files in tests/sstables/3.x/uncompressed/random_partitioner
+// They were created using following CQL statements:
+//
+// Partitioner: org.apache.cassandra.dht.RandomPartitioner
+//
+// CREATE KEYSPACE test_ks WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+//
+// CREATE TABLE test_ks.test_table ( pk INT, ck INT, v INT, PRIMARY KEY(pk, ck))
+//      WITH compression = { 'enabled' : false };
+//
+// INSERT INTO test_ks.test_table(pk, ck, v) VALUES(1, 10, 100);
+// INSERT INTO test_ks.test_table(pk, ck, v) VALUES(2, 20, 200);
+// INSERT INTO test_ks.test_table(pk, ck, v) VALUES(3, 30, 300);
+
+using exception_predicate::message_equals;
+
+SEASTAR_THREAD_TEST_CASE(test_uncompressed_random_partitioner) {
+    auto abj = defer([] { await_background_jobs().get(); });
+    const sstring uncompressed_random_partitioner_path =
+            "tests/sstables/3.x/uncompressed/random_partitioner";
+    const schema_ptr uncompressed_random_partitioner_schema =
+            schema_builder("test_ks", "test_table")
+                .with_column("pk", int32_type, column_kind::partition_key)
+                .with_column("ck", int32_type, column_kind::clustering_key)
+                .with_column("v", int32_type)
+                .set_compressor_params(compression_parameters::no_compression())
+                .build();
+
+    sstable_assertions sst(uncompressed_random_partitioner_schema,
+                           uncompressed_random_partitioner_path);
+    using namespace std::string_literals;
+    BOOST_REQUIRE_EXCEPTION(sst.load(), std::runtime_error,
+        message_equals("SSTable tests/sstables/3.x/uncompressed/random_partitioner/mc-1-big-Data.db uses "
+                       "org.apache.cassandra.dht.RandomPartitioner partitioner which is different than "
+                       "org.apache.cassandra.dht.Murmur3Partitioner partitioner used by the database"s));
+}
 // Following tests run on files in tests/sstables/3.x/uncompressed/compound_static_row
 // They were created using following CQL statements:
 //
@@ -1306,7 +1349,7 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_compound_static_row_read) {
         columns.push_back({s_text_cdef, utf8_type->from_string(text_val)});
         columns.push_back({s_inet_cdef, inet_addr_type->from_string(inet_val)});
 
-        return std::move(columns);
+        return columns;
     };
 
     assert_that(sst.read_rows_flat())
@@ -1532,7 +1575,7 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_counters_read) {
     .produces_end_of_stream();
 }
 
-// Following tests run on files in tests/sstables/3.x/{uncompressed,compressed}/partition_key_with_value_of_different_types
+// Following tests run on files in tests/sstables/3.x/{uncompressed,lz4,snappy,deflate,zstd}/partition_key_with_value_of_different_types
 // They were created using following CQL statements:
 //
 // CREATE KEYSPACE test_ks WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
@@ -1548,9 +1591,14 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_counters_read) {
 //                                   uuid_val UUID,
 //                                   text_val TEXT,
 //                                   PRIMARY KEY(pk))
-//      WITH compression = { 'enabled' : false };
+//      WITH compression = <compression>;
 //
-// "WITH compression = { 'enabled' : false };" is used only for uncompressed test. Compressed test does not use it.
+//  where <compression> is one of the following:
+//  {'enabled': false} for the uncompressed case,
+//  {'sstable_compression': 'org.apache.cassandra.io.compress.LZ4Compressor'} for the LZ4 case,
+//  {'sstable_compression': 'org.apache.cassandra.io.compress.SnappyCompressor'} for the Snappy case,
+//  {'sstable_compression': 'org.apache.cassandra.io.compress.DeflateCompressor'} for the Deflate case,
+//  {'sstable_compression': 'org.apache.cassandra.io.compress.ZstdCompressor', 'compression_level': 1} for the Zstd case.
 //
 // INSERT INTO test_ks.test_table(pk, bool_val, double_val, float_val, int_val, long_val, timestamp_val, timeuuid_val,
 //                                uuid_val, text_val)
@@ -1578,11 +1626,17 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_counters_read) {
 //                                50554d6e-29bb-11e5-b345-feff819cdc9f, 01234567-0123-0123-0123-0123456789ab,
 //                                'variable length text 5');
 
-static thread_local const sstring UNCOMPRESSED_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH =
+static const sstring UNCOMPRESSED_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH =
     "tests/sstables/3.x/uncompressed/partition_key_with_values_of_different_types";
-static thread_local const sstring COMPRESSED_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH =
-    "tests/sstables/3.x/compressed/partition_key_with_values_of_different_types";
-static thread_local const schema_ptr PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA =
+static const sstring LZ4_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH =
+    "tests/sstables/3.x/lz4/partition_key_with_values_of_different_types";
+static const sstring SNAPPY_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH =
+    "tests/sstables/3.x/snappy/partition_key_with_values_of_different_types";
+static const sstring DEFLATE_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH =
+    "tests/sstables/3.x/deflate/partition_key_with_values_of_different_types";
+static const sstring ZSTD_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH =
+    "tests/sstables/3.x/zstd/partition_key_with_values_of_different_types";
+static thread_local const schema_builder PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA_BUILDER =
     schema_builder("test_ks", "test_table")
         .with_column("pk", int32_type, column_kind::partition_key)
         .with_column("bool_val", boolean_type)
@@ -1593,45 +1647,36 @@ static thread_local const schema_ptr PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPE
         .with_column("timestamp_val", timestamp_type)
         .with_column("timeuuid_val", timeuuid_type)
         .with_column("uuid_val", uuid_type)
-        .with_column("text_val", utf8_type)
-        .set_compressor_params(compression_parameters::no_compression())
-        .build();
+        .with_column("text_val", utf8_type);
 
-static void test_partition_key_with_values_of_different_types_read(const sstring& path) {
-    sstable_assertions sst(PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA, path);
-    sst.load();
-    auto to_key = [] (int key) {
-        auto bytes = int32_type->decompose(int32_t(key));
-        auto pk = partition_key::from_single_value(*PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA, bytes);
-        return dht::global_partitioner().decorate_key(*PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA, pk);
-    };
+static void test_partition_key_with_values_of_different_types_read(const sstring& path, compression_parameters cp) {
+    auto s = schema_builder(PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA_BUILDER).set_compressor_params(cp).build();
 
-    auto bool_cdef =
-        PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA->get_column_definition(to_bytes("bool_val"));
+    auto bool_cdef = s->get_column_definition(to_bytes("bool_val"));
     BOOST_REQUIRE(bool_cdef);
-    auto double_cdef =
-        PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA->get_column_definition(to_bytes("double_val"));
+
+    auto double_cdef = s->get_column_definition(to_bytes("double_val"));
     BOOST_REQUIRE(double_cdef);
-    auto float_cdef =
-        PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA->get_column_definition(to_bytes("float_val"));
+
+    auto float_cdef = s->get_column_definition(to_bytes("float_val"));
     BOOST_REQUIRE(float_cdef);
-    auto int_cdef =
-        PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA->get_column_definition(to_bytes("int_val"));
+
+    auto int_cdef = s->get_column_definition(to_bytes("int_val"));
     BOOST_REQUIRE(int_cdef);
-    auto long_cdef =
-        PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA->get_column_definition(to_bytes("long_val"));
+
+    auto long_cdef = s->get_column_definition(to_bytes("long_val"));
     BOOST_REQUIRE(long_cdef);
-    auto timestamp_cdef =
-        PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA->get_column_definition(to_bytes("timestamp_val"));
+
+    auto timestamp_cdef = s->get_column_definition(to_bytes("timestamp_val"));
     BOOST_REQUIRE(timestamp_cdef);
-    auto timeuuid_cdef =
-        PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA->get_column_definition(to_bytes("timeuuid_val"));
+
+    auto timeuuid_cdef = s->get_column_definition(to_bytes("timeuuid_val"));
     BOOST_REQUIRE(timeuuid_cdef);
-    auto uuid_cdef =
-        PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA->get_column_definition(to_bytes("uuid_val"));
+
+    auto uuid_cdef = s->get_column_definition(to_bytes("uuid_val"));
     BOOST_REQUIRE(uuid_cdef);
-    auto text_cdef =
-        PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_SCHEMA->get_column_definition(to_bytes("text_val"));
+
+    auto text_cdef = s->get_column_definition(to_bytes("text_val"));
     BOOST_REQUIRE(text_cdef);
 
     auto generate = [&] (bool bool_val, double double_val, float float_val, int int_val, long long_val,
@@ -1649,7 +1694,16 @@ static void test_partition_key_with_values_of_different_types_read(const sstring
         columns.push_back({uuid_cdef, uuid_type->from_string(uuid_val)});
         columns.push_back({text_cdef, utf8_type->from_string(text_val)});
 
-        return std::move(columns);
+        return columns;
+    };
+
+    sstable_assertions sst(s, path);
+    sst.load();
+
+    auto to_key = [&s] (int key) {
+        auto bytes = int32_type->decompose(int32_t(key));
+        auto pk = partition_key::from_single_value(*s, bytes);
+        return dht::global_partitioner().decorate_key(*s, pk);
     };
 
     assert_that(sst.read_rows_flat())
@@ -1689,7 +1743,79 @@ static void test_partition_key_with_values_of_different_types_read(const sstring
 SEASTAR_THREAD_TEST_CASE(test_uncompressed_partition_key_with_values_of_different_types_read) {
     auto abj = defer([] { await_background_jobs().get(); });
     test_partition_key_with_values_of_different_types_read(
-        UNCOMPRESSED_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH);
+        UNCOMPRESSED_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH, compression_parameters::no_compression());
+}
+
+SEASTAR_THREAD_TEST_CASE(test_lz4_partition_key_with_values_of_different_types_read) {
+    auto abj = defer([] { await_background_jobs().get(); });
+    test_partition_key_with_values_of_different_types_read(
+        LZ4_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH, compressor::lz4);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_snappy_partition_key_with_values_of_different_types_read) {
+    auto abj = defer([] { await_background_jobs().get(); });
+    test_partition_key_with_values_of_different_types_read(
+        SNAPPY_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH, compressor::snappy);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_deflate_partition_key_with_values_of_different_types_read) {
+    auto abj = defer([] { await_background_jobs().get(); });
+    test_partition_key_with_values_of_different_types_read(
+        DEFLATE_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH, compressor::deflate);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_zstd_partition_key_with_values_of_different_types_read) {
+    auto abj = defer([] { await_background_jobs().get(); });
+    test_partition_key_with_values_of_different_types_read(
+        ZSTD_PARTITION_KEY_WITH_VALUES_OF_DIFFERENT_TYPES_PATH, compressor::create({
+            {"sstable_compression", "org.apache.cassandra.io.compress.ZstdCompressor"},
+            {"compression_level", "1"}}));
+}
+
+// Following test runs on files in tests/sstables/3.x/zstd/multiple_chunks.
+// Size of data in the sstables is big enough that multiple compressed chunks were used.
+// The files were created using following CQL statements:
+//
+// CREATE KEYSPACE test_ks WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+//
+// CREATE TABLE test_ks.test_table (val1 INT, val2 INT, PRIMARY KEY (val1, val2))
+//      WITH compression = {'sstable_compression': 'org.apache.cassandra.io.compress.ZstdCompressor',
+//                          'compression_level': 5,
+//                          'chunk_length_in_kb': 4};
+//
+// And for each `i` in the range [1, 2000],
+// INSERT INTO test_ks.test_table (val1, val2) VALUES (0, i);
+
+static thread_local const sstring ZSTD_MULTIPLE_CHUNKS_PATH =
+    "tests/sstables/3.x/zstd/multiple_chunks";
+static thread_local const schema_ptr ZSTD_MULTIPLE_CHUNKS_SCHEMA =
+    schema_builder("test_ks", "test_table")
+        .with_column("val1", int32_type, column_kind::partition_key)
+        .with_column("val2", int32_type, column_kind::clustering_key)
+        .set_compressor_params(compression_parameters{compressor::create({
+            {"sstable_compression", "org.apache.cassandra.io.compress.ZstdCompressor"},
+            {"compression_level", "5"},
+            {"chunk_length_in_kb", "4"}})})
+        .build();
+
+SEASTAR_THREAD_TEST_CASE(test_zstd_compression) {
+    auto abj = defer([] { await_background_jobs().get(); });
+
+    sstable_assertions sst(ZSTD_MULTIPLE_CHUNKS_SCHEMA, ZSTD_MULTIPLE_CHUNKS_PATH);
+    sst.load();
+
+    auto to_key = [] (int key) {
+        auto bytes = int32_type->decompose(int32_t(key));
+        auto pk = partition_key::from_single_value(*ZSTD_MULTIPLE_CHUNKS_SCHEMA, bytes);
+        return dht::global_partitioner().decorate_key(*ZSTD_MULTIPLE_CHUNKS_SCHEMA, pk);
+    };
+
+    flat_reader_assertions assertions(sst.read_rows_flat());
+    assertions.produces_partition_start(to_key(0));
+    for (int i = 1; i <= 2000; ++i) {
+        assertions.produces_row_with_key(clustering_key::from_exploded(*ZSTD_MULTIPLE_CHUNKS_SCHEMA, {int32_type->decompose(i)}));
+    }
+    assertions.produces_partition_end().produces_end_of_stream();
 }
 
 // Following tests run on files in tests/sstables/3.x/uncompressed/subset_of_columns
@@ -1817,7 +1943,7 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_subset_of_columns_read) {
             columns.push_back({text_cdef, utf8_type->from_string(*text_val)});
         }
 
-        return std::move(columns);
+        return columns;
     };
 
     assert_that(sst.read_rows_flat())
@@ -1983,7 +2109,7 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_large_subset_of_columns_sparse_read) 
 
     std::vector<const column_definition*> column_defs(64);
     for (int i = 0; i < 64; ++i) {
-        column_defs[i] = UNCOMPRESSED_LARGE_SUBSET_OF_COLUMNS_SPARSE_SCHEMA->get_column_definition(to_bytes(sprint("val%d", (i + 1))));
+        column_defs[i] = UNCOMPRESSED_LARGE_SUBSET_OF_COLUMNS_SPARSE_SCHEMA->get_column_definition(to_bytes(format("val{:d}", (i + 1))));
         BOOST_REQUIRE(column_defs[i]);
     }
 
@@ -2195,7 +2321,7 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_large_subset_of_columns_dense_read) {
 
     std::vector<const column_definition*> column_defs(64);
     for (int i = 0; i < 64; ++i) {
-        column_defs[i] = UNCOMPRESSED_LARGE_SUBSET_OF_COLUMNS_DENSE_SCHEMA->get_column_definition(to_bytes(sprint("val%d", (i + 1))));
+        column_defs[i] = UNCOMPRESSED_LARGE_SUBSET_OF_COLUMNS_DENSE_SCHEMA->get_column_definition(to_bytes(format("val{:d}", (i + 1))));
         BOOST_REQUIRE(column_defs[i]);
     }
 
@@ -2769,10 +2895,10 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_collections_read) {
                 for (auto&& entry : m_view.cells) {
                     auto cmp = compare_unsigned(int32_type->decompose(int32_t(val[idx])), entry.first);
                     if (cmp != 0) {
-                        BOOST_FAIL(sprint("Expected row with column %s having value %s, but it has value %s",
+                        BOOST_FAIL(format("Expected row with column {} having value {}, but it has value {}",
                                           def.id,
                                           int32_type->decompose(int32_t(val[idx])),
-                                          entry.first));
+                                          to_hex(entry.first)));
                     }
                     ++idx;
                 }
@@ -2789,7 +2915,7 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_collections_read) {
                 for (auto&& entry : m_view.cells) {
                     auto cmp = compare_unsigned(utf8_type->decompose(val[idx]), entry.second.value().linearize());
                     if (cmp != 0) {
-                        BOOST_FAIL(sprint("Expected row with column %s having value %s, but it has value %s",
+                        BOOST_FAIL(format("Expected row with column {} having value {}, but it has value {}",
                                           def.id,
                                           utf8_type->decompose(val[idx]),
                                           entry.second.value().linearize()));
@@ -2811,11 +2937,11 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_collections_read) {
                     auto cmp2 = compare_unsigned(utf8_type->decompose(val[idx].second), entry.second.value().linearize());
                     if (cmp1 != 0 || cmp2 != 0) {
                         BOOST_FAIL(
-                            sprint("Expected row with column %s having value (%s, %s), but it has value (%s, %s)",
+                            format("Expected row with column {} having value ({}, {}), but it has value ({}, {})",
                                    def.id,
                                    int32_type->decompose(int32_t(val[idx].first)),
                                    utf8_type->decompose(val[idx].second),
-                                   entry.first,
+                                   to_hex(entry.first),
                                    entry.second.value().linearize()));
                     }
                     ++idx;
@@ -2823,7 +2949,7 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_collections_read) {
             });
         });
 
-        return std::move(assertions);
+        return assertions;
     };
 
     std::vector<column_id> ids{set_cdef->id, list_cdef->id, map_cdef->id};
@@ -2852,30 +2978,20 @@ SEASTAR_THREAD_TEST_CASE(test_uncompressed_collections_read) {
     .produces_end_of_stream();
 }
 
-static sstables::shared_sstable open_sstable(schema_ptr schema, sstring dir, unsigned long generation) {
-    auto sst = sstables::make_sstable(std::move(schema), dir, generation,
-            sstables::sstable::version_types::mc,
-            sstables::sstable::format_types::big);
-    sst->load().get();
-    return sst;
+static sstables::shared_sstable open_sstable(test_env& env, schema_ptr schema, sstring dir, unsigned long generation) {
+    return env.reusable_sst(std::move(schema), dir, generation, sstables::sstable::version_types::mc).get0();
 }
 
-static std::vector<sstables::shared_sstable> open_sstables(schema_ptr s, sstring dir, std::vector<unsigned long> generations) {
+static std::vector<sstables::shared_sstable> open_sstables(test_env& env, schema_ptr s, sstring dir, std::vector<unsigned long> generations) {
     std::vector<sstables::shared_sstable> result;
     for(auto generation: generations) {
-        result.push_back(open_sstable(s, dir, generation));
+        result.push_back(open_sstable(env, s, dir, generation));
     }
     return result;
 }
 
-static flat_mutation_reader compacted_sstable_reader(schema_ptr s,
+static flat_mutation_reader compacted_sstable_reader(test_env& env, schema_ptr s,
                      sstring table_name, std::vector<unsigned long> generations) {
-    auto column_family_test_config = [] {
-        static db::nop_large_partition_handler nop_lp_handler;
-        column_family::config cfg;
-        cfg.large_partition_handler = &nop_lp_handler;
-        return cfg;
-    };
     storage_service_for_tests ssft;
 
     auto cm = make_lw_shared<compaction_manager>();
@@ -2886,16 +3002,16 @@ static flat_mutation_reader compacted_sstable_reader(schema_ptr s,
     lw_shared_ptr<memtable> mt = make_lw_shared<memtable>(s);
 
     tmpdir tmp;
-    auto sstables = open_sstables(s, format("tests/sstables/3.x/uncompressed/{}", table_name), generations);
+    auto sstables = open_sstables(env, s, format("tests/sstables/3.x/uncompressed/{}", table_name), generations);
     auto new_generation = generations.back() + 1;
-    auto new_sstable = [s, path = tmp.path, new_generation] {
-        return sstables::test::make_test_sstable(4096, s, path, new_generation,
-                         sstables::sstable_version_types::mc, sstable::format_types::big);
+    auto new_sstable = [s, &tmp, &env, new_generation] {
+        return env.make_sstable(s, tmp.path().string(), new_generation,
+                         sstables::sstable_version_types::mc, sstable::format_types::big, 4096);
     };
 
-    sstables::compact_sstables(sstables::compaction_descriptor(std::move(sstables)), *cf, new_sstable).get();
+    sstables::compact_sstables(sstables::compaction_descriptor(std::move(sstables)), *cf, new_sstable, replacer_fn_no_op()).get();
 
-    auto compacted_sst = open_sstable(s, tmp.path, new_generation);
+    auto compacted_sst = open_sstable(env, s, tmp.path().string(), new_generation);
     return compacted_sst->as_mutation_source().make_reader(s, query::full_partition_range, s->full_slice());
 }
 
@@ -2952,7 +3068,8 @@ SEASTAR_THREAD_TEST_CASE(compact_deleted_row) {
      *   }
      * ]
      */
-    auto reader = compacted_sstable_reader(s, table_name, {1, 2});
+    test_env env;
+    auto reader = compacted_sstable_reader(env, s, table_name, {1, 2});
     mutation_opt m = read_mutation_from_flat_mutation_reader(reader, db::no_timeout).get0();
     BOOST_REQUIRE(m);
     BOOST_REQUIRE(m->key().equal(*s, partition_key::from_singular(*s, data_value(sstring("key")))));
@@ -3022,7 +3139,8 @@ SEASTAR_THREAD_TEST_CASE(compact_deleted_cell) {
      *]
      *
      */
-    auto reader = compacted_sstable_reader(s, table_name, {1, 2});
+    test_env env;
+    auto reader = compacted_sstable_reader(env, s, table_name, {1, 2});
     mutation_opt m = read_mutation_from_flat_mutation_reader(reader, db::no_timeout).get0();
     BOOST_REQUIRE(m);
     BOOST_REQUIRE(m->key().equal(*s, partition_key::from_singular(*s, data_value(sstring("key")))));
@@ -3036,11 +3154,16 @@ SEASTAR_THREAD_TEST_CASE(compact_deleted_cell) {
 }
 
 static void compare_files(sstring filename1, sstring filename2) {
-    std::ifstream ifs1(filename1);
-    std::ifstream ifs2(filename2);
+    std::ifstream ifs1;
+    ifs1.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+    ifs1.open(filename1, std::ios_base::in | std::ios_base::binary);
 
-    std::istream_iterator<char> b1(ifs1), e1;
-    std::istream_iterator<char> b2(ifs2), e2;
+    std::ifstream ifs2;
+    ifs2.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+    ifs2.open(filename2);
+
+    std::istreambuf_iterator<char> b1(ifs1), e1;
+    std::istreambuf_iterator<char> b2(ifs2), e2;
     BOOST_CHECK_EQUAL_COLLECTIONS(b1, e1, b2, e2);
 }
 
@@ -3049,7 +3172,7 @@ static sstring get_write_test_path(sstring table_name) {
 }
 
 // This method should not be called for compressed sstables because compression is not deterministic
-static void compare_sstables(sstring result_path, sstring table_name) {
+static void compare_sstables(const std::filesystem::path& result_path, sstring table_name) {
     for (auto file_type : {component_type::Data,
                            component_type::Index,
                            component_type::Digest,
@@ -3058,21 +3181,19 @@ static void compare_sstables(sstring result_path, sstring table_name) {
                 sstable::filename(get_write_test_path(table_name),
                                   "ks", table_name, sstables::sstable_version_types::mc, 1, big, file_type);
         auto result_filename =
-                sstable::filename(result_path, "ks", table_name, sstables::sstable_version_types::mc, 1, big, file_type);
+                sstable::filename(result_path.string(), "ks", table_name, sstables::sstable_version_types::mc, 1, big, file_type);
         compare_files(orig_filename, result_filename);
     }
 }
 
-static tmpdir write_sstables(schema_ptr s, lw_shared_ptr<memtable> mt1, lw_shared_ptr<memtable> mt2) {
-    static db::nop_large_partition_handler nop_lp_handler;
+static tmpdir write_sstables(test_env& env, schema_ptr s, lw_shared_ptr<memtable> mt1, lw_shared_ptr<memtable> mt2) {
     storage_service_for_tests ssft;
     tmpdir tmp;
-    auto sst = sstables::test::make_test_sstable(4096, s, tmp.path, 1, sstables::sstable_version_types::mc, sstable::format_types::big);
-    sstable_writer_config cfg;
-    cfg.large_partition_handler = &nop_lp_handler;
+    auto sst = env.make_sstable(s, tmp.path().string(), 1, sstables::sstable_version_types::mc, sstable::format_types::big, 4096);
+
     sst->write_components(make_combined_reader(s,
         mt1->make_flat_reader(s),
-        mt2->make_flat_reader(s)), 1, s, cfg, mt1->get_stats()).get();
+        mt2->make_flat_reader(s)), 1, s, sstable_writer_config{}, mt1->get_encoding_stats()).get();
     return tmp;
 }
 
@@ -3080,27 +3201,29 @@ static tmpdir write_sstables(schema_ptr s, lw_shared_ptr<memtable> mt1, lw_share
 // that otherwise takes place for RTs put into one and the same memtable
 static tmpdir write_and_compare_sstables(schema_ptr s, lw_shared_ptr<memtable> mt1, lw_shared_ptr<memtable> mt2,
                                          sstring table_name) {
-    auto tmp = write_sstables(std::move(s), std::move(mt1), std::move(mt2));
-    compare_sstables(tmp.path, table_name);
+    test_env env;
+    auto tmp = write_sstables(env, std::move(s), std::move(mt1), std::move(mt2));
+    compare_sstables(tmp.path(), table_name);
     return tmp;
 }
 
-static tmpdir write_sstables(schema_ptr s, lw_shared_ptr<memtable> mt) {
+static tmpdir write_sstables(test_env& env, schema_ptr s, lw_shared_ptr<memtable> mt) {
     storage_service_for_tests ssft;
     tmpdir tmp;
-    auto sst = sstables::test::make_test_sstable(4096, s, tmp.path, 1, sstables::sstable_version_types::mc, sstable::format_types::big);
+    auto sst = env.make_sstable(s, tmp.path().string(), 1, sstables::sstable_version_types::mc, sstable::format_types::big, 4096);
     write_memtable_to_sstable_for_test(*mt, sst).get();
     return tmp;
 }
 
 static tmpdir write_and_compare_sstables(schema_ptr s, lw_shared_ptr<memtable> mt, sstring table_name) {
-    auto tmp = write_sstables(std::move(s), std::move(mt));
-    compare_sstables(tmp.path, table_name);
+    test_env env;
+    auto tmp = write_sstables(env, std::move(s), std::move(mt));
+    compare_sstables(tmp.path(), table_name);
     return tmp;
 }
 
-static sstable_assertions validate_read(schema_ptr s, sstring path, std::vector<mutation> mutations) {
-    sstable_assertions sst(s, path);
+static sstable_assertions validate_read(schema_ptr s, const std::filesystem::path& path, std::vector<mutation> mutations) {
+    sstable_assertions sst(s, path.string(), 1);
     sst.load();
 
     auto assertions = assert_that(sst.read_rows_flat());
@@ -3116,8 +3239,7 @@ static constexpr api::timestamp_type write_timestamp = 1525385507816568;
 static constexpr gc_clock::time_point write_time_point = gc_clock::time_point{} + gc_clock::duration{1525385507};
 
 static void validate_stats_metadata(schema_ptr s, sstable_assertions written_sst, sstring table_name) {
-    auto orig_sst = sstables::make_sstable(s, get_write_test_path(table_name), 1, sstable_version_types::mc, big);
-    orig_sst->load().get();
+    auto orig_sst = written_sst.get_env().reusable_sst(s, get_write_test_path(table_name), 1, sstable_version_types::mc).get0();
 
     const auto& orig_stats = orig_sst->get_stats_metadata();
     const auto& written_stats = written_sst.get_stats_metadata();
@@ -3139,7 +3261,7 @@ static void validate_stats_metadata(schema_ptr s, sstable_assertions written_sst
     BOOST_REQUIRE(orig_stats.max_column_names.elements == written_stats.max_column_names.elements);
     BOOST_REQUIRE_EQUAL(orig_stats.columns_count, written_stats.columns_count);
     BOOST_REQUIRE_EQUAL(orig_stats.rows_count, written_stats.rows_count);
-    check_estimated_histogram(orig_stats.estimated_row_size, written_stats.estimated_row_size);
+    check_estimated_histogram(orig_stats.estimated_partition_size, written_stats.estimated_partition_size);
     check_estimated_histogram(orig_stats.estimated_cells_count, written_stats.estimated_cells_count);
 }
 
@@ -3165,7 +3287,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_static_row) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3196,7 +3318,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_composite_partition_key) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3226,7 +3348,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_composite_clustering_key) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3273,7 +3395,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_wide_partitions) {
     }
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut1, mut2});
+    auto written_sst = validate_read(s, tmp.path(), {mut1, mut2});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3308,7 +3430,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_ttled_row) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3340,7 +3462,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_ttled_column) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3368,7 +3490,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_deleted_column) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3393,7 +3515,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_deleted_row) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3425,7 +3547,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_collection_wide_update) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3453,7 +3575,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_collection_incremental_update) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3488,7 +3610,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_multiple_partitions) {
     }
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, muts);
+    auto written_sst = validate_read(s, tmp.path(), muts);
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3512,9 +3634,10 @@ static void test_write_many_partitions(sstring table_name, tombstone partition_t
     }
 
     bool compressed = cp.get_compressor() != nullptr;
-    tmpdir tmp = compressed ? write_sstables(s, mt) : write_and_compare_sstables(s, mt, table_name);
+    test_env env;
+    tmpdir tmp = compressed ? write_sstables(env, s, mt) : write_and_compare_sstables(s, mt, table_name);
     boost::sort(muts, mutation_decorated_key_less_comparator());
-    validate_read(s, tmp.path, muts);
+    validate_read(s, tmp.path(), muts);
 }
 
 SEASTAR_THREAD_TEST_CASE(test_write_many_live_partitions) {
@@ -3557,6 +3680,16 @@ SEASTAR_THREAD_TEST_CASE(test_write_many_partitions_deflate) {
             compression_parameters{compressor::deflate});
 }
 
+SEASTAR_THREAD_TEST_CASE(test_write_many_partitions_zstd) {
+    auto abj = defer([] { await_background_jobs().get(); });
+    test_write_many_partitions(
+            "many_partitions_zstd",
+            tombstone{},
+            compression_parameters{compressor::create({
+                {"sstable_compression", "org.apache.cassandra.io.compress.ZstdCompressor"}
+            })});
+}
+
 SEASTAR_THREAD_TEST_CASE(test_write_multiple_rows) {
     auto abj = defer([] { await_background_jobs().get(); });
     sstring table_name = "multiple_rows";
@@ -3588,7 +3721,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_multiple_rows) {
 
     mt->apply(mut);
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3635,8 +3768,34 @@ SEASTAR_THREAD_TEST_CASE(test_write_missing_columns_large_set) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_write_empty_counter) {
+    auto abj = defer([] { await_background_jobs().get(); });
+    sstring table_name = "empty_counter";
+    // CREATE TABLE empty_counter (pk text, ck text, val counter, PRIMARY KEY (pk, ck)) WITH compression = {'sstable_compression': ''};
+    schema_builder builder("sst3", table_name);
+    builder.with_column("pk", utf8_type, column_kind::partition_key);
+    builder.with_column("ck", utf8_type, column_kind::clustering_key);
+    builder.with_column("val", counter_type);
+    builder.set_compressor_params(compression_parameters::no_compression());
+    schema_ptr s = builder.build(schema_builder::compact_storage::no);
+
+    lw_shared_ptr<memtable> mt = make_lw_shared<memtable>(s);
+    auto key = partition_key::from_exploded(*s, {to_bytes("key")});
+    mutation mut{s, key};
+
+    const column_definition& cdef = *s->get_column_definition("val");
+    auto ckey = clustering_key::from_exploded(*s, {to_bytes("ck")});
+
+    counter_cell_builder b;
+    mut.set_clustered_cell(ckey, cdef, b.build(write_timestamp));
+
+    mt->apply(mut);
+    tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
+    validate_read(s, tmp.path(), {mut});
 }
 
 SEASTAR_THREAD_TEST_CASE(test_write_counter_table) {
@@ -3685,7 +3844,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_counter_table) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    validate_read(s, tmp.path, {mut});
+    validate_read(s, tmp.path(), {mut});
 }
 
 SEASTAR_THREAD_TEST_CASE(test_write_different_types) {
@@ -3757,7 +3916,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_different_types) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3786,7 +3945,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_empty_clustering_values) {
 
     mt->apply(mut);
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3822,7 +3981,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_large_clustering_key) {
 
     mt->apply(mut);
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3849,41 +4008,8 @@ SEASTAR_THREAD_TEST_CASE(test_write_compact_table) {
 
     mt->apply(mut);
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
-}
-
-SEASTAR_THREAD_TEST_CASE(test_serialization_header_with_user_defined_types) {
-    // CREATE TYPE ut (my_int int, my_boolean boolean, my_text text);
-    auto ut = user_type_impl::get_instance("sst3", to_bytes("ut"),
-            {to_bytes("my_int"), to_bytes("my_boolean"), to_bytes("my_text")},
-            {int32_type, boolean_type, utf8_type});
-
-    sstring table_name = "user_defined_type_table";
-    // CREATE TABLE user_defined_type_table (pk1 frozen<ut>, pk2 frozen<ut>, ck1 frozen<ut>, ck2 frozen<ut>, rc frozen <ut>, PRIMARY KEY ((pk1, pk2), ck1 ck2));
-    schema_builder builder("sst3", table_name);
-    builder.with_column("pk1", ut, column_kind::partition_key);
-    builder.with_column("pk2", ut, column_kind::partition_key);
-    builder.with_column("ck1", ut, column_kind::clustering_key);
-    builder.with_column("ck2", ut, column_kind::clustering_key);
-    builder.with_column("st", ut, column_kind::static_column);
-    builder.with_column("rc", ut);
-    schema_ptr s = builder.build();
-    sstring expected_ut_name = "org.apache.cassandra.db.marshal.FrozenType(" + ut->name() + ")";
-    auto header = mc::make_serialization_header(*s, encoding_stats{});
-    auto pk_type = to_sstring_view(header.pk_type_name.value);
-    BOOST_REQUIRE(pk_type == "org.apache.cassandra.db.marshal.CompositeType(" + expected_ut_name + "," + expected_ut_name + ")");
-    BOOST_REQUIRE(header.clustering_key_types_names.elements.size() == 2);
-    for (auto& ck : header.clustering_key_types_names.elements) {
-        auto ck_type = to_sstring_view(ck.value);
-        BOOST_REQUIRE(ck_type == expected_ut_name);
-    }
-    BOOST_REQUIRE(header.static_columns.elements.size() == 1);
-    auto st_type = to_sstring_view(header.static_columns.elements[0].type_name.value);
-    BOOST_REQUIRE(st_type == expected_ut_name);
-    BOOST_REQUIRE(header.regular_columns.elements.size() == 1);
-    auto rc_type = to_sstring_view(header.regular_columns.elements[0].type_name.value);
-    BOOST_REQUIRE(rc_type == expected_ut_name);
 }
 
 SEASTAR_THREAD_TEST_CASE(test_write_user_defined_type_table) {
@@ -3914,7 +4040,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_user_defined_type_table) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3942,7 +4068,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_simple_range_tombstone) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -3986,7 +4112,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_adjacent_range_tombstones) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -4031,7 +4157,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_non_adjacent_range_tombstones) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -4104,7 +4230,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_mixed_rows_and_range_tombstones) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -4138,7 +4264,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_many_range_tombstones) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    validate_read(s, tmp.path, {mut});
+    validate_read(s, tmp.path(), {mut});
 }
 
 SEASTAR_THREAD_TEST_CASE(test_write_adjacent_range_tombstones_with_rows) {
@@ -4194,7 +4320,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_adjacent_range_tombstones_with_rows) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -4233,7 +4359,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_range_tombstone_same_start_with_row) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -4272,7 +4398,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_range_tombstone_same_end_with_row) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -4372,7 +4498,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_two_non_adjacent_range_tombstones) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    auto written_sst = validate_read(s, tmp.path, {mut});
+    auto written_sst = validate_read(s, tmp.path(), {mut});
     validate_stats_metadata(s, written_sst, table_name);
 }
 
@@ -4431,6 +4557,10 @@ static std::unique_ptr<index_reader> get_index_reader(shared_sstable sst) {
     return std::make_unique<index_reader>(sst, default_priority_class());
 }
 
+shared_sstable make_test_sstable(test_env& env, schema_ptr schema, const sstring& table_name, int64_t gen = 1) {
+    return env.reusable_sst(schema, get_read_index_test_path(table_name), gen, sstable_version_types::mc).get0();
+}
+
 /*
  * The SSTables read is generated using the following queries:
  *
@@ -4446,8 +4576,8 @@ SEASTAR_THREAD_TEST_CASE(test_read_empty_index) {
     builder.set_compressor_params(compression_parameters::no_compression());
     schema_ptr s = builder.build(schema_builder::compact_storage::no);
 
-    auto sst = sstables::make_sstable(s, get_read_index_test_path(table_name), 1, sstable_version_types::mc , sstable_format_types::big);
-    sst->load().get0();
+    test_env env;
+    auto sst = make_test_sstable(env, s, table_name);
     assert_that(get_index_reader(sst)).is_empty(*s);
 }
 
@@ -4466,8 +4596,8 @@ SEASTAR_THREAD_TEST_CASE(test_read_rows_only_index) {
     builder.set_compressor_params(compression_parameters::no_compression());
     schema_ptr s = builder.build(schema_builder::compact_storage::no);
 
-    auto sst = sstables::make_sstable(s, get_read_index_test_path(table_name), 1, sstable_version_types::mc , sstable_format_types::big);
-    sst->load().get0();
+    test_env env;
+    auto sst = make_test_sstable(env, s, table_name);
     assert_that(get_index_reader(sst)).has_monotonic_positions(*s);
 }
 
@@ -4485,8 +4615,8 @@ SEASTAR_THREAD_TEST_CASE(test_read_range_tombstones_only_index) {
     builder.set_compressor_params(compression_parameters::no_compression());
     schema_ptr s = builder.build(schema_builder::compact_storage::no);
 
-    auto sst = sstables::make_sstable(s, get_read_index_test_path(table_name), 1, sstable_version_types::mc , sstable_format_types::big);
-    sst->load().get0();
+    test_env env;
+    auto sst = make_test_sstable(env, s, table_name);
     assert_that(get_index_reader(sst)).has_monotonic_positions(*s);
 }
 
@@ -4512,8 +4642,8 @@ SEASTAR_THREAD_TEST_CASE(test_read_range_tombstone_boundaries_index) {
     builder.set_compressor_params(compression_parameters::no_compression());
     schema_ptr s = builder.build(schema_builder::compact_storage::no);
 
-    auto sst = sstables::make_sstable(s, get_read_index_test_path(table_name), 1, sstable_version_types::mc , sstable_format_types::big);
-    sst->load().get0();
+    test_env env;
+    auto sst = make_test_sstable(env, s, table_name);
     assert_that(get_index_reader(sst)).has_monotonic_positions(*s);
 }
 
@@ -4717,7 +4847,7 @@ SEASTAR_THREAD_TEST_CASE(test_shadowable_deletion) {
     }
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    validate_read(s, tmp.path, {mut1, mut2});
+    validate_read(s, tmp.path(), {mut1, mut2});
 }
 
 SEASTAR_THREAD_TEST_CASE(test_regular_and_shadowable_deletion) {
@@ -4766,7 +4896,7 @@ SEASTAR_THREAD_TEST_CASE(test_regular_and_shadowable_deletion) {
     }
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    validate_read(s, tmp.path, {mut1, mut2});
+    validate_read(s, tmp.path(), {mut1, mut2});
 }
 
 SEASTAR_THREAD_TEST_CASE(test_write_static_row_with_missing_columns) {
@@ -4794,7 +4924,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_static_row_with_missing_columns) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    validate_read(s, tmp.path, {mut});
+    validate_read(s, tmp.path(), {mut});
 }
 
 SEASTAR_THREAD_TEST_CASE(test_write_interleaved_atomic_and_collection_columns) {
@@ -4835,7 +4965,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_interleaved_atomic_and_collection_columns) {
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    validate_read(s, tmp.path, {mut});
+    validate_read(s, tmp.path(), {mut});
 }
 
 SEASTAR_THREAD_TEST_CASE(test_write_static_interleaved_atomic_and_collection_columns) {
@@ -4877,7 +5007,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_static_interleaved_atomic_and_collection_col
     mt->apply(mut);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    validate_read(s, tmp.path, {mut});
+    validate_read(s, tmp.path(), {mut});
 }
 
 SEASTAR_THREAD_TEST_CASE(test_write_empty_static_row) {
@@ -4914,7 +5044,7 @@ SEASTAR_THREAD_TEST_CASE(test_write_empty_static_row) {
     mt->apply(mut2);
 
     tmpdir tmp = write_and_compare_sstables(s, mt, table_name);
-    validate_read(s, tmp.path, {mut2, mut1}); // Mutations are re-ordered according to decorated_key order
+    validate_read(s, tmp.path(), {mut2, mut1}); // Mutations are re-ordered according to decorated_key order
 }
 
 SEASTAR_THREAD_TEST_CASE(test_read_missing_summary) {
@@ -4933,7 +5063,6 @@ SEASTAR_THREAD_TEST_CASE(test_read_missing_summary) {
 }
 
 SEASTAR_THREAD_TEST_CASE(test_sstable_reader_on_unknown_column) {
-    db::nop_large_partition_handler nop_lp_handler;
     api::timestamp_type write_timestamp = 1525385507816568;
     auto wait_bg = seastar::defer([] { sstables::await_background_jobs().get(); });
     storage_service_for_tests ssft;
@@ -4969,13 +5098,13 @@ SEASTAR_THREAD_TEST_CASE(test_sstable_reader_on_unknown_column) {
         tmpdir dir;
         sstable_writer_config cfg;
         cfg.promoted_index_block_size = index_block_size;
-        cfg.large_partition_handler = &nop_lp_handler;
-        auto sst = sstables::make_sstable(write_schema,
-            dir.path,
+        test_env env;
+        auto sst = env.make_sstable(write_schema,
+            dir.path().string(),
             1 /* generation */,
             sstable_version_types::mc,
             sstables::sstable::format_types::big);
-        sst->write_components(mt->make_flat_reader(write_schema), 1, write_schema, cfg).get();
+        sst->write_components(mt->make_flat_reader(write_schema), 1, write_schema, cfg, mt->get_encoding_stats()).get();
         sst->load().get();
 
         BOOST_REQUIRE_EXCEPTION(
@@ -4987,8 +5116,144 @@ SEASTAR_THREAD_TEST_CASE(test_sstable_reader_on_unknown_column) {
                 .produces_partition_end()
                 .produces_end_of_stream(),
             std::exception,
-            [&] (const std::exception& e) {
-                return e.what() == "Column val1 missing in current schema. in sstable " + sst->get_filename();
-            });
+            message_equals("Column val1 missing in current schema in sstable " + sst->get_filename()));
     }
+}
+
+namespace {
+struct large_row_handler : public db::large_data_handler {
+    using callback_t = std::function<void(const schema& s, const sstables::key& partition_key,
+            const clustering_key_prefix* clustering_key, uint64_t row_size)>;
+    callback_t callback;
+
+    large_row_handler(uint64_t large_rows_threshold, uint64_t rows_count_threshold, callback_t callback)
+        : large_data_handler(std::numeric_limits<uint64_t>::max(), large_rows_threshold, std::numeric_limits<uint64_t>::max(),
+            rows_count_threshold)
+        , callback(std::move(callback)) {}
+
+    virtual void log_too_many_rows(const sstables::sstable& sst, const sstables::key& partition_key,
+            uint64_t rows_count) const override {
+        const schema_ptr s = sst.get_schema();
+        callback(*s, partition_key, nullptr, rows_count);
+        return;
+    }
+
+    virtual future<> record_large_rows(const sstables::sstable& sst, const sstables::key& partition_key,
+            const clustering_key_prefix* clustering_key, uint64_t row_size) const override {
+        const schema_ptr s = sst.get_schema();
+        callback(*s, partition_key, clustering_key, row_size);
+        return make_ready_future<>();
+    }
+
+    virtual future<> record_large_cells(const sstables::sstable& sst, const sstables::key& partition_key,
+        const clustering_key_prefix* clustering_key, const column_definition& cdef, uint64_t cell_size) const override {
+        return make_ready_future<>();
+    }
+
+    virtual future<> record_large_partitions(const sstables::sstable& sst,
+            const sstables::key& partition_key, uint64_t partition_size) const override {
+        return make_ready_future<>();
+    }
+
+    virtual future<> delete_large_data_entries(const schema& s, sstring sstable_name, std::string_view) const override {
+        return make_ready_future<>();
+    }
+};
+}
+
+static void test_sstable_write_large_row_f(schema_ptr s, memtable& mt, const partition_key& pk,
+        std::vector<clustering_key*> expected, uint64_t threshold) {
+    unsigned i = 0;
+    auto f = [&i, &expected, &pk, &threshold](const schema& s, const sstables::key& partition_key,
+                     const clustering_key_prefix* clustering_key, uint64_t row_size) {
+        BOOST_REQUIRE_EQUAL(pk.components(s), partition_key.to_partition_key(s).components(s));
+        BOOST_REQUIRE(i < expected.size());
+        BOOST_REQUIRE(row_size > threshold);
+
+        if (clustering_key) {
+            BOOST_REQUIRE(expected[i]->equal(s, *clustering_key));
+        } else {
+            BOOST_REQUIRE_EQUAL(expected[i], nullptr);
+        }
+        ++i;
+    };
+
+    large_row_handler handler(threshold, std::numeric_limits<uint64_t>::max(), f);
+    auto env = test_env(&handler);
+    tmpdir dir;
+    auto sst = env.make_sstable(
+            s, dir.path().string(), 1 /* generation */, sstable_version_types::mc, sstables::sstable::format_types::big);
+
+    // The test provides thresholds values for the large row handler. Whether the handler gets
+    // trigger depends on the size of rows after they are written in the MC format and that size
+    // depends on the encoding statistics (because of variable-length encoding). The original values
+    // were chosen with the default-constructed encoding_stats, so let's keep it that way.
+    sst->write_components(mt.make_flat_reader(s), 1, s, sstable_writer_config{}, encoding_stats{}).get();
+    BOOST_REQUIRE_EQUAL(i, expected.size());
+}
+
+SEASTAR_THREAD_TEST_CASE(test_sstable_write_large_row) {
+    storage_service_for_tests ssft;
+    simple_schema s;
+    mutation partition = s.new_mutation("pv");
+    const partition_key& pk = partition.key();
+    s.add_static_row(partition, "foo bar zed");
+
+    auto ck1 = s.make_ckey("cv1");
+    s.add_row(partition, ck1, "foo");
+
+    auto ck2 = s.make_ckey("cv2");
+    s.add_row(partition, ck2, "foo bar");
+
+    auto mt = make_lw_shared<memtable>(s.schema());
+    mt->apply(partition);
+
+    test_sstable_write_large_row_f(s.schema(), *mt, pk, {nullptr, &ck1, &ck2}, 21);
+    test_sstable_write_large_row_f(s.schema(), *mt, pk, {nullptr, &ck2}, 22);
+}
+
+static void test_sstable_log_too_many_rows_f(int rows, uint64_t threshold, bool expected) {
+    simple_schema s;
+    mutation p = s.new_mutation("pv");
+    const partition_key& pk = p.key();
+    sstring sv;
+    for (auto idx = 0; idx < rows - 1; idx++) {
+        sv += "foo ";
+        s.add_row(p, s.make_ckey(sv), sv);
+    }
+    schema_ptr sc = s.schema();
+    auto mt = make_lw_shared<memtable>(sc);
+    mt->apply(p);
+
+    bool logged = false;
+    auto f = [&logged, &expected, &pk, &threshold](const schema& sc, const sstables::key& partition_key,
+                     const clustering_key_prefix* clustering_key, uint64_t rows_count) {
+        BOOST_REQUIRE(rows_count > threshold);
+        BOOST_REQUIRE_EQUAL(pk.components(sc), partition_key.to_partition_key(sc).components(sc));
+        logged = true;
+    };
+
+    large_row_handler handler(std::numeric_limits<uint64_t>::max(), threshold, f);
+    auto env = test_env(&handler);
+    tmpdir dir;
+    auto sst = env.make_sstable(sc, dir.path().string(), 1, sstable_version_types::mc, sstables::sstable::format_types::big);
+    sst->write_components(mt->make_flat_reader(sc), 1, sc, sstable_writer_config{}, encoding_stats{}).get();
+
+    BOOST_REQUIRE_EQUAL(logged, expected);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_sstable_log_too_many_rows) {
+    storage_service_for_tests ssft;
+
+    // Generates a pseudo-random number from 1 to 100
+    uint64_t random = (rand() % 100 + 1);
+
+    // This test creates a sstable with a given number of rows and test it against a
+    // compaction_rows_count_warning_threshold. A warning is triggered when the number of rows
+    // exceeds the threshold.
+    test_sstable_log_too_many_rows_f(random, 0, true);
+    test_sstable_log_too_many_rows_f(random, (random - 1), true);
+    test_sstable_log_too_many_rows_f(random, random, false);
+    test_sstable_log_too_many_rows_f(random, (random + 1), false);
+    test_sstable_log_too_many_rows_f((random + 1), random, true);
 }

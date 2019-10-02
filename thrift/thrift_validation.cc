@@ -97,7 +97,7 @@ void validate_cf_def(const CfDef& cf_def) {
 void validate_column_name(const std::string& name) {
     auto max_name_length = static_cast<uint32_t>(utils::fb_utilities::MAX_UNSIGNED_SHORT);
     if (name.size() > max_name_length) {
-        throw make_exception<InvalidRequestException>("column name length must not be greater than %s", max_name_length);
+        throw make_exception<InvalidRequestException>("column name length must not be greater than %u", max_name_length);
     }
     if (name.empty()) {
         throw make_exception<InvalidRequestException>("column name must not be empty");
@@ -117,7 +117,7 @@ void validate_column(const Column& col, const column_definition& def) {
     if (!col.__isset.timestamp) {
         throw make_exception<InvalidRequestException>("Column timestamp is required");
     }
-    def.type->validate(to_bytes_view(col.value));
+    def.type->validate(to_bytes_view(col.value), cql_serialization_format::latest());
 }
 
 }

@@ -22,6 +22,7 @@
 #include "atomic_cell.hh"
 #include "atomic_cell_or_collection.hh"
 #include "types.hh"
+#include "types/collection.hh"
 
 /// LSA mirator for cells with irrelevant type
 ///
@@ -191,20 +192,20 @@ bool atomic_cell_or_collection::equals(const abstract_type& type, const atomic_c
         if (a.timestamp() != b.timestamp()) {
             return false;
         }
+        if (a.is_live() != b.is_live()) {
+            return false;
+        }
         if (a.is_live()) {
-            if (!b.is_live()) {
+            if (a.is_counter_update() != b.is_counter_update()) {
                 return false;
             }
             if (a.is_counter_update()) {
-                if (!b.is_counter_update()) {
-                    return false;
-                }
                 return a.counter_update_value() == b.counter_update_value();
             }
+            if (a.is_live_and_has_ttl() != b.is_live_and_has_ttl()) {
+                return false;
+            }
             if (a.is_live_and_has_ttl()) {
-                if (!b.is_live_and_has_ttl()) {
-                    return false;
-                }
                 if (a.ttl() != b.ttl() || a.expiry() != b.expiry()) {
                     return false;
                 }
@@ -243,16 +244,18 @@ size_t atomic_cell_or_collection::external_memory_usage(const abstract_type& t) 
         + imr_object_type::size_overhead + external_value_size;
 }
 
-std::ostream& operator<<(std::ostream& os, const atomic_cell_or_collection& c) {
-    if (!c._data.get()) {
+std::ostream& operator<<(std::ostream& os, const atomic_cell_or_collection::printer& p) {
+    if (!p._cell._data.get()) {
         return os << "{ null atomic_cell_or_collection }";
     }
     using dc = data::cell;
     os << "{ ";
-    if (dc::structure::get_member<dc::tags::flags>(c._data.get()).get<dc::tags::collection>()) {
-        os << "collection";
+    if (dc::structure::get_member<dc::tags::flags>(p._cell._data.get()).get<dc::tags::collection>()) {
+        os << "collection ";
+        auto cmv = p._cell.as_collection_mutation();
+        os << to_hex(cmv.data.linearize());
     } else {
-        os << "atomic cell";
+        os << p._cell.as_atomic_cell(p._cdef);
     }
-    return os << " @" << static_cast<const void*>(c._data.get()) << " }";
+    return os << " }";
 }

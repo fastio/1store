@@ -44,7 +44,8 @@
 #include "cql3/statements/prepared_statement.hh"
 #include "cql3/restrictions/single_column_restriction.hh"
 #include "validation.hh"
-#include "core/shared_ptr.hh"
+#include "db/consistency_level_validations.hh"
+#include <seastar/core/shared_ptr.hh>
 #include "query-result-reader.hh"
 #include <boost/range/adaptor/transformed.hpp>
 #include <boost/range/algorithm_ext/push_back.hpp>
@@ -52,6 +53,7 @@
 #include <boost/range/adaptor/map.hpp>
 #include <boost/range/adaptor/indirected.hpp>
 #include "service/storage_service.hh"
+#include "database.hh"
 #include <seastar/core/execution_stage.hh>
 
 namespace cql3 {
@@ -160,11 +162,11 @@ future<> modification_statement::check_access(const service::client_state& state
 }
 
 future<std::vector<mutation>>
-modification_statement::get_mutations(service::storage_proxy& proxy, const query_options& options, db::timeout_clock::time_point timeout, bool local, int64_t now, tracing::trace_state_ptr trace_state) {
+modification_statement::get_mutations(service::storage_proxy& proxy, const query_options& options, db::timeout_clock::time_point timeout, bool local, int64_t now, tracing::trace_state_ptr trace_state, service_permit permit) {
     auto json_cache = maybe_prepare_json_cache(options);
     auto keys = make_lw_shared(build_partition_keys(options, json_cache));
     auto ranges = make_lw_shared(create_clustering_ranges(options, json_cache));
-    return make_update_parameters(proxy, keys, ranges, options, timeout, local, now, std::move(trace_state)).then(
+    return make_update_parameters(proxy, keys, ranges, options, timeout, local, now, std::move(trace_state), std::move(permit)).then(
             [this, keys, ranges, now, json_cache = std::move(json_cache)] (auto params_ptr) {
                 std::vector<mutation> mutations;
                 mutations.reserve(keys->size());
@@ -189,8 +191,9 @@ modification_statement::make_update_parameters(
         db::timeout_clock::time_point timeout,
         bool local,
         int64_t now,
-        tracing::trace_state_ptr trace_state) {
-    return read_required_rows(proxy, *keys, std::move(ranges), local, options, timeout, std::move(trace_state)).then(
+        tracing::trace_state_ptr trace_state,
+        service_permit permit) {
+    return read_required_rows(proxy, *keys, std::move(ranges), local, options, timeout, std::move(trace_state), std::move(permit)).then(
             [this, &options, now] (auto rows) {
                 return make_ready_future<std::unique_ptr<update_parameters>>(
                         std::make_unique<update_parameters>(s, options,
@@ -206,13 +209,13 @@ class prefetch_data_builder {
     update_parameters::prefetch_data& _data;
     const query::partition_slice& _ps;
     schema_ptr _schema;
-    std::experimental::optional<partition_key> _pkey;
+    std::optional<partition_key> _pkey;
 private:
     void add_cell(update_parameters::prefetch_data::row& cells, const column_definition& def, const std::optional<query::result_bytes_view>& cell) {
         if (cell) {
             auto ctype = static_pointer_cast<const collection_type_impl>(def.type);
             if (!ctype->is_multi_cell()) {
-                throw std::logic_error(sprint("cannot prefetch frozen collection: %s", def.name_as_text()));
+                throw std::logic_error(format("cannot prefetch frozen collection: {}", def.name_as_text()));
             }
             auto map_type = map_type_impl::get_instance(ctype->name_comparator(), ctype->value_comparator(), true);
             update_parameters::prefetch_data::cell_list list;
@@ -277,16 +280,17 @@ modification_statement::read_required_rows(
         bool local,
         const query_options& options,
         db::timeout_clock::time_point timeout,
-        tracing::trace_state_ptr trace_state) {
+        tracing::trace_state_ptr trace_state,
+        service_permit permit) {
     if (!requires_read()) {
         return make_ready_future<update_parameters::prefetched_rows_type>(
                 update_parameters::prefetched_rows_type{});
     }
     auto cl = options.get_consistency();
     try {
-        validate_for_read(keyspace(), cl);
+        validate_for_read(cl);
     } catch (exceptions::invalid_request_exception& e) {
-        throw exceptions::invalid_request_exception(sprint("Write operation require a read but consistency %s is not supported on reads", cl));
+        throw exceptions::invalid_request_exception(format("Write operation require a read but consistency {} is not supported on reads", cl));
     }
 
     static auto is_collection = [] (const column_definition& def) {
@@ -294,11 +298,9 @@ modification_statement::read_required_rows(
     };
 
     // FIXME: we read all collection columns, but could be enhanced just to read the list(s) being RMWed
-    std::vector<column_id> static_cols;
-    boost::range::push_back(static_cols, s->static_columns()
+    auto static_cols = boost::copy_range<query::column_id_vector>(s->static_columns()
         | boost::adaptors::filtered(is_collection) | boost::adaptors::transformed([] (auto&& col) { return col.id; }));
-    std::vector<column_id> regular_cols;
-    boost::range::push_back(regular_cols, s->regular_columns()
+    auto regular_cols = boost::copy_range<query::column_id_vector>(s->regular_columns()
         | boost::adaptors::filtered(is_collection) | boost::adaptors::transformed([] (auto&& col) { return col.id; }));
     query::partition_slice ps(
             *ranges,
@@ -311,7 +313,7 @@ modification_statement::read_required_rows(
     query::read_command cmd(s->id(), s->version(), ps, std::numeric_limits<uint32_t>::max());
     // FIXME: ignoring "local"
     return proxy.query(s, make_lw_shared(std::move(cmd)), std::move(keys),
-            cl, {timeout, std::move(trace_state)}).then([this, ps] (auto qr) {
+            cl, {timeout, std::move(permit), std::move(trace_state)}).then([this, ps] (auto qr) {
         return query::result_view::do_with(*qr.query_result, [&] (query::result_view v) {
             auto prefetched_rows = update_parameters::prefetched_rows_type({update_parameters::prefetch_data(s)});
             v.consume(ps, prefetch_data_builder(s, prefetched_rows.value(), ps));
@@ -343,8 +345,7 @@ modification_statement::create_clustering_ranges(const query_options& options, c
         // (see above)
         if (!type.is_insert()) {
             if (_restrictions->has_clustering_columns_restriction()) {
-                throw exceptions::invalid_request_exception(sprint(
-                    "Invalid restriction on clustering column %s since the %s statement modifies only static columns",
+                throw exceptions::invalid_request_exception(format("Invalid restriction on clustering column {} since the {} statement modifies only static columns",
                     _restrictions->get_clustering_columns_restrictions()->get_column_defs().front()->name_as_text(), type));
             }
 
@@ -404,18 +405,18 @@ future<>
 modification_statement::execute_without_condition(service::storage_proxy& proxy, service::query_state& qs, const query_options& options) {
     auto cl = options.get_consistency();
     if (is_counter()) {
-        db::validate_counter_for_write(s, cl);
+        db::validate_counter_for_write(*s, cl);
     } else {
-        db::validate_for_write(s->ks_name(), cl);
+        db::validate_for_write(cl);
     }
 
     auto timeout = db::timeout_clock::now() + options.get_timeout_config().*get_timeout_config_selector();
-    return get_mutations(proxy, options, timeout, false, options.get_timestamp(qs), qs.get_trace_state()).then([this, cl, timeout, &proxy, &qs] (auto mutations) {
+    return get_mutations(proxy, options, timeout, false, options.get_timestamp(qs), qs.get_trace_state(), qs.get_permit()).then([this, cl, timeout, &proxy, &qs] (auto mutations) {
         if (mutations.empty()) {
             return now();
         }
 
-        return proxy.mutate_with_triggers(std::move(mutations), cl, timeout, false, qs.get_trace_state(), this->is_raw_counter_shard_write());
+        return proxy.mutate_with_triggers(std::move(mutations), cl, timeout, false, qs.get_trace_state(), qs.get_permit(), this->is_raw_counter_shard_write());
     });
 }
 
@@ -452,7 +453,7 @@ modification_statement::process_where_clause(database& db, std::vector<relation_
     _restrictions = ::make_shared<restrictions::statement_restrictions>(
             db, s, type, where_clause, std::move(names), applies_only_to_static_columns(), _sets_a_collection, false);
     if (_restrictions->get_partition_key_restrictions()->is_on_token()) {
-        throw exceptions::invalid_request_exception(sprint("The token function cannot be used in WHERE clauses for UPDATE and DELETE statements: %s",
+        throw exceptions::invalid_request_exception(format("The token function cannot be used in WHERE clauses for UPDATE and DELETE statements: {}",
                 _restrictions->get_partition_key_restrictions()->to_string()));
     }
     if (!_restrictions->get_non_pk_restriction().empty()) {
@@ -460,11 +461,11 @@ modification_statement::process_where_clause(database& db, std::vector<relation_
                                          | boost::adaptors::map_keys
                                          | boost::adaptors::indirected
                                          | boost::adaptors::transformed(std::mem_fn(&column_definition::name)));
-        throw exceptions::invalid_request_exception(sprint("Invalid where clause contains non PRIMARY KEY columns: %s", column_names));
+        throw exceptions::invalid_request_exception(format("Invalid where clause contains non PRIMARY KEY columns: {}", column_names));
     }
     auto ck_restrictions = _restrictions->get_clustering_columns_restrictions();
     if (ck_restrictions->is_slice() && !allow_clustering_key_slices()) {
-        throw exceptions::invalid_request_exception(sprint("Invalid operator in where clause %s", ck_restrictions->to_string()));
+        throw exceptions::invalid_request_exception(format("Invalid operator in where clause {}", ck_restrictions->to_string()));
     }
     if (_restrictions->has_unrestricted_clustering_columns() && !applies_only_to_static_columns() && !s->is_dense()) {
         // Tomek: Origin had "&& s->comparator->is_composite()" in the condition below.
@@ -478,7 +479,7 @@ modification_statement::process_where_clause(database& db, std::vector<relation_
         // the check seems redundant.
         if (require_full_clustering_key()) {
             auto& col = s->column_at(column_kind::clustering_key, ck_restrictions->size());
-            throw exceptions::invalid_request_exception(sprint("Missing mandatory PRIMARY KEY part %s", col.name_as_text()));
+            throw exceptions::invalid_request_exception(format("Missing mandatory PRIMARY KEY part {}", col.name_as_text()));
         }
         // In general, we can't modify specific columns if not all clustering columns have been specified.
         // However, if we modify only static columns, it's fine since we won't really use the prefix anyway.
@@ -486,8 +487,7 @@ modification_statement::process_where_clause(database& db, std::vector<relation_
             auto& col = s->column_at(column_kind::clustering_key, ck_restrictions->size());
             for (auto&& op : _column_operations) {
                 if (!op->column.is_static()) {
-                    throw exceptions::invalid_request_exception(sprint(
-                        "Primary key column '%s' must be specified in order to modify column '%s'",
+                    throw exceptions::invalid_request_exception(format("Primary key column '{}' must be specified in order to modify column '{}'",
                         col.name_as_text(), op->column.name_as_text()));
                 }
             }
@@ -495,7 +495,7 @@ modification_statement::process_where_clause(database& db, std::vector<relation_
     }
     if (_restrictions->has_partition_key_unrestricted_components()) {
         auto& col = s->column_at(column_kind::partition_key, _restrictions->get_partition_key_restrictions()->size());
-        throw exceptions::invalid_request_exception(sprint("Missing mandatory PRIMARY KEY part %s", col.name_as_text()));
+        throw exceptions::invalid_request_exception(format("Missing mandatory PRIMARY KEY part {}", col.name_as_text()));
     }
 }
 
@@ -541,14 +541,14 @@ modification_statement::prepare(database& db, ::shared_ptr<variable_specificatio
                 auto id = entry.first->prepare_column_identifier(schema);
                 const column_definition* def = get_column_definition(schema, *id);
                 if (!def) {
-                    throw exceptions::invalid_request_exception(sprint("Unknown identifier %s", *id));
+                    throw exceptions::invalid_request_exception(format("Unknown identifier {}", *id));
                 }
 
                 auto condition = entry.second->prepare(db, keyspace(), *def);
                 condition->collect_marker_specificaton(bound_names);
 
                 if (def->is_primary_key()) {
-                    throw exceptions::invalid_request_exception(sprint("PRIMARY KEY column '%s' cannot have IF conditions", *id));
+                    throw exceptions::invalid_request_exception(format("PRIMARY KEY column '{}' cannot have IF conditions", *id));
                 }
                 stmt->add_condition(condition);
             }

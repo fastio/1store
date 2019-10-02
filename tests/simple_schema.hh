@@ -83,13 +83,13 @@ public:
 
     // Make a clustering_key which is n-th in some arbitrary sequence of keys
     clustering_key make_ckey(uint32_t n) {
-        return make_ckey(sprint("ck%010d", n));
+        return make_ckey(format("ck{:010d}", n));
     }
 
     // Make a partition key which is n-th in some arbitrary sequence of keys.
     // There is no particular order for the keys, they're not in ring order.
     dht::decorated_key make_pkey(uint32_t n) {
-        return make_pkey(sprint("pk%010d", n));
+        return make_pkey(format("pk{:010d}", n));
     }
 
     dht::decorated_key make_pkey(sstring pk) {
@@ -152,6 +152,9 @@ public:
         }
         range_tombstone rt(bv_range.first, bv_range.second, t);
         return rt;
+    }
+    range_tombstone make_range_tombstone(const query::clustering_range& range, gc_clock::time_point deletion_time) {
+        return make_range_tombstone(range, tombstone(new_timestamp(), deletion_time));
     }
 
     mutation new_mutation(sstring pk) {

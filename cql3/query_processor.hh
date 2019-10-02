@@ -41,7 +41,7 @@
 
 #pragma once
 
-#include <experimental/string_view>
+#include <string_view>
 #include <unordered_map>
 
 #include <seastar/core/distributed.hh>
@@ -108,10 +108,11 @@ public:
 private:
     std::unique_ptr<migration_subscriber> _migration_subscriber;
     service::storage_proxy& _proxy;
-    distributed<database>& _db;
+    database& _db;
 
     struct stats {
         uint64_t prepare_invocations = 0;
+        uint64_t queries_by_cl[size_t(db::consistency_level::MAX_VALUE) + 1] = {};
     } _stats;
 
     cql_stats _cql_stats;
@@ -132,20 +133,20 @@ public:
     static const sstring CQL_VERSION;
 
     static prepared_cache_key_type compute_id(
-            const std::experimental::string_view& query_string,
+            const std::string_view& query_string,
             const sstring& keyspace);
 
     static prepared_cache_key_type compute_thrift_id(
-            const std::experimental::string_view& query_string,
+            const std::string_view& query_string,
             const sstring& keyspace);
 
-    static ::shared_ptr<statements::raw::parsed_statement> parse_statement(const std::experimental::string_view& query);
+    static ::shared_ptr<statements::raw::parsed_statement> parse_statement(const std::string_view& query);
 
-    query_processor(service::storage_proxy& proxy, distributed<database>& db, memory_config mcfg);
+    query_processor(service::storage_proxy& proxy, database& db, memory_config mcfg);
 
     ~query_processor();
 
-    distributed<database>& db() {
+    database& db() {
         return _db;
     }
 
@@ -196,7 +197,7 @@ public:
 
     future<::shared_ptr<cql_transport::messages::result_message>>
     process(
-            const std::experimental::string_view& query_string,
+            const std::string_view& query_string,
             service::query_state& query_state,
             query_options& options);
 
@@ -241,6 +242,49 @@ public:
                 create_paged_state(query_string, { data_value(std::forward<Args>(args))... }), std::move(f));
     }
 
+    /*!
+     * \brief iterate over all cql results using paging
+     *
+     * You Create a statement with optional paraemter and pass
+     * a function that goes over the results.
+     *
+     * The passed function would be called for all the results, return future<stop_iteration::yes>
+     * to stop during iteration.
+     *
+     * For example:
+            return query("SELECT * from system.compaction_history",
+                         [&history] (const cql3::untyped_result_set::row& row) mutable {
+                ....
+                ....
+                return make_ready_future<stop_iteration>(stop_iteration::no);
+            });
+
+     * You can use place holder in the query, the prepared statement will only be done once.
+     *
+     *
+     * query_string - the cql string, can contain place holder
+     * values - query parameters value
+     * f - a function to be run on each of the query result, if the function return stop_iteration::no the iteration
+     * would stop
+     */
+    future<> query(
+            const sstring& query_string,
+            const std::initializer_list<data_value>& values,
+            noncopyable_function<future<stop_iteration>(const cql3::untyped_result_set_row&)>&& f);
+
+    /*
+     * \brief iterate over all cql results using paging
+     * An overload of the query with future function without query parameters.
+     *
+     * query_string - the cql string, can contain place holder
+     * f - a function to be run on each of the query result, if the function return stop_iteration::no the iteration
+     * would stop
+     */
+    future<> query(
+            const sstring& query_string,
+            noncopyable_function<future<stop_iteration>(const cql3::untyped_result_set_row&)>&& f);
+
+
     future<::shared_ptr<untyped_result_set>> process(
             const sstring& query_string,
             db::consistency_level,
@@ -253,16 +297,6 @@ public:
             db::consistency_level,
             const timeout_config& timeout_config,
             const std::initializer_list<data_value>& = { });
-
-    /*
-     * This function provides a timestamp that is guaranteed to be higher than any timestamp
-     * previously used in internal queries.
-     *
-     * This is useful because the client_state have a built-in mechanism to guarantee monotonicity.
-     * Bypassing that mechanism by the use of some other clock may yield times in the past, even if the operation
-     * was done in the future.
-     */
-    api::timestamp_type next_timestamp();
 
     future<::shared_ptr<cql_transport::messages::result_message::prepared>>
     prepare(sstring query_string, service::query_state& query_state);
@@ -280,7 +314,7 @@ public:
             std::unordered_map<prepared_cache_key_type, authorized_prepared_statements_cache::value_type> pending_authorization_entries);
 
     std::unique_ptr<statements::prepared_statement> get_statement(
-            const std::experimental::string_view& query,
+            const std::string_view& query,
             const service::client_state& client_state);
 
     friend class migration_subscriber;
@@ -319,6 +353,13 @@ private:
             std::function<stop_iteration(const cql3::untyped_result_set_row&)>&& f);
 
     /*!
+     * \brief iterate over all results using paging, accept a function that returns a future
+     */
+    future<> for_each_cql_result(
+            ::shared_ptr<cql3::internal_query_state> state,
+             noncopyable_function<future<stop_iteration>(const cql3::untyped_result_set_row&)>&& f);
+
+    /*!
      * \brief check, based on the state if there are additional results
      * Users of the paging, should not use the internal_query_state directly
      */
@@ -352,7 +393,7 @@ private:
                 auto bound_terms = prepared->statement->get_bound_terms();
                 if (bound_terms > std::numeric_limits<uint16_t>::max()) {
                     throw exceptions::invalid_request_exception(
-                            sprint("Too many markers(?). %d markers exceed the allowed maximum of %d",
+                            format("Too many markers(?). {:d} markers exceed the allowed maximum of {:d}",
                                    bound_terms,
                                    std::numeric_limits<uint16_t>::max()));
                 }
@@ -372,7 +413,7 @@ private:
     template <typename ResultMsgType, typename KeyGenerator, typename IdGetter>
     ::shared_ptr<cql_transport::messages::result_message::prepared>
     get_stored_prepared_statement_one(
-            const std::experimental::string_view& query_string,
+            const std::string_view& query_string,
             const sstring& keyspace,
             KeyGenerator&& key_gen,
             IdGetter&& id_getter) {
@@ -387,7 +428,7 @@ private:
 
     ::shared_ptr<cql_transport::messages::result_message::prepared>
     get_stored_prepared_statement(
-            const std::experimental::string_view& query_string,
+            const std::string_view& query_string,
             const sstring& keyspace,
             bool for_thrift);
 };
@@ -420,11 +461,11 @@ public:
     virtual void on_drop_view(const sstring& ks_name, const sstring& view_name) override;
 
 private:
-    void remove_invalid_prepared_statements(sstring ks_name, std::experimental::optional<sstring> cf_name);
+    void remove_invalid_prepared_statements(sstring ks_name, std::optional<sstring> cf_name);
 
     bool should_invalidate(
             sstring ks_name,
-            std::experimental::optional<sstring> cf_name,
+            std::optional<sstring> cf_name,
             ::shared_ptr<cql_statement> statement);
 };
 

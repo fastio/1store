@@ -28,8 +28,6 @@
 #include "cql3/statements/prepared_statement.hh"
 #include "cql3/query_processor.hh"
 #include "service/migration_manager.hh"
-#include "database.hh"
-
 
 /**
  * \class table_helper
@@ -90,50 +88,15 @@ public:
      */
     template <typename OptMaker, typename... Args>
     GCC6_CONCEPT( requires seastar::CanApply<OptMaker, Args...> )
-    future<> insert(service::query_state& qs, OptMaker opt_maker, Args&&... opt_maker_args) {
-        return cache_table_info(qs).then([this, &qs, opt_maker = std::move(opt_maker), args = std::forward_as_tuple(std::forward<Args>(opt_maker_args)...)] () mutable {
-            return do_with(apply(opt_maker, std::move(args)), [this, &qs] (auto& opts) {
-                return _insert_stmt->execute(service::get_storage_proxy().local(), qs, opts);
-            });
-        }).discard_result();
+    future<> insert(service::query_state& qs, OptMaker opt_maker, Args... opt_maker_args) {
+        return insert(qs, noncopyable_function<cql3::query_options ()>([opt_maker = std::move(opt_maker), args = std::make_tuple(std::move(opt_maker_args)...)] () mutable {
+            return apply(opt_maker, std::move(args));
+        }));
     }
 
-    template <typename... Args>
-    static inline future<> setup_keyspace(const sstring& keyspace_name, sstring replication_factor, service::query_state& qs, const Args&... args) {
-        if (engine().cpu_id() == 0) {
-            size_t n = sizeof...(args);
-            const table_helper* tables[sizeof...(args)] = {&args...};
-            for (size_t i = 0; i < n; ++i) {
-                if (tables[i]->_keyspace != keyspace_name) {
-                    throw std::invalid_argument("setup_keyspace called with table_helper for different keyspace");
-                }
-            }
-            return seastar::async([&keyspace_name, replication_factor, &qs, &args...] {
-                auto& db = cql3::get_local_query_processor().db().local();
+    future<> insert(service::query_state& qs, noncopyable_function<cql3::query_options ()> opt_maker);
 
-                // Create a keyspace
-                if (!db.has_keyspace(keyspace_name)) {
-                    std::map<sstring, sstring> opts;
-                    opts["replication_factor"] = replication_factor;
-                    auto ksm = keyspace_metadata::new_keyspace(keyspace_name, "org.apache.cassandra.locator.SimpleStrategy", std::move(opts), true);
-                    // We use min_timestamp so that default keyspace metadata will loose with any manual adjustments. See issue #2129.
-                    service::get_local_migration_manager().announce_new_keyspace(ksm, api::min_timestamp, false).get();
-                }
-
-                qs.get_client_state().set_keyspace(cql3::get_local_query_processor().db(), keyspace_name);
-
-
-                // Create tables
-                size_t n = sizeof...(args);
-                const table_helper* tables[sizeof...(args)] = {&args...};
-                for (size_t i = 0; i < n; ++i) {
-                    tables[i]->setup_table().get();
-                }
-            });
-        } else {
-            return make_ready_future<>();
-        }
-    }
+    static future<> setup_keyspace(const sstring& keyspace_name, sstring replication_factor, service::query_state& qs, std::vector<table_helper*> tables);
 
     /**
      * Makes a monotonically increasing value in 100ns ("nanos") based on the given time
@@ -171,12 +134,12 @@ public:
     bad_column_family(const sstring& keyspace, const sstring& cf)
         : _keyspace(keyspace)
         , _cf(cf)
-        , _what(sprint("%s.%s doesn't meet expected schema.", _keyspace, _cf))
+        , _what(format("{}.{} doesn't meet expected schema.", _keyspace, _cf))
     { }
     bad_column_family(const sstring& keyspace, const sstring& cf, const std::exception& e)
         : _keyspace(keyspace)
         , _cf(cf)
-        , _what(sprint("%s.%s doesn't meet expected schema: %s", _keyspace, _cf, e.what()))
+        , _what(format("{}.{} doesn't meet expected schema: {}", _keyspace, _cf, e.what()))
     { }
     const char* what() const noexcept override {
         return _what.c_str();

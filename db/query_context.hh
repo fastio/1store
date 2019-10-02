@@ -21,8 +21,8 @@
 #pragma once
 
 #include <memory>
-#include "core/sharded.hh"
-#include "core/future.hh"
+#include <seastar/core/sharded.hh>
+#include <seastar/core/future.hh>
 #include "cql3/query_processor.hh"
 
 class database;
@@ -50,9 +50,6 @@ struct query_context {
         return _qp.local().proxy();
     }
 
-    api::timestamp_type next_timestamp() {
-        return _qp.local().next_timestamp();
-    }
     cql3::query_processor& qp() {
         return _qp.local();
     }

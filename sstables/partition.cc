@@ -21,10 +21,10 @@
 #include "mutation.hh"
 #include "sstables.hh"
 #include "types.hh"
-#include "core/future-util.hh"
+#include <seastar/core/future-util.hh>
 #include "key.hh"
 #include "keys.hh"
-#include "core/do_with.hh"
+#include <seastar/core/do_with.hh>
 #include "unimplemented.hh"
 #include "dht/i_partitioner.hh"
 #include <seastar/core/byteorder.hh>
@@ -82,8 +82,7 @@ concept bool RowConsumer() {
         { t.io_priority() } -> const io_priority_class&;
         { t.is_mutation_end() } -> bool;
         { t.setup_for_partition(pk) } -> void;
-        { t.get_mutation() } -> std::optional<new_mutation>;
-        { t.push_ready_fragments() } -> row_consumer::proceed;
+        { t.push_ready_fragments() } -> void
         { t.maybe_skip() } -> std::optional<position_in_partition_view>;
         { t.fast_forward_to(std::move(cr), timeout) } -> std::optional<position_in_partition_view>;
     };
@@ -128,9 +127,7 @@ GCC6_CONCEPT(
     requires RowConsumer<Consumer>()
 )
 class sstable_mutation_reader : public mp_row_consumer_reader {
-    shared_sstable _sst;
     Consumer _consumer;
-    bool _index_in_current_partition = false; // Whether index lower bound is in current partition
     bool _will_likely_slice = false;
     bool _read_enabled = true;
     data_consume_context_opt<DataConsumeRowsContext> _context;
@@ -140,19 +137,13 @@ class sstable_mutation_reader : public mp_row_consumer_reader {
     std::function<future<> ()> _initialize;
     streamed_mutation::forwarding _fwd;
     read_monitor& _monitor;
-    std::optional<dht::decorated_key> _current_partition_key;
-    bool _partition_finished = true;
-    // when set, the consumer is positioned right before a partition.
-    // _index_in_current_partition applies to the partition which is about to be read.
-    bool _before_partition = true;
 public:
     sstable_mutation_reader(shared_sstable sst, schema_ptr schema,
          const io_priority_class &pc,
          reader_resource_tracker resource_tracker,
          streamed_mutation::forwarding fwd,
          read_monitor& mon)
-        : mp_row_consumer_reader(std::move(schema))
-        , _sst(std::move(sst))
+        : mp_row_consumer_reader(std::move(schema), std::move(sst))
         , _consumer(this, _schema, _schema->full_slice(), pc, std::move(resource_tracker), fwd, _sst)
         , _initialize([this] {
             _context = data_consume_rows<DataConsumeRowsContext>(*_schema, _sst, _consumer);
@@ -170,8 +161,7 @@ public:
          streamed_mutation::forwarding fwd,
          mutation_reader::forwarding fwd_mr,
          read_monitor& mon)
-        : mp_row_consumer_reader(std::move(schema))
-        , _sst(std::move(sst))
+        : mp_row_consumer_reader(std::move(schema), std::move(sst))
         , _consumer(this, _schema, slice, pc, std::move(resource_tracker), fwd, _sst)
         , _initialize([this, pr, &pc, &slice, resource_tracker = std::move(resource_tracker), fwd_mr] () mutable {
             auto f = get_index_reader().advance_to(pr);
@@ -198,8 +188,7 @@ public:
                             streamed_mutation::forwarding fwd,
                             mutation_reader::forwarding fwd_mr,
                             read_monitor& mon)
-        : mp_row_consumer_reader(std::move(schema))
-        , _sst(std::move(sst))
+        : mp_row_consumer_reader(std::move(schema), std::move(sst))
         , _consumer(this, _schema, slice, pc, std::move(resource_tracker), fwd, _sst)
         , _single_partition_read(true)
         , _initialize([this, key = std::move(key), &pc, &slice, fwd_mr] () mutable {
@@ -235,7 +224,8 @@ public:
         auto close = [this] (std::unique_ptr<index_reader>& ptr) {
             if (ptr) {
                 auto f = ptr->close();
-                f.handle_exception([index = std::move(ptr)] (auto&&) { });
+                // FIXME: discarded future.
+                (void)f.handle_exception([index = std::move(ptr)] (auto&&) { });
             }
         };
         close(_index_reader);
@@ -260,9 +250,6 @@ private:
             _index_in_current_partition = false;
             return make_ready_future<>();
         }
-        if (_single_partition_read) {
-            return make_ready_future<>();
-        }
         return (_index_in_current_partition
                 ? _index_reader->advance_to_next_partition()
                 : get_index_reader().advance_to(dht::ring_position_view::for_after_key(*_current_partition_key))).then([this] {
@@ -273,7 +260,9 @@ private:
                 return make_ready_future<>();
             }
             assert(_index_reader->element_kind() == indexable_element::partition);
-            return _context->skip_to(_index_reader->element_kind(), start);
+            return _context->skip_to(_index_reader->element_kind(), start).then([this] {
+                _sst->get_stats().on_partition_seek();
+            });
         });
     }
     future<> read_from_index() {
@@ -291,23 +280,7 @@ private:
     }
     future<> read_from_datafile() {
         sstlog.trace("reader {}: read from data file", this);
-        return _context->read().then_wrapped([this] (future<> f) {
-            try {
-                f.get();
-
-                auto& consumer = _consumer;
-                auto mut = consumer.get_mutation();
-                if (!mut) {
-                    sstlog.trace("reader {}: eof", this);
-                    return make_ready_future<>();
-                }
-                on_next_partition(dht::global_partitioner().decorate_key(*_schema, std::move(mut->key)), mut->tomb);
-            } catch (...) {
-                throw std::runtime_error(sprint("SSTable reader found an exception when reading sstable %s : %s",
-                        _sst->get_filename(), std::current_exception()));
-            }
-            return make_ready_future<>();
-        });
+        return _context->read();
     }
     // Assumes that we're currently positioned at partition boundary.
     future<> read_partition() {
@@ -320,10 +293,6 @@ private:
         }
 
         if (!_consumer.is_mutation_end()) {
-            if (_single_partition_read) {
-                _read_enabled = false;
-                return make_ready_future<>();
-            }
             // FIXME: give more details from _context
             throw malformed_sstable_exception("consumer not at partition boundary", _sst->get_filename());
         }
@@ -358,7 +327,7 @@ private:
         // If next partition exists then on_next_partition will be called
         // and _end_of_stream will be set to false again.
         _end_of_stream = true;
-        if (!_read_enabled) {
+        if (!_read_enabled || _single_partition_read) {
             sstlog.trace("reader {}: eof", this);
             return make_ready_future<>();
         }
@@ -385,18 +354,11 @@ private:
                     return make_ready_future<>();
                 }
                 return _context->skip_to(idx.element_kind(), index_position.start).then([this, &idx] {
+                    _sst->get_stats().on_partition_seek();
                     set_range_tombstone_start_from_end_open_marker(_consumer, *_schema, idx);
                 });
             });
         });
-    }
-    void on_next_partition(dht::decorated_key key, tombstone tomb) {
-        _partition_finished = false;
-        _before_partition = false;
-        _end_of_stream = false;
-        _current_partition_key = std::move(key);
-        push_mutation_fragment(
-            mutation_fragment(partition_start(*_current_partition_key, tomb)));
     }
     bool is_initialized() const {
         return bool(_context);
@@ -408,7 +370,7 @@ private:
         return _initialize();
     }
 public:
-    void on_end_of_stream() {
+    void on_out_of_clustering_range() override {
         if (_fwd == streamed_mutation::forwarding::yes) {
             _end_of_stream = true;
         } else {
@@ -504,7 +466,18 @@ public:
     }
 };
 
+void mp_row_consumer_reader::on_next_partition(dht::decorated_key key, tombstone tomb) {
+    _partition_finished = false;
+    _before_partition = false;
+    _end_of_stream = false;
+    _current_partition_key = std::move(key);
+    push_mutation_fragment(
+        mutation_fragment(partition_start(*_current_partition_key, tomb)));
+    _sst->get_stats().on_partition_read();
+}
+
 flat_mutation_reader sstable::read_rows_flat(schema_ptr schema, const io_priority_class& pc, streamed_mutation::forwarding fwd) {
+    get_stats().on_sstable_partition_read();
     if (_version == version_types::mc) {
         return make_flat_mutation_reader<sstable_mutation_reader<data_consume_rows_context_m, mp_row_consumer_m>>(
             shared_from_this(), std::move(schema), pc, no_resource_tracking(), fwd, default_read_monitor());
@@ -521,6 +494,7 @@ sstables::sstable::read_row_flat(schema_ptr schema,
                                  streamed_mutation::forwarding fwd,
                                  read_monitor& mon)
 {
+    get_stats().on_single_partition_read();
     if (_version == version_types::mc) {
         return make_flat_mutation_reader<sstable_mutation_reader<data_consume_rows_context_m, mp_row_consumer_m>>(
             shared_from_this(), std::move(schema), std::move(key), slice, pc, std::move(resource_tracker), fwd, mutation_reader::forwarding::no, mon);
@@ -537,6 +511,7 @@ sstable::read_range_rows_flat(schema_ptr schema,
                          streamed_mutation::forwarding fwd,
                          mutation_reader::forwarding fwd_mr,
                          read_monitor& mon) {
+    get_stats().on_range_partition_read();
     if (_version == version_types::mc) {
         return make_flat_mutation_reader<sstable_mutation_reader<data_consume_rows_context_m, mp_row_consumer_m>>(
             shared_from_this(), std::move(schema), range, slice, pc, std::move(resource_tracker), fwd, fwd_mr, mon);

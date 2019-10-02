@@ -78,7 +78,7 @@ struct duration_conversor {
         } else if (target_duration == "SECONDS") {
             return convert<std::chrono::seconds>(d);
         } else {
-            throw std::runtime_error(sprint("target duration %s is not available", target_duration));
+            throw std::runtime_error(format("target duration {} is not available", target_duration));
         }
     }
 };
@@ -114,10 +114,10 @@ public:
         base_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::seconds(DEFAULT_BASE_TIME_SECONDS)).count();
     }
 private:
-    static std::experimental::optional<sstring> get_value(const std::map<sstring, sstring>& options, const sstring& name) {
+    static std::optional<sstring> get_value(const std::map<sstring, sstring>& options, const sstring& name) {
         auto it = options.find(name);
         if (it == options.end()) {
-            return std::experimental::nullopt;
+            return std::nullopt;
         }
         return it->second;
     }

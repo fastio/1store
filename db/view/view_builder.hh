@@ -22,7 +22,6 @@
 #pragma once
 
 #include "database_fwd.hh"
-#include "db/system_keyspace.hh"
 #include "db/system_distributed_keyspace.hh"
 #include "dht/i_partitioner.hh"
 #include "keys.hh"
@@ -45,6 +44,14 @@
 #include <optional>
 #include <unordered_map>
 #include <vector>
+
+namespace db::system_keyspace {
+
+using view_name = std::pair<sstring, sstring>;
+class view_build_progress;
+
+}
+
 
 namespace db::view {
 
@@ -159,7 +166,12 @@ class view_builder final : public service::migration_listener::only_view_notific
     std::unordered_map<std::pair<sstring, sstring>, seastar::shared_promise<>, utils::tuple_hash> _build_notifiers;
 
 public:
+    // The view builder processes the base table in steps of batch_size rows.
+    // However, if the individual rows are large, there is no real need to
+    // collect batch_size of them in memory at once. Rather, as soon as we've
+    // collected batch_memory_max bytes, we can process the rows read so far.
     static constexpr size_t batch_size = 128;
+    static constexpr size_t batch_memory_max = 1024*1024;
 
 public:
     view_builder(database&, db::system_distributed_keyspace&, service::migration_manager&);

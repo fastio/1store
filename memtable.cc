@@ -22,10 +22,96 @@
 #include "memtable.hh"
 #include "database.hh"
 #include "frozen_mutation.hh"
-#include "stdx.hh"
 #include "partition_snapshot_reader.hh"
 #include "schema_upgrader.hh"
 #include "partition_builder.hh"
+
+void memtable::memtable_encoding_stats_collector::update_timestamp(api::timestamp_type ts) {
+    if (ts != api::missing_timestamp) {
+        encoding_stats_collector::update_timestamp(ts);
+        max_timestamp.update(ts);
+    }
+}
+
+memtable::memtable_encoding_stats_collector::memtable_encoding_stats_collector()
+    : max_timestamp(0)
+{}
+
+void memtable::memtable_encoding_stats_collector::update(atomic_cell_view cell) {
+    update_timestamp(cell.timestamp());
+    if (cell.is_live_and_has_ttl()) {
+        update_ttl(cell.ttl());
+        update_local_deletion_time(cell.expiry());
+    } else if (!cell.is_live()) {
+        update_local_deletion_time(cell.deletion_time());
+    }
+}
+
+void memtable::memtable_encoding_stats_collector::update(tombstone tomb) {
+    if (tomb) {
+        update_timestamp(tomb.timestamp);
+        update_local_deletion_time(tomb.deletion_time);
+    }
+}
+
+void memtable::memtable_encoding_stats_collector::update(const ::schema& s, const row& r, column_kind kind) {
+    r.for_each_cell([this, &s, kind](column_id id, const atomic_cell_or_collection& item) {
+        auto& col = s.column_at(kind, id);
+        if (col.is_atomic()) {
+            update(item.as_atomic_cell(col));
+        } else {
+            auto ctype = static_pointer_cast<const collection_type_impl>(col.type);
+            item.as_collection_mutation().data.with_linearized([&] (bytes_view bv) {
+            auto mview = ctype->deserialize_mutation_form(bv);
+            // Note: when some of the collection cells are dead and some are live
+            // we need to encode a "live" deletion_time for the living ones.
+            // It is not strictly required to update encoding_stats for the latter case
+            // since { <int64_t>.min(), <int32_t>.max() } will not affect the encoding_stats
+            // minimum values.  (See #4035)
+            update(mview.tomb);
+            for (auto& entry : mview.cells) {
+                update(entry.second);
+            }
+            });
+        }
+    });
+}
+
+void memtable::memtable_encoding_stats_collector::update(const range_tombstone& rt) {
+    update(rt.tomb);
+}
+
+void memtable::memtable_encoding_stats_collector::update(const row_marker& marker) {
+    update_timestamp(marker.timestamp());
+    if (!marker.is_missing()) {
+        if (!marker.is_live()) {
+            update_ttl(gc_clock::duration(sstables::expired_liveness_ttl));
+            update_local_deletion_time(marker.deletion_time());
+        } else if (marker.is_expiring()) {
+            update_ttl(marker.ttl());
+            update_local_deletion_time(marker.expiry());
+        }
+    }
+}
+
+void memtable::memtable_encoding_stats_collector::update(const ::schema& s, const deletable_row& dr) {
+    update(dr.marker());
+    row_tombstone row_tomb = dr.deleted_at();
+    update(row_tomb.regular());
+    update(row_tomb.tomb());
+    update(s, dr.cells(), column_kind::regular_column);
+}
+
+void memtable::memtable_encoding_stats_collector::update(const ::schema& s, const mutation_partition& mp) {
+    update(mp.partition_tombstone());
+    update(s, mp.static_row(), column_kind::static_column);
+    for (auto&& row_entry : mp.clustered_rows()) {
+        update(s, row_entry.row());
+    }
+    for (auto&& rt : mp.row_tombstones()) {
+        update(rt);
+    }
+}
 
 memtable::memtable(schema_ptr schema, dirty_memory_manager& dmm, memtable_list* memtable_list,
     seastar::scheduling_group compaction_scheduling_group)
@@ -165,7 +251,7 @@ class iterator_reader {
     lw_shared_ptr<memtable> _memtable;
     schema_ptr _schema;
     const dht::partition_range* _range;
-    stdx::optional<dht::decorated_key> _last;
+    std::optional<dht::decorated_key> _last;
     memtable::partitions_type::iterator _i;
     memtable::partitions_type::iterator _end;
     uint64_t _last_reclaim_counter;
@@ -246,7 +332,7 @@ protected:
         return *_memtable;
     };
 
-    std::experimental::optional<dht::partition_range> get_delegate_range() {
+    std::optional<dht::partition_range> get_delegate_range() {
         // We cannot run concurrently with row_cache::update().
         if (_memtable->is_flushed()) {
             return _last ? _range->split_after(*_last, dht::ring_position_comparator(*_memtable->_schema)) : *_range;
@@ -272,8 +358,8 @@ protected:
 };
 
 class scanning_reader final : public flat_mutation_reader::impl, private iterator_reader {
-    stdx::optional<dht::partition_range> _delegate_range;
-    stdx::optional<flat_mutation_reader> _delegate;
+    std::optional<dht::partition_range> _delegate_range;
+    std::optional<flat_mutation_reader> _delegate;
     const io_priority_class& _pc;
     const query::partition_slice& _slice;
     mutation_reader::forwarding _fwd_mr;
@@ -524,7 +610,7 @@ public:
                 return stop_iteration(is_buffer_full());
             }, timeout).then([this] {
                 if (_partition_reader->is_end_of_stream() && _partition_reader->is_buffer_empty()) {
-                    _partition_reader = stdx::nullopt;
+                    _partition_reader = std::nullopt;
                 }
             });
         });
@@ -532,7 +618,7 @@ public:
     virtual void next_partition() override {
         clear_buffer_to_next_partition();
         if (is_buffer_empty()) {
-            _partition_reader = stdx::nullopt;
+            _partition_reader = std::nullopt;
         }
     }
     virtual future<> fast_forward_to(const dht::partition_range&, db::timeout_clock::time_point timeout) override {
@@ -561,7 +647,7 @@ memtable::make_flat_reader(schema_ptr s,
                       tracing::trace_state_ptr trace_state_ptr,
                       streamed_mutation::forwarding fwd,
                       mutation_reader::forwarding fwd_mr) {
-    if (query::is_single_partition(range)) {
+    if (query::is_single_partition(range) && !fwd_mr) {
         const query::ring_position& pos = range.start()->value();
         auto snp = _read_section(*this, [&] () -> partition_snapshot_ptr {
             managed_bytes::linearization_context_guard lcg;
@@ -592,7 +678,7 @@ memtable::make_flat_reader(schema_ptr s,
         if (fwd == streamed_mutation::forwarding::yes) {
             return make_forwardable(std::move(res));
         } else {
-            return std::move(res);
+            return res;
         }
     }
 }
@@ -723,5 +809,5 @@ std::ostream& operator<<(std::ostream& out, memtable& mt) {
 }
 
 std::ostream& operator<<(std::ostream& out, const memtable_entry& mt) {
-    return out << "{" << mt.key() << ": " << mt.partition() << "}";
+    return out << "{" << mt.key() << ": " << partition_entry::printer(*mt.schema(), mt.partition()) << "}";
 }

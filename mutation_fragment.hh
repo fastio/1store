@@ -24,11 +24,10 @@
 #include "mutation_partition.hh"
 #include "position_in_partition.hh"
 
-#include <experimental/optional>
+#include <optional>
 #include <seastar/util/gcc6-concepts.hh>
 #include <seastar/util/optimized_optional.hh>
 
-#include "stdx.hh"
 #include "seastar/core/future-util.hh"
 
 #include "db/timeout_clock.hh"
@@ -128,7 +127,17 @@ public:
                && _cells.equal(column_kind::regular_column, s, other._cells, s);
     }
 
-    friend std::ostream& operator<<(std::ostream& os, const clustering_row& row);
+    class printer {
+        const schema& _schema;
+        const clustering_row& _clustering_row;
+    public:
+        printer(const schema& s, const clustering_row& r) : _schema(s), _clustering_row(r) { }
+        printer(const printer&) = delete;
+        printer(printer&&) = delete;
+
+        friend std::ostream& operator<<(std::ostream& os, const printer& p);
+    };
+    friend std::ostream& operator<<(std::ostream& os, const printer& p);
 };
 
 class static_row {
@@ -174,7 +183,17 @@ public:
         return _cells.equal(column_kind::static_column, s, other._cells, s);
     }
 
-    friend std::ostream& operator<<(std::ostream& is, const static_row& row);
+    class printer {
+        const schema& _schema;
+        const static_row& _static_row;
+    public:
+        printer(const schema& s, const static_row& r) : _schema(s), _static_row(r) { }
+        printer(const printer&) = delete;
+        printer(printer&&) = delete;
+
+        friend std::ostream& operator<<(std::ostream& os, const printer& p);
+    };
+    friend std::ostream& operator<<(std::ostream& os, const printer& p);
 };
 
 class partition_start final {
@@ -295,7 +314,7 @@ private:
         data() { }
         ~data() { }
 
-        stdx::optional<size_t> _size_in_bytes;
+        std::optional<size_t> _size_in_bytes;
         union {
             static_row _static_row;
             clustering_row _clustering_row;
@@ -316,7 +335,7 @@ private:
     friend class position_in_partition;
 public:
     struct clustering_row_tag_t { };
-    
+
     template<typename... Args>
     mutation_fragment(clustering_row_tag_t, Args&&... args)
         : _kind(kind::clustering_row)
@@ -391,23 +410,23 @@ public:
     bool is_end_of_partition() const { return _kind == kind::partition_end; }
 
     static_row& as_mutable_static_row() {
-        _data->_size_in_bytes = stdx::nullopt;
+        _data->_size_in_bytes = std::nullopt;
         return _data->_static_row;
     }
     clustering_row& as_mutable_clustering_row() {
-        _data->_size_in_bytes = stdx::nullopt;
+        _data->_size_in_bytes = std::nullopt;
         return _data->_clustering_row;
     }
     range_tombstone& as_mutable_range_tombstone() {
-        _data->_size_in_bytes = stdx::nullopt;
+        _data->_size_in_bytes = std::nullopt;
         return _data->_range_tombstone;
     }
     partition_start& as_mutable_partition_start() {
-        _data->_size_in_bytes = stdx::nullopt;
+        _data->_size_in_bytes = std::nullopt;
         return _data->_partition_start;
     }
     partition_end& as_mutable_end_of_partition() {
-        _data->_size_in_bytes = stdx::nullopt;
+        _data->_size_in_bytes = std::nullopt;
         return _data->_partition_end;
     }
 
@@ -501,7 +520,17 @@ public:
         return _kind == mf._kind && _kind != kind::range_tombstone;
     }
 
-    friend std::ostream& operator<<(std::ostream&, const mutation_fragment& mf);
+    class printer {
+        const schema& _schema;
+        const mutation_fragment& _mutation_fragment;
+    public:
+        printer(const schema& s, const mutation_fragment& mf) : _schema(s), _mutation_fragment(mf) { }
+        printer(const printer&) = delete;
+        printer(printer&&) = delete;
+
+        friend std::ostream& operator<<(std::ostream& os, const printer& p);
+    };
+    friend std::ostream& operator<<(std::ostream& os, const printer& p);
 };
 
 inline position_in_partition_view static_row::position() const
@@ -524,9 +553,8 @@ inline position_in_partition_view partition_end::position() const
     return position_in_partition_view(position_in_partition_view::end_of_partition_tag_t());
 }
 
+std::ostream& operator<<(std::ostream&, partition_region);
 std::ostream& operator<<(std::ostream&, mutation_fragment::kind);
-
-std::ostream& operator<<(std::ostream&, const mutation_fragment& mf);
 
 using mutation_fragment_opt = optimized_optional<mutation_fragment>;
 
@@ -593,7 +621,10 @@ public:
     void apply(const range_tombstone_list& list) {
         _list.apply(_schema, list);
     }
-    void apply(const range_tombstone_list&, const query::clustering_range&);
+    // Apply those range tombstones from the list, that overlap with the
+    // range. If `trim_front` is set, range tombstones will be trimmed to the
+    // start of the clustering range.
+    void apply(const range_tombstone_list&, const query::clustering_range&, bool trim_front = false);
     void reset();
     bool empty() const;
     friend std::ostream& operator<<(std::ostream& out, const range_tombstone_stream&);

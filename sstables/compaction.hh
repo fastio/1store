@@ -26,6 +26,7 @@
 #include "shared_sstable.hh"
 #include "gc_clock.hh"
 #include "compaction_weight_registration.hh"
+#include "utils/UUID.hh"
 #include <seastar/core/thread.hh>
 #include <functional>
 
@@ -38,15 +39,25 @@ namespace sstables {
         int level;
         // Threshold size for sstable(s) to be created.
         uint64_t max_sstable_bytes;
+        // Run identifier of output sstables.
+        utils::UUID run_identifier;
         // Holds ownership of a weight assigned to this compaction iff it's a regular one.
-        stdx::optional<compaction_weight_registration> weight_registration;
+        std::optional<compaction_weight_registration> weight_registration;
+        // Calls compaction manager's task for this compaction to release reference to exhausted sstables.
+        std::function<void(const std::vector<shared_sstable>& exhausted_sstables)> release_exhausted;
 
         compaction_descriptor() = default;
 
-        explicit compaction_descriptor(std::vector<sstables::shared_sstable> sstables, int level = 0, uint64_t max_sstable_bytes = std::numeric_limits<uint64_t>::max())
+        static constexpr int default_level = 0;
+        static constexpr uint64_t default_max_sstable_bytes = std::numeric_limits<uint64_t>::max();
+
+        explicit compaction_descriptor(std::vector<sstables::shared_sstable> sstables, int level = default_level,
+                                       uint64_t max_sstable_bytes = default_max_sstable_bytes,
+                                       utils::UUID run_identifier = utils::make_random_uuid())
             : sstables(std::move(sstables))
             , level(level)
-            , max_sstable_bytes(max_sstable_bytes) {}
+            , max_sstable_bytes(max_sstable_bytes)
+            , run_identifier(run_identifier) {}
     };
 
     struct resharding_descriptor {
@@ -86,8 +97,9 @@ namespace sstables {
 
     struct compaction_info {
         compaction_type type = compaction_type::Compaction;
-        sstring ks;
-        sstring cf;
+        table* cf = nullptr;
+        sstring ks_name;
+        sstring cf_name;
         size_t sstables = 0;
         uint64_t start_size = 0;
         uint64_t end_size = 0;
@@ -97,6 +109,12 @@ namespace sstables {
         std::vector<shared_sstable> new_sstables;
         sstring stop_requested;
         bool tracking = true;
+        utils::UUID run_identifier;
+        struct replacement {
+            const std::vector<shared_sstable> removed;
+            const std::vector<shared_sstable> added;
+        };
+        std::vector<replacement> pending_replacements;
 
         bool is_stop_requested() const {
             return stop_requested.size() > 0;
@@ -111,10 +129,14 @@ namespace sstables {
         }
     };
 
+    // Replaces old sstable(s) by new one(s) which contain all non-expired data.
+    using replacer_fn = std::function<void(std::vector<shared_sstable> removed, std::vector<shared_sstable> added)>;
+
     // Compact a list of N sstables into M sstables.
     // Returns info about the finished compaction, which includes vector to new sstables.
     //
     // creator is used to get a sstable object for a new sstable that will be written.
+    // replacer will replace old sstables by new ones in the column family.
     // max_sstable_size is a relaxed limit size for a sstable to be generated.
     // Example: It's okay for the size of a new sstable to go beyond max_sstable_size
     // when writing its last partition.
@@ -122,8 +144,8 @@ namespace sstables {
     // If cleanup is true, mutation that doesn't belong to current node will be
     // cleaned up, log messages will inform the user that compact_sstables runs for
     // cleaning operation, and compaction history will not be updated.
-    future<compaction_info> compact_sstables(sstables::compaction_descriptor descriptor,
-            column_family& cf, std::function<shared_sstable()> creator, bool cleanup = false);
+    future<compaction_info> compact_sstables(sstables::compaction_descriptor descriptor, column_family& cf,
+        std::function<shared_sstable()> creator, replacer_fn replacer, bool cleanup = false);
 
     // Compacts a set of N shared sstables into M sstables. For every shard involved,
     // i.e. which owns any of the sstables, a new unshared sstable is created.

@@ -58,6 +58,7 @@
 namespace service {
 
 class storage_proxy;
+class storage_service;
 
 }
 
@@ -79,6 +80,7 @@ static constexpr auto BATCHLOG = "batchlog";
 static constexpr auto PAXOS = "paxos";
 static constexpr auto BUILT_INDEXES = "IndexInfo";
 static constexpr auto LOCAL = "local";
+static constexpr auto TRUNCATED = "truncated";
 static constexpr auto PEERS = "peers";
 static constexpr auto PEER_EVENTS = "peer_events";
 static constexpr auto RANGE_XFERS = "range_xfers";
@@ -87,6 +89,9 @@ static constexpr auto COMPACTION_HISTORY = "compaction_history";
 static constexpr auto SSTABLE_ACTIVITY = "sstable_activity";
 static constexpr auto SIZE_ESTIMATES = "size_estimates";
 static constexpr auto LARGE_PARTITIONS = "large_partitions";
+static constexpr auto LARGE_ROWS = "large_rows";
+static constexpr auto LARGE_CELLS = "large_cells";
+static constexpr auto SCYLLA_LOCAL = "scylla_local";
 
 namespace v3 {
 static constexpr auto BATCHES = "batches";
@@ -127,12 +132,7 @@ struct range_estimates {
 };
 
 using view_name = std::pair<sstring, sstring>;
-struct view_build_progress {
-    view_name view;
-    dht::token first_token;
-    std::optional<dht::token> next_token;
-    shard_id cpu_id;
-};
+struct view_build_progress;
 
 extern schema_ptr hints();
 extern schema_ptr batchlog();
@@ -158,7 +158,9 @@ void minimal_setup(distributed<database>& db, distributed<cql3::query_processor>
 
 future<> init_local_cache();
 future<> deinit_local_cache();
-future<> setup(distributed<database>& db, distributed<cql3::query_processor>& qp);
+future<> setup(distributed<database>& db,
+               distributed<cql3::query_processor>& qp,
+               distributed<service::storage_service>& ss);
 future<> update_schema_version(utils::UUID version);
 future<> update_tokens(std::unordered_set<dht::token> tokens);
 future<> update_tokens(gms::inet_address ep, std::unordered_set<dht::token> tokens);
@@ -172,6 +174,9 @@ future<> update_peer_info(gms::inet_address ep, sstring column_name, Value value
 future<> remove_endpoint(gms::inet_address ep);
 
 future<> update_hints_dropped(gms::inet_address ep, utils::UUID time_period, int value);
+
+future<> set_scylla_local_param(const sstring& key, const sstring& value);
+future<std::optional<sstring>> get_scylla_local_param(const sstring& key);
 
 std::vector<schema_ptr> all_tables();
 void make(database& db, bool durable, bool volatile_testing_only = false);
@@ -372,12 +377,16 @@ enum class bootstrap_state {
 
     future<> update_compaction_history(sstring ksname, sstring cfname, int64_t compacted_at, int64_t bytes_in, int64_t bytes_out,
                                        std::unordered_map<int32_t, int64_t> rows_merged);
-    future<std::vector<compaction_history_entry>> get_compaction_history();
+    using compaction_history_consumer = noncopyable_function<future<>(const compaction_history_entry&)>;
+    future<> get_compaction_history(compaction_history_consumer&& f);
 
     typedef std::vector<db::replay_position> replay_positions;
 
+    future<> migrate_truncation_records();
+    // for tests
+    future<> wait_for_truncation_record_migration_complete();
+    future<> save_truncation_record(utils::UUID, db_clock::time_point truncated_at, db::replay_position);
     future<> save_truncation_record(const column_family&, db_clock::time_point truncated_at, db::replay_position);
-    future<> save_truncation_records(const column_family&, db_clock::time_point truncated_at, replay_positions);
     future<> remove_truncation_record(utils::UUID);
     future<replay_positions> get_truncated_position(utils::UUID);
     future<db::replay_position> get_truncated_position(utils::UUID, uint32_t shard);
@@ -494,12 +503,6 @@ enum class bootstrap_state {
     future<std::unordered_set<dht::token>> get_saved_tokens();
 
     future<std::unordered_map<gms::inet_address, sstring>> load_peer_features();
-    
-    /**
-     * Return a vector of peer's IP addresses
-     *
-     */
-    future<std::vector<gms::inet_address>> load_peers();
 
 future<int> increment_and_get_generation();
 bool bootstrap_complete();
@@ -546,69 +549,6 @@ future<> set_bootstrap_state(bootstrap_state state);
     future<utils::UUID> set_local_host_id(const utils::UUID& host_id);
 
 #if 0
-
-    public static PaxosState loadPaxosState(ByteBuffer key, CFMetaData metadata)
-    {
-        String req = "SELECT * FROM system.%s WHERE row_key = ? AND cf_id = ?";
-        UntypedResultSet results = executeInternal(String.format(req, PAXOS), key, metadata.cfId);
-        if (results.isEmpty())
-            return new PaxosState(key, metadata);
-        UntypedResultSet.Row row = results.one();
-        Commit promised = row.has("in_progress_ballot")
-                        ? new Commit(key, row.getUUID("in_progress_ballot"), ArrayBackedSortedColumns.factory.create(metadata))
-                        : Commit.emptyCommit(key, metadata);
-        // either we have both a recently accepted ballot and update or we have neither
-        Commit accepted = row.has("proposal")
-                        ? new Commit(key, row.getUUID("proposal_ballot"), ColumnFamily.fromBytes(row.getBytes("proposal")))
-                        : Commit.emptyCommit(key, metadata);
-        // either most_recent_commit and most_recent_commit_at will both be set, or neither
-        Commit mostRecent = row.has("most_recent_commit")
-                          ? new Commit(key, row.getUUID("most_recent_commit_at"), ColumnFamily.fromBytes(row.getBytes("most_recent_commit")))
-                          : Commit.emptyCommit(key, metadata);
-        return new PaxosState(promised, accepted, mostRecent);
-    }
-
-    public static void savePaxosPromise(Commit promise)
-    {
-        String req = "UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET in_progress_ballot = ? WHERE row_key = ? AND cf_id = ?";
-        executeInternal(String.format(req, PAXOS),
-                        UUIDGen.microsTimestamp(promise.ballot),
-                        paxosTtl(promise.update.metadata),
-                        promise.ballot,
-                        promise.key,
-                        promise.update.id());
-    }
-
-    public static void savePaxosProposal(Commit proposal)
-    {
-        executeInternal(String.format("UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET proposal_ballot = ?, proposal = ? WHERE row_key = ? AND cf_id = ?", PAXOS),
-                        UUIDGen.microsTimestamp(proposal.ballot),
-                        paxosTtl(proposal.update.metadata),
-                        proposal.ballot,
-                        proposal.update.toBytes(),
-                        proposal.key,
-                        proposal.update.id());
-    }
-
-    private static int paxosTtl(CFMetaData metadata)
-    {
-        // keep paxos state around for at least 3h
-        return Math.max(3 * 3600, metadata.getGcGraceSeconds());
-    }
-
-    public static void savePaxosCommit(Commit commit)
-    {
-        // We always erase the last proposal (with the commit timestamp to no erase more recent proposal in case the commit is old)
-        // even though that's really just an optimization  since SP.beginAndRepairPaxos will exclude accepted proposal older than the mrc.
-        String cql = "UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET proposal_ballot = null, proposal = null, most_recent_commit_at = ?, most_recent_commit = ? WHERE row_key = ? AND cf_id = ?";
-        executeInternal(String.format(cql, PAXOS),
-                        UUIDGen.microsTimestamp(commit.ballot),
-                        paxosTtl(commit.update.metadata),
-                        commit.ballot,
-                        commit.update.toBytes(),
-                        commit.key,
-                        commit.update.id());
-    }
 
     /**
      * Returns a RestorableMeter tracking the average read rate of a particular SSTable, restoring the last-seen rate

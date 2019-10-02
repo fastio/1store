@@ -22,7 +22,8 @@
 #include "utils/limiting_data_source.hh"
 
 #include <boost/test/unit_test.hpp>
-#include <seastar/tests/test-utils.hh>
+#include <seastar/testing/test_case.hh>
+#include <seastar/testing/thread_test_case.hh>
 #include <seastar/core/iostream.hh>
 #include <seastar/core/temporary_buffer.hh>
 #include <seastar/core/thread.hh>
@@ -85,7 +86,7 @@ data_source prepare_test_skip() {
     BOOST_REQUIRE_EQUAL(1, buf.size());
     BOOST_REQUIRE_EQUAL(0, buf[0]);
     // At this point we have 9 chars buffered in limiting_data_source_impl
-    return std::move(tested);
+    return tested;
 }
 
 }

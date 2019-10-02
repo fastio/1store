@@ -28,14 +28,17 @@
 
 #include <seastar/net/inet_address.hh>
 
-#include "tests/test-utils.hh"
+#include <seastar/testing/test_case.hh>
 #include "tests/cql_test_env.hh"
 #include "tests/cql_assertions.hh"
 
-#include "core/future-util.hh"
-#include "core/sleep.hh"
+#include <seastar/core/future-util.hh>
+#include <seastar/core/sleep.hh>
 #include "transport/messages/result_message.hh"
 #include "utils/big_decimal.hh"
+#include "types/tuple.hh"
+#include "types/user.hh"
+#include "types/list.hh"
 
 using namespace std::literals::chrono_literals;
 
@@ -482,10 +485,10 @@ SEASTAR_TEST_CASE(test_json_insert_null) {
     return do_with_cql_env_thread([] (cql_test_env& e) {
         e.execute_cql(
                 "CREATE TABLE mytable ("
-                "    myid text PRIMARY KEY,"
+                "    myid text,"
                 "    mytext text,"
                 "    mytext1 text,"
-                "    mytext2 text);"
+                "    mytext2 text, PRIMARY KEY (myid, mytext));"
         ).get();
 
        e.execute_cql("INSERT INTO mytable JSON '{\"myid\" : \"id2\", \"mytext\" : \"text234\", \"mytext1\" : \"text235\", \"mytext2\" : null}';").get();
@@ -497,5 +500,104 @@ SEASTAR_TEST_CASE(test_json_insert_null) {
             {utf8_type->decompose(sstring("text235"))},
             {}
         }});
+
+        // Primary keys must be present
+        BOOST_REQUIRE_THROW(e.execute_cql("INSERT INTO mytable JSON '{}';").get(), exceptions::invalid_request_exception);
+        BOOST_REQUIRE_THROW(e.execute_cql("INSERT INTO mytable JSON '{\"mytext\" : \"text234\", \"mytext1\" : \"text235\", \"mytext2\" : null}';").get(), exceptions::invalid_request_exception);
+        BOOST_REQUIRE_THROW(e.execute_cql("INSERT INTO mytable JSON '{\"myid\" : \"id2\", \"mytext1\" : \"text235\", \"mytext2\" : null}';").get(), exceptions::invalid_request_exception);
+    });
+}
+
+SEASTAR_TEST_CASE(test_json_tuple) {
+    return do_with_cql_env_thread([] (cql_test_env& e) {
+        e.execute_cql("CREATE TABLE t(id int PRIMARY KEY, v tuple<int, text, float>);").get();
+
+        e.execute_cql("INSERT INTO t JSON '{\"id\" : 7, \"v\": [5, \"test123\", 2.5]}';").get();
+
+        auto tt = tuple_type_impl::get_instance({int32_type, utf8_type, float_type});
+
+        auto msg = e.execute_cql("SELECT * FROM t;").get0();
+        assert_that(msg).is_rows().with_rows({{
+            {int32_type->decompose(7)},
+            {tt->decompose(make_tuple_value(tt, tuple_type_impl::native_type({int32_t(5), sstring("test123"), float(2.5)})))},
+        }});
+
+        e.execute_cql("INSERT INTO t (id, v) VALUES (3, (5, 'test543', 4.5));").get();
+
+        msg = e.execute_cql("SELECT JSON * FROM t WHERE id = 3;").get0();
+        assert_that(msg).is_rows().with_rows({{
+            utf8_type->decompose(sstring("{\"id\": 3, \"v\": [5, \"test543\", 4.5]}"))
+        }});
+
+        BOOST_REQUIRE_THROW(e.execute_cql("INSERT INTO t JSON '{\"id\" : 7, \"v\": [5, \"test123\", 2.5, 3]}';").get(), marshal_exception);
+        BOOST_REQUIRE_THROW(e.execute_cql("INSERT INTO t JSON '{\"id\" : 7, \"v\": [\"test123\", 5, 2.5]}';").get(), marshal_exception);
+        BOOST_REQUIRE_THROW(e.execute_cql("INSERT INTO t JSON '{\"id\" : 7, \"v\": {\"1\": 5}}';").get(), marshal_exception);
+    });
+}
+
+SEASTAR_TEST_CASE(test_json_udt) {
+    return do_with_cql_env_thread([] (cql_test_env& e) {
+        e.execute_cql("CREATE TYPE utype (first int, second text, third float);").get();
+        e.execute_cql("CREATE TABLE t(id int PRIMARY KEY, v frozen<utype>);").get();
+
+        e.execute_cql("INSERT INTO t JSON '{\"id\" : 7, \"v\": {\"first\": 5, \"third\": 2.5, \"second\": \"test123\"}}';").get();
+
+        auto ut = user_type_impl::get_instance("ks", "utype", std::vector{bytes("first"), bytes("second"), bytes("third")}, {int32_type, utf8_type, float_type});
+
+        auto msg = e.execute_cql("SELECT * FROM t;").get0();
+        assert_that(msg).is_rows().with_rows({{
+            {int32_type->decompose(7)},
+            {ut->decompose(make_user_value(ut, user_type_impl::native_type({int32_t(5), sstring("test123"), float(2.5)})))},
+        }});
+
+        e.execute_cql("INSERT INTO t (id, v) VALUES (3, (5, 'test543', 4.5));").get();
+
+        msg = e.execute_cql("SELECT JSON * FROM t WHERE id = 3;").get0();
+        assert_that(msg).is_rows().with_rows({{
+            utf8_type->decompose(sstring("{\"id\": 3, \"v\": {\"first\": 5, \"second\": \"test543\", \"third\": 4.5}}"))
+        }});
+
+        e.execute_cql("INSERT INTO t (id, v) VALUES (3, {\"first\": 3, \"third\": 4.5});").get();
+
+        msg = e.execute_cql("SELECT JSON * FROM t WHERE id = 3;").get0();
+        assert_that(msg).is_rows().with_rows({{
+            utf8_type->decompose(sstring("{\"id\": 3, \"v\": {\"first\": 3, \"second\": null, \"third\": 4.5}}"))
+        }});
+
+        BOOST_REQUIRE_THROW(e.execute_cql("INSERT INTO t JSON '{\"id\" : 7, \"v\": [5, \"test123\", 2.5, 3, 3]}';").get(), marshal_exception);
+        BOOST_REQUIRE_THROW(e.execute_cql("INSERT INTO t JSON '{\"id\" : 7, \"v\": {\"wrong\": 5, \"third\": 2.5, \"second\": \"test123\"}}';").get(), marshal_exception);
+        BOOST_REQUIRE_THROW(e.execute_cql("INSERT INTO t JSON '{\"id\" : 7, \"v\": {\"first\": \"hi\", \"third\": 2.5, \"second\": \"test123\"}}';").get(), marshal_exception);
+
+        e.execute_cql("CREATE TYPE utype2 (\"WeirdNameThatNeedsEscaping\\n,)\" int);").get();
+        e.execute_cql("CREATE TABLE t2(id int PRIMARY KEY, v frozen<utype2>);").get();
+
+        e.execute_cql("INSERT INTO t2 (id, v) VALUES (1, (7));").get();
+        msg = e.execute_cql("SELECT JSON * FROM t2 WHERE id = 1;").get0();
+        assert_that(msg).is_rows().with_rows({{
+            utf8_type->decompose(sstring("{\"id\": 1, \"v\": {\"WeirdNameThatNeedsEscaping\\\\n,)\": 7}}"))
+        }});
+    });
+}
+
+// Checks #4348
+SEASTAR_TEST_CASE(test_unpack_decimal){
+    return do_with_cql_env_thread([] (cql_test_env& e) {
+        e.execute_cql("create type ds (d1 decimal, d2 varint, d3 int)").get();
+        e.execute_cql("create table t (id int PRIMARY KEY, ds list<frozen<ds>>);").get();
+        e.execute_cql("update t set ds = fromJson('[{\"d1\":1,\"d2\":2,\"d3\":3}]') where id = 1").get();
+
+        auto ut = user_type_impl::get_instance("ks", to_bytes("ds"),
+                {to_bytes("d1"), to_bytes("d2"), to_bytes("d3")},
+                {decimal_type, varint_type, int32_type});
+        auto ut_val = make_user_value(ut,
+                user_type_impl::native_type({big_decimal{0, boost::multiprecision::cpp_int(1)},
+                boost::multiprecision::cpp_int(2),
+                3}));
+
+        auto lt = list_type_impl::get_instance(ut, true);
+        auto lt_val = lt->decompose(make_list_value(lt, list_type_impl::native_type{{ut_val}}));
+
+        auto msg = e.execute_cql("select * from t where id = 1;").get0();
+        assert_that(msg).is_rows().with_rows({{int32_type->decompose(1), lt_val}});
     });
 }

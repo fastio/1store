@@ -31,8 +31,6 @@ class extremum_tracker {
     bool _is_set = false;
     T _value;
 public:
-    extremum_tracker() {}
-
     explicit extremum_tracker(T default_value) {
         _default_value = default_value;
     }
@@ -45,6 +43,12 @@ public:
             if (Comparator{}(value,_value)) {
                 _value = value;
             }
+        }
+    }
+
+    void update(const extremum_tracker& other) {
+        if (other._is_set) {
+            update(other._value);
         }
     }
 
@@ -85,8 +89,8 @@ public:
     }
 
     void update(const min_max_tracker<T>& other) {
-        _min_tracker.update(other.min());
-        _max_tracker.update(other.max());
+        _min_tracker.update(other._min_tracker);
+        _max_tracker.update(other._max_tracker);
     }
 
     T min() const {
@@ -97,4 +101,3 @@ public:
         return _max_tracker.get();
     }
 };
-

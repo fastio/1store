@@ -21,12 +21,12 @@
 
 #pragma once
 
-#include "core/semaphore.hh"
-#include "core/sstring.hh"
-#include "core/shared_ptr.hh"
-#include "core/gate.hh"
-#include "core/shared_future.hh"
-#include "core/rwlock.hh"
+#include <seastar/core/semaphore.hh>
+#include <seastar/core/sstring.hh>
+#include <seastar/core/shared_ptr.hh>
+#include <seastar/core/gate.hh>
+#include <seastar/core/shared_future.hh>
+#include <seastar/core/rwlock.hh>
 #include <seastar/core/metrics_registration.hh>
 #include <seastar/core/scheduling.hh>
 #include "log.hh"
@@ -38,6 +38,7 @@
 #include "compaction_weight_registration.hh"
 #include "compaction_backlog_manager.hh"
 #include "backlog_controller.hh"
+#include "seastarx.hh"
 
 class table;
 using column_family = table;
@@ -132,7 +133,7 @@ private:
     // Compaction manager stop itself if it finds an storage I/O error which results in
     // stop of transportation services. It cannot make progress anyway.
     // Returns true if error is judged not fatal, and compaction can be retried.
-    inline bool maybe_stop_on_error(future<> f);
+    inline bool maybe_stop_on_error(future<> f, stop_iteration will_stop = stop_iteration::no);
 
     void postponed_compactions_reevaluation();
     void reevaluate_postponed_compactions();
@@ -144,6 +145,10 @@ private:
     compaction_backlog_manager _backlog_manager;
     seastar::scheduling_group _scheduling_group;
     size_t _available_memory;
+
+    using get_candidates_func = std::function<std::vector<sstables::shared_sstable>(const column_family&)>;
+
+    future<> rewrite_sstables(column_family* cf, bool is_cleanup, get_candidates_func);
 public:
     compaction_manager(seastar::scheduling_group sg, const ::io_priority_class& iop, size_t available_memory);
     compaction_manager(seastar::scheduling_group sg, const ::io_priority_class& iop, size_t available_memory, uint64_t shares);
@@ -165,6 +170,12 @@ public:
 
     // Submit a column family to be cleaned up and wait for its termination.
     future<> perform_cleanup(column_family* cf);
+
+    // Submit a column family to be upgraded and wait for its termination.
+    future<> perform_sstable_upgrade(column_family* cf, bool exclude_current_version);
+
+    // Submit a column family to be scrubbed and wait for its termination.
+    future<> perform_sstable_scrub(column_family* cf);
 
     // Submit a column family for major compaction.
     future<> submit_major_compaction(column_family* cf);
@@ -218,6 +229,9 @@ public:
     void register_backlog_tracker(compaction_backlog_tracker& backlog_tracker) {
         _backlog_manager.register_backlog_tracker(backlog_tracker);
     }
+
+    // Propagate replacement of sstables to all ongoing compaction of a given column family
+    void propagate_replacement(column_family*cf, const std::vector<sstables::shared_sstable>& removed, const std::vector<sstables::shared_sstable>& added);
 
     friend class compacting_sstable_registration;
     friend class compaction_weight_registration;

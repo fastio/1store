@@ -30,11 +30,11 @@
 #include "service/migration_manager.hh"
 #include "schema.hh"
 
-#include "core/shared_ptr.hh"
+#include <seastar/core/shared_ptr.hh>
 
 #include <utility>
 #include <vector>
-#include <experimental/optional>
+#include <optional>
 
 namespace cql3 {
 

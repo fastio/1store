@@ -22,17 +22,17 @@
 #pragma once
 
 #include "clocks-impl.hh"
+#include "hashing.hh"
 
 #include <seastar/core/lowres_clock.hh>
 
 #include <chrono>
-#include <experimental/optional>
+#include <optional>
 
-// FIXME: wraps around in 2038
 class gc_clock final {
 public:
     using base = seastar::lowres_system_clock;
-    using rep = int32_t;
+    using rep = int64_t;
     using period = std::ratio<1, 1>; // seconds
     using duration = std::chrono::duration<rep, period>;
     using time_point = std::chrono::time_point<gc_clock, duration>;
@@ -50,12 +50,39 @@ public:
     static time_point now() {
         return time_point(std::chrono::duration_cast<duration>(base::now().time_since_epoch())) + get_clocks_offset();
     }
+
+    static int32_t as_int32(duration d) {
+        auto count = d.count();
+        int32_t count_32 = static_cast<int32_t>(count);
+        if (count_32 != count) {
+            throw std::runtime_error("Duration too big");
+        }
+        return count_32;
+    }
+
+    static int32_t as_int32(time_point tp) {
+        return as_int32(tp.time_since_epoch());
+    }
 };
 
-using expiry_opt = std::experimental::optional<gc_clock::time_point>;
-using ttl_opt = std::experimental::optional<gc_clock::duration>;
+using expiry_opt = std::optional<gc_clock::time_point>;
+using ttl_opt = std::optional<gc_clock::duration>;
 
 // 20 years in seconds
 static constexpr gc_clock::duration max_ttl = gc_clock::duration{20 * 365 * 24 * 60 * 60};
 
 std::ostream& operator<<(std::ostream& os, gc_clock::time_point tp);
+
+template<>
+struct appending_hash<gc_clock::time_point> {
+    template<typename Hasher>
+    void operator()(Hasher& h, gc_clock::time_point t) const {
+        // Remain backwards-compatible with the 32-bit duration::rep (refs #4460).
+        uint64_t d64 = t.time_since_epoch().count();
+        feed_hash(h, uint32_t(d64 & 0xffff'ffff));
+        uint32_t msb = d64 >> 32;
+        if (msb) {
+            feed_hash(h, msb);
+        }
+    }
+};

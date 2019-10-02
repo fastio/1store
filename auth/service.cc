@@ -36,12 +36,12 @@
 #include "auth/standard_role_manager.hh"
 #include "cql3/query_processor.hh"
 #include "cql3/untyped_result_set.hh"
-#include "db/config.hh"
 #include "db/consistency_level_type.hh"
 #include "exceptions/exceptions.hh"
 #include "log.hh"
 #include "service/migration_listener.hh"
 #include "utils/class_registrator.hh"
+#include "database.hh"
 
 namespace auth {
 
@@ -77,17 +77,23 @@ private:
     void on_update_view(const sstring& ks_name, const sstring& view_name, bool columns_changed) override {}
 
     void on_drop_keyspace(const sstring& ks_name) override {
-        _authorizer.revoke_all(
+        // Do it in the background.
+        (void)_authorizer.revoke_all(
                 auth::make_data_resource(ks_name)).handle_exception_type([](const unsupported_authorization_operation&) {
             // Nothing.
+        }).handle_exception([] (std::exception_ptr e) {
+            log.error("Unexpected exception while revoking all permissions on dropped keyspace: {}", e);
         });
     }
 
     void on_drop_column_family(const sstring& ks_name, const sstring& cf_name) override {
-        _authorizer.revoke_all(
+        // Do it in the background.
+        (void)_authorizer.revoke_all(
                 auth::make_data_resource(
                         ks_name, cf_name)).handle_exception_type([](const unsupported_authorization_operation&) {
             // Nothing.
+        }).handle_exception([] (std::exception_ptr e) {
+            log.error("Unexpected exception while revoking all permissions on dropped table: {}", e);
         });
     }
 
@@ -97,25 +103,12 @@ private:
     void on_drop_view(const sstring& ks_name, const sstring& view_name) override {}
 };
 
-static future<> validate_role_exists(const service& ser, stdx::string_view role_name) {
+static future<> validate_role_exists(const service& ser, std::string_view role_name) {
     return ser.underlying_role_manager().exists(role_name).then([role_name](bool exists) {
         if (!exists) {
             throw nonexistant_role(role_name);
         }
     });
-}
-
-service_config service_config::from_db_config(const db::config& dc) {
-    const qualified_name qualified_authorizer_name(meta::AUTH_PACKAGE_NAME, dc.authorizer());
-    const qualified_name qualified_authenticator_name(meta::AUTH_PACKAGE_NAME, dc.authenticator());
-    const qualified_name qualified_role_manager_name(meta::AUTH_PACKAGE_NAME, dc.role_manager());
-
-    service_config c;
-    c.authorizer_java_name = qualified_authorizer_name;
-    c.authenticator_java_name = qualified_authenticator_name;
-    c.role_manager_java_name = qualified_role_manager_name;
-
-    return c;
 }
 
 service::service(
@@ -139,8 +132,7 @@ service::service(
     if ((_authenticator->qualified_java_name() == password_authenticator_name())
             && (_role_manager->qualified_java_name() != standard_role_manager_name())) {
         throw incompatible_module_combination(
-                sprint(
-                        "The %s authenticator must be loaded alongside the %s role-manager.",
+                format("The {} authenticator must be loaded alongside the {} role-manager.",
                         password_authenticator_name(),
                         standard_role_manager_name()));
     }
@@ -161,7 +153,7 @@ service::service(
 }
 
 future<> service::create_keyspace_if_missing() const {
-    auto& db = _qp.db().local();
+    auto& db = _qp.db();
 
     if (!db.has_keyspace(meta::AUTH_KS)) {
         std::map<sstring, sstring> opts{{"replication_factor", "1"}};
@@ -184,7 +176,9 @@ future<> service::start() {
     return once_among_shards([this] {
         return create_keyspace_if_missing();
     }).then([this] {
-        return when_all_succeed(_role_manager->start(), _authorizer->start(), _authenticator->start());
+        return _role_manager->start().then([this] {
+            return when_all_succeed(_authorizer->start(), _authenticator->start());
+        });
     }).then([this] {
         _permissions_cache = std::make_unique<permissions_cache>(_permissions_cache_config, *this, log);
     }).then([this] {
@@ -206,18 +200,16 @@ future<> service::stop() {
 }
 
 future<bool> service::has_existing_legacy_users() const {
-    if (!_qp.db().local().has_schema(meta::AUTH_KS, meta::USERS_CF)) {
+    if (!_qp.db().has_schema(meta::AUTH_KS, meta::USERS_CF)) {
         return make_ready_future<bool>(false);
     }
 
-    static const sstring default_user_query = sprint(
-            "SELECT * FROM %s.%s WHERE %s = ?",
+    static const sstring default_user_query = format("SELECT * FROM {}.{} WHERE {} = ?",
             meta::AUTH_KS,
             meta::USERS_CF,
             meta::user_name_col_name);
 
-    static const sstring all_users_query = sprint(
-            "SELECT * FROM %s.%s LIMIT 1",
+    static const sstring all_users_query = format("SELECT * FROM {}.{} LIMIT 1",
             meta::AUTH_KS,
             meta::USERS_CF);
 
@@ -260,7 +252,7 @@ service::get_uncached_permissions(const role_or_anonymous& maybe_role, const res
         return _authorizer->authorize(maybe_role, r);
     }
 
-    const stdx::string_view role_name = *maybe_role.name;
+    const std::string_view role_name = *maybe_role.name;
 
     return has_superuser(role_name).then([this, role_name, &r](bool superuser) {
         if (superuser) {
@@ -274,7 +266,7 @@ service::get_uncached_permissions(const role_or_anonymous& maybe_role, const res
         return do_with(permission_set(), [this, role_name, &r](auto& all_perms) {
             return get_roles(role_name).then([this, &r, &all_perms](role_set all_roles) {
                 return do_with(std::move(all_roles), [this, &r, &all_perms](const auto& all_roles) {
-                    return parallel_for_each(all_roles, [this, &r, &all_perms](stdx::string_view role_name) {
+                    return parallel_for_each(all_roles, [this, &r, &all_perms](std::string_view role_name) {
                         return _authorizer->authorize(role_name, r).then([&all_perms](permission_set perms) {
                             all_perms = permission_set::from_mask(all_perms.mask() | perms.mask());
                         });
@@ -291,7 +283,7 @@ future<permission_set> service::get_permissions(const role_or_anonymous& maybe_r
     return _permissions_cache->get(maybe_role, r);
 }
 
-future<bool> service::has_superuser(stdx::string_view role_name) const {
+future<bool> service::has_superuser(std::string_view role_name) const {
     return this->get_roles(std::move(role_name)).then([this](role_set roles) {
         return do_with(std::move(roles), [this](const role_set& roles) {
             return do_with(false, roles.begin(), [this, &roles](bool& any_super, auto& iter) {
@@ -309,7 +301,7 @@ future<bool> service::has_superuser(stdx::string_view role_name) const {
     });
 }
 
-future<role_set> service::get_roles(stdx::string_view role_name) const {
+future<role_set> service::get_roles(std::string_view role_name) const {
     //
     // We may wish to cache this information in the future (as Apache Cassandra does).
     //
@@ -320,7 +312,7 @@ future<role_set> service::get_roles(stdx::string_view role_name) const {
 future<bool> service::exists(const resource& r) const {
     switch (r.kind()) {
         case resource_kind::data: {
-            const auto& db = _qp.db().local();
+            const auto& db = _qp.db();
 
             data_resource_view v(r);
             const auto keyspace = v.keyspace();
@@ -415,7 +407,7 @@ static void validate_authentication_options_are_supported(
 
 future<> create_role(
         const service& ser,
-        stdx::string_view name,
+        std::string_view name,
         const role_config& config,
         const authentication_options& options) {
     return ser.underlying_role_manager().create(name, config).then([&ser, name, &options] {
@@ -439,7 +431,7 @@ future<> create_role(
 
 future<> alter_role(
         const service& ser,
-        stdx::string_view name,
+        std::string_view name,
         const role_config_update& config_update,
         const authentication_options& options) {
     return ser.underlying_role_manager().alter(name, config_update).then([&ser, name, &options] {
@@ -456,7 +448,7 @@ future<> alter_role(
     });
 }
 
-future<> drop_role(const service& ser, stdx::string_view name) {
+future<> drop_role(const service& ser, std::string_view name) {
     return do_with(make_role_resource(name), [&ser, name](const resource& r) {
         auto& a = ser.underlying_authorizer();
 
@@ -472,14 +464,14 @@ future<> drop_role(const service& ser, stdx::string_view name) {
     });
 }
 
-future<bool> has_role(const service& ser, stdx::string_view grantee, stdx::string_view name) {
+future<bool> has_role(const service& ser, std::string_view grantee, std::string_view name) {
     return when_all_succeed(
             validate_role_exists(ser, name),
             ser.get_roles(grantee)).then([name](role_set all_roles) {
         return make_ready_future<bool>(all_roles.count(sstring(name)) != 0);
     });
 }
-future<bool> has_role(const service& ser, const authenticated_user& u, stdx::string_view name) {
+future<bool> has_role(const service& ser, const authenticated_user& u, std::string_view name) {
     if (is_anonymous(u)) {
         return make_ready_future<bool>(false);
     }
@@ -489,7 +481,7 @@ future<bool> has_role(const service& ser, const authenticated_user& u, stdx::str
 
 future<> grant_permissions(
         const service& ser,
-        stdx::string_view role_name,
+        std::string_view role_name,
         permission_set perms,
         const resource& r) {
     return validate_role_exists(ser, role_name).then([&ser, role_name, perms, &r] {
@@ -497,7 +489,7 @@ future<> grant_permissions(
     });
 }
 
-future<> grant_applicable_permissions(const service& ser, stdx::string_view role_name, const resource& r) {
+future<> grant_applicable_permissions(const service& ser, std::string_view role_name, const resource& r) {
     return grant_permissions(ser, role_name, r.applicable_permissions(), r);
 }
 future<> grant_applicable_permissions(const service& ser, const authenticated_user& u, const resource& r) {
@@ -510,7 +502,7 @@ future<> grant_applicable_permissions(const service& ser, const authenticated_us
 
 future<> revoke_permissions(
         const service& ser,
-        stdx::string_view role_name,
+        std::string_view role_name,
         permission_set perms,
         const resource& r) {
     return validate_role_exists(ser, role_name).then([&ser, role_name, perms, &r] {
@@ -521,7 +513,7 @@ future<> revoke_permissions(
 future<std::vector<permission_details>> list_filtered_permissions(
         const service& ser,
         permission_set perms,
-        std::optional<stdx::string_view> role_name,
+        std::optional<std::string_view> role_name,
         const std::optional<std::pair<resource, recursive_permissions>>& resource_filter) {
     return ser.underlying_authorizer().list_all().then([&ser, perms, role_name, &resource_filter](
             std::vector<permission_details> all_details) {

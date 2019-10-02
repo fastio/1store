@@ -29,14 +29,15 @@
 #include <query-result-writer.hh>
 
 #include "tests/test_services.hh"
-#include "tests/test-utils.hh"
+#include <seastar/testing/test_case.hh>
+#include <seastar/testing/thread_test_case.hh>
 #include "tests/mutation_assertions.hh"
 #include "tests/result_set_assertions.hh"
 #include "tests/mutation_source_test.hh"
 
 #include "mutation_query.hh"
-#include "core/do_with.hh"
-#include "core/thread.hh"
+#include <seastar/core/do_with.hh>
+#include <seastar/core/thread.hh>
 #include "schema_builder.hh"
 #include "partition_slice_builder.hh"
 
@@ -414,7 +415,7 @@ SEASTAR_TEST_CASE(test_partitions_with_only_expired_tombstones_are_dropped) {
 
         auto new_key = [s] {
             static int ctr = 0;
-            return partition_key::from_singular(*s, data_value(to_bytes(sprint("key%d", ctr++))));
+            return partition_key::from_singular(*s, data_value(to_bytes(format("key{:d}", ctr++))));
         };
 
         auto make_ring = [&] (int n) {

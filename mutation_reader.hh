@@ -25,9 +25,9 @@
 
 #include "mutation.hh"
 #include "clustering_key_filter.hh"
-#include "core/future.hh"
-#include "core/future-util.hh"
-#include "core/do_with.hh"
+#include <seastar/core/future.hh>
+#include <seastar/core/future-util.hh>
+#include <seastar/core/do_with.hh>
 #include "tracing/trace_state.hh"
 #include "flat_mutation_reader.hh"
 #include "reader_concurrency_semaphore.hh"
@@ -403,23 +403,27 @@ flat_mutation_reader make_foreign_reader(schema_ptr schema,
 /// multishard reader itself.
 class reader_lifecycle_policy {
 public:
-    struct paused_or_stopped_reader {
-        // Null when the reader is paused.
-        foreign_ptr<std::unique_ptr<flat_mutation_reader>> remote_reader;
+    struct stopped_reader {
+        foreign_ptr<std::unique_ptr<reader_concurrency_semaphore::inactive_read_handle>> handle;
         circular_buffer<mutation_fragment> unconsumed_fragments;
-        // Only set for paused readers.
         bool has_pending_next_partition;
     };
 
+protected:
+    // Helpers for implementations, who might wish to provide the semaphore in
+    // other ways than through the official `semaphore()` override.
+    static reader_concurrency_semaphore::inactive_read_handle pause(reader_concurrency_semaphore& sem, flat_mutation_reader reader);
+    static flat_mutation_reader_opt try_resume(reader_concurrency_semaphore& sem, reader_concurrency_semaphore::inactive_read_handle irh);
+
 public:
-    /// Create an appropriate reader on the specified shard.
+    /// Create an appropriate reader on the shard it is called on.
     ///
     /// Will be called when the multishard reader visits a shard for the
-    /// first time. This method should also enter gates, take locks or
-    /// whatever is appropriate to make sure resources it is using on the
+    /// first time or when a reader has to be recreated after having been
+    /// evicted (while paused). This method should also enter gates, take locks
+    /// or whatever is appropriate to make sure resources it is using on the
     /// remote shard stay alive, during the lifetime of the created reader.
-    virtual future<foreign_ptr<std::unique_ptr<flat_mutation_reader>>> create_reader(
-            shard_id shard,
+    virtual flat_mutation_reader create_reader(
             schema_ptr schema,
             const dht::partition_range& range,
             const query::partition_slice& slice,
@@ -441,7 +445,19 @@ public:
     /// all the readers being cleaned up is up to the implementation.
     ///
     /// This method will be called from a destructor so it cannot throw.
-    virtual void destroy_reader(shard_id shard, future<paused_or_stopped_reader> reader) noexcept = 0;
+    virtual void destroy_reader(shard_id shard, future<stopped_reader> reader) noexcept = 0;
+
+    /// Get the relevant semaphore for this read.
+    ///
+    /// The semaphore is used to register paused readers with as inactive
+    /// readers. The semaphore then can evict these readers when resources are
+    /// in-demand.
+    /// The multishard reader will pause and resume readers via the `pause()`
+    /// and `try_resume()` helper methods. Clients can resume any paused readers
+    /// after the multishard reader is destroyed via the same helper methods.
+    ///
+    /// This method will be called on the shard where the relevant reader lives.
+    virtual reader_concurrency_semaphore& semaphore() = 0;
 
     /// Pause the reader.
     ///
@@ -449,13 +465,19 @@ public:
     /// otherwise inactive. This allows freeing up resources that are in-demand
     /// by evicting these paused readers. Most notably, this allows freeing up
     /// reader permits when the node is overloaded with reads.
-    virtual future<> pause(foreign_ptr<std::unique_ptr<flat_mutation_reader>> reader) = 0;
+    /// This is just a helper method, it uses the semaphore returned by
+    /// `semaphore()` for the actual pausing.
+    /// \see semaphore()
+    reader_concurrency_semaphore::inactive_read_handle pause(flat_mutation_reader reader);
 
     /// Try to resume the reader.
     ///
-    /// The pointer returned will be null when resuming fails. This can happen
-    /// if the reader was evicted while paused.
-    virtual future<foreign_ptr<std::unique_ptr<flat_mutation_reader>>> try_resume(shard_id shard) = 0;
+    /// The optional returned will be disengaged when resuming fails. This can
+    /// happen if the reader was evicted while paused.
+    /// This is just a helper method, it uses the semaphore returned by
+    /// `semaphore()` for the actual pausing.
+    /// \see semaphore()
+    flat_mutation_reader_opt try_resume(reader_concurrency_semaphore::inactive_read_handle irh);
 };
 
 /// Make a multishard_combining_reader.
@@ -485,3 +507,42 @@ flat_mutation_reader make_multishard_combining_reader(
         const io_priority_class& pc,
         tracing::trace_state_ptr trace_state = nullptr,
         mutation_reader::forwarding fwd_mr = mutation_reader::forwarding::no);
+
+class queue_reader;
+
+/// Calls to different methods cannot overlap!
+/// The handle can be used only while the reader is still alive. Once
+/// `push_end_of_stream()` is called, the reader and the handle can be destroyed
+/// in any order. The reader can be destroyed at any time.
+class queue_reader_handle {
+    friend std::pair<flat_mutation_reader, queue_reader_handle> make_queue_reader(schema_ptr s);
+    friend class queue_reader;
+
+private:
+    queue_reader* _reader = nullptr;
+    std::exception_ptr _ex;
+
+private:
+    explicit queue_reader_handle(queue_reader& reader);
+
+    void abandon();
+
+public:
+    queue_reader_handle(queue_reader_handle&& o);
+    ~queue_reader_handle();
+    queue_reader_handle& operator=(queue_reader_handle&& o);
+
+    future<> push(mutation_fragment mf);
+
+    /// Terminate the queue.
+    ///
+    /// The reader will be set to EOS. The handle cannot be used anymore.
+    void push_end_of_stream();
+
+    /// Aborts the queue.
+    ///
+    /// All future operations on the handle or the reader will raise `ep`.
+    void abort(std::exception_ptr ep);
+};
+
+std::pair<flat_mutation_reader, queue_reader_handle> make_queue_reader(schema_ptr s);

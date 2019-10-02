@@ -1,4 +1,5 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 #
 # Copyright 2018 ScyllaDB
 #
@@ -24,18 +25,26 @@ import sys
 import tempfile
 import tarfile
 from scylla_util import *
+import argparse
 
 VERSION='0.17.0'
-INSTALL_DIR='/usr/lib/scylla/Prometheus/node_exporter'
+INSTALL_DIR=scylladir()+'/Prometheus/node_exporter'
 
 if __name__ == '__main__':
-    if os.getuid() > 0:
+    parser = argparse.ArgumentParser(description='Download and install prometheus node_exporter')
+    parser.add_argument('-F', '--force', action='store_true', default=False, help='Force re-installation when node_exporter is already installed')
+    args = parser.parse_args()
+    force = args.force
+    if not is_nonroot() and os.getuid() > 0:
         print('Requires root permission.')
         sys.exit(1)
-
-    if os.path.exists('/usr/bin/node_exporter') or os.path.exists('/usr/bin/prometheus-node_exporter'):
-        print('node_exporter already installed')
-        sys.exit(1)
+    node_exporter_p = bindir_p() / 'node_exporter'
+    if node_exporter_p.exists() or (bindir_p() / 'prometheus-node_exporter').exists():
+        if force:
+            print('node_exporter already installed, reinstalling')
+        else:
+            print('node_exporter already installed, you can use `--force` to force reinstallation')
+            sys.exit(1)
 
     if is_gentoo_variant():
         run('emerge -uq app-metrics/node_exporter')
@@ -52,23 +61,14 @@ if __name__ == '__main__':
         with tarfile.open('/var/tmp/node_exporter-{version}.linux-amd64.tar.gz'.format(version=VERSION)) as tf:
             tf.extractall(INSTALL_DIR)
         os.remove('/var/tmp/node_exporter-{version}.linux-amd64.tar.gz'.format(version=VERSION))
-        os.symlink('{install_dir}/node_exporter-{version}.linux-amd64/node_exporter'.format(install_dir=INSTALL_DIR, version=VERSION), '/usr/bin/node_exporter')
+        if node_exporter_p.exists():
+            node_exporter_p.unlink()
+        os.symlink('{install_dir}/node_exporter-{version}.linux-amd64/node_exporter'.format(install_dir=INSTALL_DIR, version=VERSION), str(node_exporter_p))
         if is_systemd():
             node_exporter = systemd_unit('node-exporter.service')
             node_exporter.enable()
             node_exporter.start()
         else:
-            conf = '''
-# Run node_exporter
-
-start on startup
-
-script
-   /usr/bin/node_exporter
-end script
-'''[1:-1]
-            with open('/etc/init/node_exporter.conf', 'w') as f:
-                f.write(conf)
-            run('service node_exporter start')
+            run('service node-exporter start')
 
     print('node_exporter successfully installed')

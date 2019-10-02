@@ -1,6 +1,9 @@
-#!/usr/bin/python3
-
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
 # Copyright (C) 2017 ScyllaDB
+#
+
 #
 # This file is part of Scylla.
 #
@@ -19,7 +22,7 @@
 
 import os
 import re
-import scylla_util
+from scylla_util import *
 import subprocess
 import argparse
 import yaml
@@ -33,13 +36,13 @@ if __name__ == "__main__":
                         help='configure AWS AMI')
     args = parser.parse_args()
 
-    cpudata = scylla_util.scylla_cpuinfo()
-    if not scylla_util.is_developer_mode():
+    cpudata = scylla_cpuinfo()
+    if not is_developer_mode():
         if args.ami:
-            idata = scylla_util.aws_instance()
+            idata = aws_instance()
 
             disk_properties = {}
-            disk_properties["mountpoint"] = "/var/lib/scylla"
+            disk_properties["mountpoint"] = datadir()
             nr_disks = len(idata.ephemeral_disks())
             ## both i3 and i2 can run with 1 I/O Queue per shard
             if idata.instance() == "i3.large":
@@ -57,51 +60,82 @@ if __name__ == "__main__":
                 disk_properties["read_bandwidth"] = 2015342735 * nr_disks
                 disk_properties["write_iops"] = 181500 * nr_disks
                 disk_properties["write_bandwidth"] = 808775652 * nr_disks
+            elif idata.instance_class() == "i3en":
+                if idata.instance() == "i3en.large":
+                    disk_properties["read_iops"] = 43315
+                    disk_properties["read_bandwidth"] = 330301440
+                    disk_properties["write_iops"] = 33177
+                    disk_properties["write_bandwidth"] = 165675008
+                elif idata.instance() in ("i3.xlarge", "i3en.2xlarge"):
+                    disk_properties["read_iops"] = 84480 * nr_disks
+                    disk_properties["read_bandwidth"] = 666894336 * nr_disks
+                    disk_properties["write_iops"] = 66969 * nr_disks
+                    disk_properties["write_bandwidth"] = 333447168 * nr_disks
+                else:
+                    disk_properties["read_iops"] = 257024 * nr_disks
+                    disk_properties["read_bandwidth"] = 2043674624 * nr_disks
+                    disk_properties["write_iops"] = 174080 * nr_disks
+                    disk_properties["write_bandwidth"] = 1024458752 * nr_disks
             elif idata.instance_class() == "i2":
                 disk_properties["read_iops"] = 64000 * nr_disks
                 disk_properties["read_bandwidth"] = 507338935 * nr_disks
                 disk_properties["write_iops"] = 57100 * nr_disks
                 disk_properties["write_bandwidth"] = 483141731 * nr_disks
-            properties_file = open("/etc/scylla.d/io_properties.yaml", "w")
+            properties_file = open(etcdir() + "/scylla.d/io_properties.yaml", "w")
             yaml.dump({ "disks": [ disk_properties ] }, properties_file,  default_flow_style=False)
-            ioconf = open("/etc/scylla.d/io.conf", "w")
+            ioconf = open(etcdir() + "/scylla.d/io.conf", "w")
             ioconf.write("SEASTAR_IO=\"--io-properties-file={}\"\n".format(properties_file.name))
         else:
             if "SCYLLA_CONF" in os.environ:
                 conf_dir = os.environ["SCYLLA_CONF"]
             else:
-                conf_dir = "/etc/scylla"
-            cfg = yaml.load(open(os.path.join(conf_dir, "scylla.yaml")))
+                conf_dir = etcdir() + "/scylla"
+            cfg = yaml.safe_load(open(os.path.join(conf_dir, "scylla.yaml")))
+            if not "data_file_directories" in cfg:
+                logging.error("No data directories found. Please check the configuration and run scylla_io_setup again.\n")
+                sys.exit(1)
             data_dirs = cfg["data_file_directories"]
-            if len(data_dirs) > 1:
-                logging.warn("%d data directories found. scylla_io_setup currently lacks support for it, and only %s will be evaluated",
-                             len(data_dirs), data_dirs[0])
 
-            data_dir = data_dirs[0]
-            if os.path.exists(data_dir) == False:
-                logging.error("%s is not found. please check the configuration and run scylla_io_setup again.\n", data_dir)
-                sys.exit(1)
-            if os.path.isdir(data_dir) == False:
-                logging.error("%s is not a directory. please check the configuration and run scylla_io_setup again.\n", data_dir)
-                sys.exit(1)
+            default_path = datadir()
+            for t in [ "commitlog", "hints", "view_hints", "saved_caches" ]:
+                key = "%s_directory" % t
+                if key in cfg:
+                    data_dirs += [ cfg[key] ]
+                elif os.path.isdir(default_path + key):
+                    data_dirs += [ default_path + key ]
+
             iotune_args = []
+            for data_dir in data_dirs:
+                if os.path.exists(data_dir) == False:
+                    logging.error("%s was not found. Please check the configuration and run scylla_io_setup again.\n", data_dir)
+                    sys.exit(1)
+                if os.path.isdir(data_dir) == False:
+                    logging.error("%s is not a directory. Please check the configuration and run scylla_io_setup again.\n", data_dir)
+                    sys.exit(1)
+                st = os.statvfs(data_dir)
+                avail = st.f_bavail * st.f_frsize
+                rec = 10000000000
+                if avail < rec:
+                    logging.error("Filesystem at %s has only %d bytes available; that is less than the recommended 10 GB. Please free up space and run scylla_io_setup again.\n", data_dir, avail)
+                    sys.exit(1)
+                blocktune.tune_fs(data_dir, '2')
+                iotune_args += [ "--evaluation-directory", data_dir ]
+
             if cpudata.cpuset():
                 iotune_args += [ "--cpuset", ",".join(map(str, cpudata.cpuset())) ]
             elif cpudata.smp():
-                iotune_args += [ "--smp", cpudata.smp() ]
+                iotune_args += [ "--smp", str(cpudata.smp()) ]
 
-            blocktune.tune_fs(data_dir, '2')
             try:
-                subprocess.check_call(["iotune",
-                                       "--evaluation-directory", data_dir,
+                subprocess.check_call([bindir() + "/iotune",
                                        "--format", "envfile",
-                                       "--options-file", "/etc/scylla.d/io.conf",
-                                       "--properties-file", "/etc/scylla.d/io_properties.yaml"] + iotune_args)
+                                       "--options-file", etcdir() + "/scylla.d/io.conf",
+                                       "--properties-file", etcdir() + "/scylla.d/io_properties.yaml"] + iotune_args)
             except Exception:
                 logging.error("%s did not pass validation tests, it may not be on XFS and/or has limited disk space.\n"
                               "This is a non-supported setup, and performance is expected to be very bad.\n"
                               "For better performance, placing your data on XFS-formatted directories is required.\n"
                               "To override this error, enable developer mode as follow:\n"
-                              "sudo /usr/lib/scylla/scylla_dev_mode_setup --developer-mode 1", data_dir)
+                              "sudo %s/scylla_dev_mode_setup --developer-mode 1", data_dirs, scriptsdir())
                 sys.exit(1)
 

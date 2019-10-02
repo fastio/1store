@@ -26,26 +26,27 @@
 #include "constants.hh"
 #include <boost/iterator/transform_iterator.hpp>
 #include <boost/range/adaptor/reversed.hpp>
+#include "types/list.hh"
 
 namespace cql3 {
 
 shared_ptr<column_specification>
 lists::index_spec_of(shared_ptr<column_specification> column) {
     return make_shared<column_specification>(column->ks_name, column->cf_name,
-            ::make_shared<column_identifier>(sprint("idx(%s)", *column->name), true), int32_type);
+            ::make_shared<column_identifier>(format("idx({})", *column->name), true), int32_type);
 }
 
 shared_ptr<column_specification>
 lists::value_spec_of(shared_ptr<column_specification> column) {
     return make_shared<column_specification>(column->ks_name, column->cf_name,
-            ::make_shared<column_identifier>(sprint("value(%s)", *column->name), true),
+            ::make_shared<column_identifier>(format("value({})", *column->name), true),
                 dynamic_pointer_cast<const list_type_impl>(column->type)->get_elements_type());
 }
 
 shared_ptr<column_specification>
 lists::uuid_index_spec_of(shared_ptr<column_specification> column) {
     return make_shared<column_specification>(column->ks_name, column->cf_name,
-            ::make_shared<column_identifier>(sprint("uuid_idx(%s)", *column->name), true), uuid_type);
+            ::make_shared<column_identifier>(format("uuid_idx({})", *column->name), true), uuid_type);
 }
 
 
@@ -61,7 +62,7 @@ lists::literal::prepare(database& db, const sstring& keyspace, shared_ptr<column
         auto&& t = rt->prepare(db, keyspace, value_spec);
 
         if (t->contains_bind_marker()) {
-            throw exceptions::invalid_request_exception(sprint("Invalid list literal for %s: bind variables are not supported inside collection literals", *receiver->name));
+            throw exceptions::invalid_request_exception(format("Invalid list literal for {}: bind variables are not supported inside collection literals", *receiver->name));
         }
         if (dynamic_pointer_cast<non_terminal>(t)) {
             all_terminal = false;
@@ -79,14 +80,14 @@ lists::literal::prepare(database& db, const sstring& keyspace, shared_ptr<column
 void
 lists::literal::validate_assignable_to(database& db, const sstring keyspace, shared_ptr<column_specification> receiver) {
     if (!dynamic_pointer_cast<const list_type_impl>(receiver->type)) {
-        throw exceptions::invalid_request_exception(sprint("Invalid list literal for %s of type %s",
-                *receiver->name, *receiver->type->as_cql3_type()));
+        throw exceptions::invalid_request_exception(format("Invalid list literal for {} of type {}",
+                *receiver->name, receiver->type->as_cql3_type()));
     }
     auto&& value_spec = value_spec_of(receiver);
     for (auto rt : _elements) {
         if (!is_assignable(rt->test_assignment(db, keyspace, value_spec))) {
-            throw exceptions::invalid_request_exception(sprint("Invalid list literal for %s: value %s is not of type %s",
-                    *receiver->name, *rt, *value_spec->type->as_cql3_type()));
+            throw exceptions::invalid_request_exception(format("Invalid list literal for {}: value {} is not of type {}",
+                    *receiver->name, *rt, value_spec->type->as_cql3_type()));
         }
     }
 }
@@ -116,11 +117,17 @@ lists::literal::to_string() const {
 
 lists::value
 lists::value::from_serialized(const fragmented_temporary_buffer::view& val, list_type type, cql_serialization_format sf) {
+    return with_linearized(val, [&] (bytes_view v) {
+        return from_serialized(v, type, sf);
+    });
+}
+
+lists::value
+lists::value::from_serialized(bytes_view v, list_type type, cql_serialization_format sf) {
     try {
         // Collections have this small hack that validate cannot be called on a serialized object,
         // but compose does the validation (so we're fine).
         // FIXME: deserializeForNativeProtocol()?!
-      return with_linearized(val, [&] (bytes_view v) {
         auto l = value_cast<list_type_impl::native_type>(type->deserialize(v, sf));
         std::vector<bytes_opt> elements;
         elements.reserve(l.size());
@@ -129,7 +136,6 @@ lists::value::from_serialized(const fragmented_temporary_buffer::view& val, list
             elements.push_back(element.is_null() ? bytes_opt() : bytes_opt(type->get_elements_type()->decompose(element)));
         }
         return value(std::move(elements));
-      });
     } catch (marshal_exception& e) {
         throw exceptions::invalid_request_exception(e.what());
     }
@@ -219,7 +225,14 @@ lists::marker::bind(const query_options& options) {
     } else if (value.is_unset_value()) {
         return constants::UNSET_VALUE;
     } else {
-        return make_shared(value::from_serialized(*value, std::move(ltype), options.get_cql_serialization_format()));
+        try {
+            return with_linearized(*value, [&] (bytes_view v) {
+                ltype->validate(v, options.get_cql_serialization_format());
+                return make_shared(value::from_serialized(v, std::move(ltype), options.get_cql_serialization_format()));
+            });
+        } catch (marshal_exception& e) {
+            throw exceptions::invalid_request_exception(e.what());
+        }
     }
 }
 
@@ -298,7 +311,7 @@ lists::setter_by_index::execute(mutation& m, const clustering_key_prefix& prefix
     auto&& existing_list = *existing_list_opt;
     // we verified that index is an int32_type
     if (idx < 0 || size_t(idx) >= existing_list.size()) {
-        throw exceptions::invalid_request_exception(sprint("List index %d out of bound, list has size %d",
+        throw exceptions::invalid_request_exception(format("List index {:d} out of bound, list has size {:d}",
                 idx, existing_list.size()));
     }
 
@@ -494,7 +507,7 @@ lists::discarder_by_index::execute(mutation& m, const clustering_key_prefix& pre
     }
     auto&& existing_list = *existing_list_opt;
     if (idx < 0 || size_t(idx) >= existing_list.size()) {
-        throw exceptions::invalid_request_exception(sprint("List index %d out of bound, list has size %d", idx, existing_list.size()));
+        throw exceptions::invalid_request_exception(format("List index {:d} out of bound, list has size {:d}", idx, existing_list.size()));
     }
     collection_type_impl::mutation mut;
     mut.cells.emplace_back(existing_list[idx].key, params.make_dead_cell());

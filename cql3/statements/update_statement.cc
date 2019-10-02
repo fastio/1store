@@ -47,6 +47,9 @@
 
 #include "cql3/operation_impl.hh"
 #include "json.hh"
+#include "types/map.hh"
+#include "types/set.hh"
+#include "types/list.hh"
 
 namespace cql3 {
 
@@ -95,7 +98,7 @@ parse(const sstring& json_string, const std::vector<column_definition>& expected
         }
     }
     if (!prepared_map.empty()) {
-        throw exceptions::invalid_request_exception(sprint("JSON values map contains unrecognized column: %s", prepared_map.begin()->first));
+        throw exceptions::invalid_request_exception(format("JSON values map contains unrecognized column: {}", prepared_map.begin()->first));
     }
     return json_map;
 }
@@ -126,7 +129,7 @@ void update_statement::add_update_for_key(mutation& m, const query::clustering_r
     auto prefix = range.start() ? std::move(range.start()->value()) : clustering_key_prefix::make_empty();
     if (s->is_dense()) {
         if (prefix.is_empty(*s) || prefix.components().front().empty()) {
-            throw exceptions::invalid_request_exception(sprint("Missing PRIMARY KEY part %s", s->clustering_key_columns().begin()->name_as_text()));
+            throw exceptions::invalid_request_exception(format("Missing PRIMARY KEY part {}", s->clustering_key_columns().begin()->name_as_text()));
         }
         // An empty name for the value is what we use to recognize the case where there is not column
         // outside the PK, see CreateStatement.
@@ -139,7 +142,7 @@ void update_statement::add_update_for_key(mutation& m, const query::clustering_r
         } else {
             // dense means we don't have a row marker, so don't accept to set only the PK. See CASSANDRA-5648.
             if (_column_operations.empty()) {
-                throw exceptions::invalid_request_exception(sprint("Column %s is mandatory for this COMPACT STORAGE table", s->regular_begin()->name_as_text()));
+                throw exceptions::invalid_request_exception(format("Column {} is mandatory for this COMPACT STORAGE table", s->regular_begin()->name_as_text()));
             }
         }
     } else {
@@ -176,7 +179,7 @@ void update_statement::add_update_for_key(mutation& m, const query::clustering_r
 
 modification_statement::json_cache_opt insert_prepared_json_statement::maybe_prepare_json_cache(const query_options& options) {
     sstring json_string = with_linearized(_term->bind_and_get(options).data().value(), [&] (bytes_view value) {
-        return utf8_type->to_string(value.to_string());
+        return utf8_type->to_string(bytes(value));
     });
     return json_helpers::parse(std::move(json_string), s->all_columns(), options.get_cql_serialization_format());
 }
@@ -185,12 +188,12 @@ void
 insert_prepared_json_statement::execute_set_value(mutation& m, const clustering_key_prefix& prefix, const update_parameters& params, const column_definition& column, const bytes_opt& value) {
     if (!value) {
         if (column.type->is_collection()) {
-            auto& k = static_pointer_cast<const collection_type_impl>(column.type)->_kind;
-            if (&k == &collection_type_impl::kind::list) {
+            auto k = static_pointer_cast<const collection_type_impl>(column.type)->get_kind();
+            if (k == abstract_type::kind::list) {
                 lists::setter::execute(m, prefix, params, column, make_shared<lists::value>(lists::value(std::vector<bytes_opt>())));
-            } else if (&k == &collection_type_impl::kind::set) {
+            } else if (k == abstract_type::kind::set) {
                 sets::setter::execute(m, prefix, params, column, make_shared<sets::value>(sets::value(std::set<bytes, serialized_compare>(serialized_compare(empty_type)))));
-            } else if (&k == &collection_type_impl::kind::map) {
+            } else if (k == abstract_type::kind::map) {
                 maps::setter::execute(m, prefix, params, column, make_shared<maps::value>(maps::value(std::map<bytes, bytes, serialized_compare>(serialized_compare(empty_type)))));
             } else {
                 throw exceptions::invalid_request_exception("Incorrect value kind in JSON INSERT statement");
@@ -204,15 +207,15 @@ insert_prepared_json_statement::execute_set_value(mutation& m, const clustering_
         return;
     }
 
-    auto& k = static_pointer_cast<const collection_type_impl>(column.type)->_kind;
+    auto k = static_pointer_cast<const collection_type_impl>(column.type)->get_kind();
     cql_serialization_format sf = params._options.get_cql_serialization_format();
-    if (&k == &collection_type_impl::kind::list) {
+    if (k == abstract_type::kind::list) {
         auto list_terminal = make_shared<lists::value>(lists::value::from_serialized(fragmented_temporary_buffer::view(*value), dynamic_pointer_cast<const list_type_impl>(column.type), sf));
         lists::setter::execute(m, prefix, params, column, std::move(list_terminal));
-    } else if (&k == &collection_type_impl::kind::set) {
+    } else if (k == abstract_type::kind::set) {
         auto set_terminal = make_shared<sets::value>(sets::value::from_serialized(fragmented_temporary_buffer::view(*value), dynamic_pointer_cast<const set_type_impl>(column.type), sf));
         sets::setter::execute(m, prefix, params, column, std::move(set_terminal));
-    } else if (&k == &collection_type_impl::kind::map) {
+    } else if (k == abstract_type::kind::map) {
         auto map_terminal = make_shared<maps::value>(maps::value::from_serialized(fragmented_temporary_buffer::view(*value), dynamic_pointer_cast<const map_type_impl>(column.type), sf));
         maps::setter::execute(m, prefix, params, column, std::move(map_terminal));
     } else {
@@ -225,11 +228,11 @@ insert_prepared_json_statement::build_partition_keys(const query_options& option
     dht::partition_range_vector ranges;
     std::vector<bytes_opt> exploded;
     for (const auto& def : s->partition_key_columns()) {
-        auto json_value = json_cache->at(def.name_as_text());
-        if (!json_value) {
-            throw exceptions::invalid_request_exception(sprint("Missing mandatory PRIMARY KEY part %s", def.name_as_text()));
+        auto json_value = json_cache->find(def.name_as_text());
+        if (json_value == json_cache->end() || !json_value->second) {
+            throw exceptions::invalid_request_exception(format("Missing mandatory PRIMARY KEY part {}", def.name_as_text()));
         }
-        exploded.emplace_back(*json_value);
+        exploded.emplace_back(json_value->second);
     }
     auto pkey = partition_key::from_optional_exploded(*s, std::move(exploded));
     auto k = query::range<query::ring_position>::make_singular(dht::global_partitioner().decorate_key(*s, std::move(pkey)));
@@ -241,11 +244,11 @@ query::clustering_row_ranges insert_prepared_json_statement::create_clustering_r
     query::clustering_row_ranges ranges;
     std::vector<bytes_opt> exploded;
     for (const auto& def : s->clustering_key_columns()) {
-        auto json_value = json_cache->at(def.name_as_text());
-        if (!json_value) {
-            throw exceptions::invalid_request_exception(sprint("Missing mandatory PRIMARY KEY part %s", def.name_as_text()));
+        auto json_value = json_cache->find(def.name_as_text());
+        if (json_value == json_cache->end() || !json_value->second) {
+            throw exceptions::invalid_request_exception(format("Missing mandatory PRIMARY KEY part {}", def.name_as_text()));
         }
-        exploded.emplace_back(*json_value);
+        exploded.emplace_back(json_value->second);
     }
     auto k = query::range<clustering_key_prefix>::make_singular(clustering_key_prefix::from_optional_exploded(*s, std::move(exploded)));
     ranges.emplace_back(query::clustering_range(std::move(k)));
@@ -255,7 +258,7 @@ query::clustering_row_ranges insert_prepared_json_statement::create_clustering_r
 void insert_prepared_json_statement::execute_operations_for_key(mutation& m, const clustering_key_prefix& prefix, const update_parameters& params, const json_cache_opt& json_cache) {
     for (const auto& def : s->regular_columns()) {
         if (def.type->is_counter()) {
-            throw exceptions::invalid_request_exception(sprint("Cannot set the value of counter column %s in JSON", def.name_as_text()));
+            throw exceptions::invalid_request_exception(format("Cannot set the value of counter column {} in JSON", def.name_as_text()));
         }
 
         auto it = json_cache->find(def.name_as_text());
@@ -305,10 +308,10 @@ insert_statement::prepare_internal(database& db, schema_ptr schema,
         auto id = col->prepare_column_identifier(schema);
         auto def = get_column_definition(schema, *id);
         if (!def) {
-            throw exceptions::invalid_request_exception(sprint("Unknown identifier %s", *id));
+            throw exceptions::invalid_request_exception(format("Unknown identifier {}", *id));
         }
         if (column_ids.count(id->name())) {
-            throw exceptions::invalid_request_exception(sprint("Multiple definitions found for column %s", *id));
+            throw exceptions::invalid_request_exception(format("Multiple definitions found for column {}", *id));
         }
         column_ids.emplace(id->name());
 
@@ -369,14 +372,14 @@ update_statement::prepare_internal(database& db, schema_ptr schema,
         auto id = entry.first->prepare_column_identifier(schema);
         auto def = get_column_definition(schema, *id);
         if (!def) {
-            throw exceptions::invalid_request_exception(sprint("Unknown identifier %s", *entry.first));
+            throw exceptions::invalid_request_exception(format("Unknown identifier {}", *entry.first));
         }
 
         auto operation = entry.second->prepare(db, keyspace(), *def);
         operation->collect_marker_specification(bound_names);
 
         if (def->is_primary_key()) {
-            throw exceptions::invalid_request_exception(sprint("PRIMARY KEY part %s found in SET part", *entry.first));
+            throw exceptions::invalid_request_exception(format("PRIMARY KEY part {} found in SET part", *entry.first));
         }
         stmt->add_operation(std::move(operation));
     }

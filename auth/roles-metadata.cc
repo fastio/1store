@@ -36,7 +36,7 @@ namespace meta {
 
 namespace roles_table {
 
-stdx::string_view creation_query() {
+std::string_view creation_query() {
     static const sstring instance = sprint(
             "CREATE TABLE %s ("
             "  %s text PRIMARY KEY,"
@@ -51,7 +51,7 @@ stdx::string_view creation_query() {
     return instance;
 }
 
-stdx::string_view qualified_name() noexcept {
+std::string_view qualified_name() noexcept {
     static const sstring instance = AUTH_KS + "." + sstring(name);
     return instance;
 }
@@ -63,8 +63,7 @@ stdx::string_view qualified_name() noexcept {
 future<bool> default_role_row_satisfies(
         cql3::query_processor& qp,
         std::function<bool(const cql3::untyped_result_set_row&)> p) {
-    static const sstring query = sprint(
-            "SELECT * FROM %s WHERE %s = ?",
+    static const sstring query = format("SELECT * FROM {} WHERE {} = ?",
             meta::roles_table::qualified_name(),
             meta::roles_table::role_col_name);
 
@@ -98,7 +97,7 @@ future<bool> default_role_row_satisfies(
 future<bool> any_nondefault_role_row_satisfies(
         cql3::query_processor& qp,
         std::function<bool(const cql3::untyped_result_set_row&)> p) {
-    static const sstring query = sprint("SELECT * FROM %s", meta::roles_table::qualified_name());
+    static const sstring query = format("SELECT * FROM {}", meta::roles_table::qualified_name());
 
     return do_with(std::move(p), [&qp](const auto& p) {
         return qp.process(

@@ -22,24 +22,24 @@
 #include "big_decimal.hh"
 #include <cassert>
 #include "marshal_exception.hh"
-#include "core/print.hh"
+#include <seastar/core/print.hh>
 
 #include <regex>
 
 big_decimal::big_decimal(sstring_view text)
 {
-    std::string str = text.to_string();
+    std::string str(text);
     static const std::regex big_decimal_re("^([\\+\\-]?)([0-9]*)(\\.([0-9]*))?([eE]([\\+\\-]?[0-9]+))?");
     std::smatch sm;
     if (!std::regex_match(str, sm, big_decimal_re)) {
-        throw marshal_exception(sprint("big_decimal contains invalid characters: '%s'", str));
+        throw marshal_exception(format("big_decimal contains invalid characters: '{}'", str));
     }
     bool negative = sm[1] == "-";
     auto integer = sm[2].str();
     auto fraction = sm[4].str();
     auto exponent = sm[6].str();
     if (integer.empty() && fraction.empty()) {
-        throw marshal_exception(sprint("big_decimal - both integer and fraction are empty: '%s'", str));
+        throw marshal_exception(format("big_decimal - both integer and fraction are empty: '{}'", str));
     }
     integer.append(fraction);
     unsigned i;
@@ -110,6 +110,32 @@ big_decimal& big_decimal::operator+=(const big_decimal& other)
         _scale = max_scale;
     }
     return *this;
+}
+
+big_decimal& big_decimal::operator-=(const big_decimal& other) {
+    if (_scale == other._scale) {
+        _unscaled_value -= other._unscaled_value;
+    } else {
+        boost::multiprecision::cpp_int rescale(10);
+        auto max_scale = std::max(_scale, other._scale);
+        boost::multiprecision::cpp_int u = _unscaled_value * boost::multiprecision::pow(rescale,  max_scale - _scale);
+        boost::multiprecision::cpp_int v = other._unscaled_value * boost::multiprecision::pow(rescale, max_scale - other._scale);
+        _unscaled_value = u - v;
+        _scale = max_scale;
+    }
+    return *this;
+}
+
+big_decimal big_decimal::operator+(const big_decimal& other) const {
+    big_decimal ret(*this);
+    ret += other;
+    return ret;
+}
+
+big_decimal big_decimal::operator-(const big_decimal& other) const {
+    big_decimal ret(*this);
+    ret -= other;
+    return ret;
 }
 
 big_decimal big_decimal::div(const ::uint64_t y, const rounding_mode mode) const

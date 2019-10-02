@@ -29,7 +29,7 @@
 #include "range_tombstone_list.hh"
 #include "range_tombstone_list_assertions.hh"
 
-static schema_ptr s = schema_builder("ks", "cf")
+static thread_local schema_ptr s = schema_builder("ks", "cf")
         .with_column("pk", int32_type, column_kind::partition_key)
         .with_column("ck1", int32_type, column_kind::clustering_key)
         .with_column("ck2", int32_type, column_kind::clustering_key)
@@ -48,7 +48,7 @@ static clustering_key_prefix key(std::vector<int32_t> components) {
 
 static void assert_rt(const range_tombstone& expected, const range_tombstone& actual) {
     if (!expected.equal(*s, actual)) {
-        BOOST_FAIL(sprint("Expected %s but got %s", expected, actual));
+        BOOST_FAIL(format("Expected {} but got {}", expected, actual));
     }
 }
 
@@ -163,7 +163,7 @@ BOOST_AUTO_TEST_CASE(test_adjacent_ranges_with_differing_timestamps_are_not_merg
 
 static bool no_overlap(const range_tombstone_list& l) {
     bound_view::tri_compare cmp(*s);
-    stdx::optional<range_tombstone> prev;
+    std::optional<range_tombstone> prev;
     for (const range_tombstone& r : l) {
         if (prev) {
             if (cmp(prev->end_bound(), r.start_bound()) >= 0) {

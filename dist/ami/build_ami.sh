@@ -1,5 +1,8 @@
 #!/bin/bash -e
 
+./SCYLLA-VERSION-GEN
+PRODUCT=$(cat build/SCYLLA-PRODUCT-FILE)
+
 if [ ! -e dist/ami/build_ami.sh ]; then
     echo "run build_ami.sh in top of scylla dir"
     exit 1
@@ -14,6 +17,7 @@ print_usage() {
     exit 1
 }
 LOCALRPM=0
+REPO_FOR_INSTALL=
 while [ $# -gt 0 ]; do
     case "$1" in
         "--localrpm")
@@ -21,10 +25,12 @@ while [ $# -gt 0 ]; do
             shift 1
             ;;
         "--repo")
+            REPO_FOR_INSTALL=$2
             INSTALL_ARGS="$INSTALL_ARGS --repo $2"
             shift 2
             ;;
         "--repo-for-install")
+            REPO_FOR_INSTALL=$2
             INSTALL_ARGS="$INSTALL_ARGS --repo-for-install $2"
             shift 2
             ;;
@@ -61,46 +67,110 @@ REGION=us-east-1
 SSH_USERNAME=centos
 
 if [ $LOCALRPM -eq 1 ]; then
-    sudo rm -rf build/*
     REPO=`./scripts/scylla_current_repo --target centos`
     INSTALL_ARGS="$INSTALL_ARGS --localrpm --repo $REPO"
     if [ ! -f /usr/bin/git ]; then
         pkg_install git
     fi
 
-    if [ ! -f dist/ami/files/scylla.x86_64.rpm ] || [ ! -f dist/ami/files/scylla-kernel-conf.x86_64.rpm ] || [ ! -f dist/ami/files/scylla-conf.x86_64.rpm ] || [ ! -f dist/ami/files/scylla-server.x86_64.rpm ] || [ ! -f dist/ami/files/scylla-debuginfo.x86_64.rpm ]; then
-        dist/redhat/build_rpm.sh --dist --target epel-7-x86_64
-        cp build/rpms/scylla-`cat build/SCYLLA-VERSION-FILE`-`cat build/SCYLLA-RELEASE-FILE`.*.x86_64.rpm dist/ami/files/scylla.x86_64.rpm
-        cp build/rpms/scylla-kernel-conf-`cat build/SCYLLA-VERSION-FILE`-`cat build/SCYLLA-RELEASE-FILE`.*.x86_64.rpm dist/ami/files/scylla-kernel-conf.x86_64.rpm
-        cp build/rpms/scylla-conf-`cat build/SCYLLA-VERSION-FILE`-`cat build/SCYLLA-RELEASE-FILE`.*.x86_64.rpm dist/ami/files/scylla-conf.x86_64.rpm
-        cp build/rpms/scylla-server-`cat build/SCYLLA-VERSION-FILE`-`cat build/SCYLLA-RELEASE-FILE`.*.x86_64.rpm dist/ami/files/scylla-server.x86_64.rpm
-        cp build/rpms/scylla-debuginfo-`cat build/SCYLLA-VERSION-FILE`-`cat build/SCYLLA-RELEASE-FILE`.*.x86_64.rpm dist/ami/files/scylla-debuginfo.x86_64.rpm
+    if [ ! -f dist/ami/files/$PRODUCT.x86_64.rpm ] || [ ! -f dist/ami/files/$PRODUCT-kernel-conf.x86_64.rpm ] || [ ! -f dist/ami/files/$PRODUCT-conf.x86_64.rpm ] || [ ! -f dist/ami/files/$PRODUCT-server.x86_64.rpm ] || [ ! -f dist/ami/files/$PRODUCT-debuginfo.x86_64.rpm ]; then
+        reloc/build_reloc.sh
+        reloc/build_rpm.sh --dist --target centos7
+        cp build/redhat/RPMS/x86_64/$PRODUCT-`cat build/SCYLLA-VERSION-FILE`-`cat build/SCYLLA-RELEASE-FILE`.*.x86_64.rpm dist/ami/files/$PRODUCT.x86_64.rpm
+        cp build/redhat/RPMS/x86_64/$PRODUCT-kernel-conf-`cat build/SCYLLA-VERSION-FILE`-`cat build/SCYLLA-RELEASE-FILE`.*.x86_64.rpm dist/ami/files/$PRODUCT-kernel-conf.x86_64.rpm
+        cp build/redhat/RPMS/x86_64/$PRODUCT-conf-`cat build/SCYLLA-VERSION-FILE`-`cat build/SCYLLA-RELEASE-FILE`.*.x86_64.rpm dist/ami/files/$PRODUCT-conf.x86_64.rpm
+        cp build/redhat/RPMS/x86_64/$PRODUCT-server-`cat build/SCYLLA-VERSION-FILE`-`cat build/SCYLLA-RELEASE-FILE`.*.x86_64.rpm dist/ami/files/$PRODUCT-server.x86_64.rpm
+        cp build/redhat/RPMS/x86_64/$PRODUCT-debuginfo-`cat build/SCYLLA-VERSION-FILE`-`cat build/SCYLLA-RELEASE-FILE`.*.x86_64.rpm dist/ami/files/$PRODUCT-debuginfo.x86_64.rpm
     fi
-    if [ ! -f dist/ami/files/scylla-jmx.noarch.rpm ]; then
+    branch_arg=${BRANCH:-$(git rev-parse --abbrev-ref HEAD || echo -n)}
+    if [ -n "$branch_arg" ]; then
+        if [[ "$b" == '(HEAD detached at'* ]]; then
+            branch_arg=$(echo "$branch_arg" | sed -e 's/^(HEAD detached at.*\///' -e 's/)$//')
+        fi
+        branch_arg="-b $branch_arg"
+    fi
+    if [ ! -f dist/ami/files/$PRODUCT-jmx.noarch.rpm ]; then
         cd build
-        git clone -b branch-3.0 --depth 1 https://github.com/scylladb/scylla-jmx.git
-        cd scylla-jmx
-        dist/redhat/build_rpm.sh --target epel-7-x86_64
+        if [ ! -f $PRODUCT-jmx/reloc/build_reloc.sh ]; then
+            # directory exists but file is missing, so need to try clone again
+            rm -rf $PRODUCT-jmx
+            git clone $branch_arg --depth 1 git@github.com:scylladb/$PRODUCT-jmx.git
+        else
+            git pull
+        fi
+        cd $PRODUCT-jmx
+        reloc/build_reloc.sh
+        reloc/build_rpm.sh
         cd ../..
-        cp build/scylla-jmx/build/rpms/scylla-jmx-`cat build/scylla-jmx/build/SCYLLA-VERSION-FILE`-`cat build/scylla-jmx/build/SCYLLA-RELEASE-FILE`.*.noarch.rpm dist/ami/files/scylla-jmx.noarch.rpm
+        cp build/$PRODUCT-jmx/build/redhat/RPMS/noarch/$PRODUCT-jmx-`cat build/$PRODUCT-jmx/build/SCYLLA-VERSION-FILE`-`cat build/$PRODUCT-jmx/build/SCYLLA-RELEASE-FILE`.noarch.rpm dist/ami/files/$PRODUCT-jmx.noarch.rpm
     fi
-    if [ ! -f dist/ami/files/scylla-tools.noarch.rpm ] || [ ! -f dist/ami/files/scylla-tools-core.noarch.rpm ]; then
+    if [ ! -f dist/ami/files/$PRODUCT-tools.noarch.rpm ] || [ ! -f dist/ami/files/$PRODUCT-tools-core.noarch.rpm ]; then
         cd build
-        git clone --depth 1 https://github.com/scylladb/scylla-tools-java.git
-        cd scylla-tools-java
-        dist/redhat/build_rpm.sh --target epel-7-x86_64
+        if [ ! -f $PRODUCT-tools-java/reloc/build_reloc.sh ]; then
+            # directory exists but file is missing, so need to try clone again
+            rm -rf $PRODUCT-tools-java
+            git clone $branch_arg --depth 1 git@github.com:scylladb/$PRODUCT-tools-java.git
+        else
+            git pull
+        fi
+        cd $PRODUCT-tools-java
+        reloc/build_reloc.sh
+        reloc/build_rpm.sh
         cd ../..
-        cp build/scylla-tools-java/build/rpms/scylla-tools-`cat build/scylla-tools-java/build/SCYLLA-VERSION-FILE`-`cat build/scylla-tools-java/build/SCYLLA-RELEASE-FILE`.*.noarch.rpm dist/ami/files/scylla-tools.noarch.rpm
-        cp build/scylla-tools-java/build/rpms/scylla-tools-core-`cat build/scylla-tools-java/build/SCYLLA-VERSION-FILE`-`cat build/scylla-tools-java/build/SCYLLA-RELEASE-FILE`.*.noarch.rpm dist/ami/files/scylla-tools-core.noarch.rpm
+        cp build/$PRODUCT-tools-java/build/redhat/RPMS/noarch/$PRODUCT-tools-`cat build/$PRODUCT-tools-java/build/SCYLLA-VERSION-FILE`-`cat build/$PRODUCT-tools-java/build/SCYLLA-RELEASE-FILE`.noarch.rpm dist/ami/files/$PRODUCT-tools.noarch.rpm
+        cp build/$PRODUCT-tools-java/build/redhat/RPMS/noarch/$PRODUCT-tools-core-`cat build/$PRODUCT-tools-java/build/SCYLLA-VERSION-FILE`-`cat build/$PRODUCT-tools-java/build/SCYLLA-RELEASE-FILE`.noarch.rpm dist/ami/files/$PRODUCT-tools-core.noarch.rpm
     fi
-    if [ ! -f dist/ami/files/scylla-ami.noarch.rpm ]; then
+    if [ ! -f dist/ami/files/$PRODUCT-ami.noarch.rpm ]; then
         cd build
-        git clone --depth 1 https://github.com/scylladb/scylla-ami.git
-        cd scylla-ami
-        dist/redhat/build_rpm.sh --target epel-7-x86_64
+        if [ ! -f $PRODUCT-ami/dist/redhat/build_rpm.sh ]; then
+            # directory exists but file is missing, so need to try clone again
+            rm -rf $PRODUCT-ami
+            git clone $branch_arg --depth 1 git@github.com:scylladb/$PRODUCT-ami.git
+        else
+            git pull
+        fi
+        cd $PRODUCT-ami
+        dist/redhat/build_rpm.sh --target centos7
         cd ../..
-        cp build/scylla-ami/build/rpms/scylla-ami-`cat build/scylla-ami/build/SCYLLA-VERSION-FILE`-`cat build/scylla-ami/build/SCYLLA-RELEASE-FILE`.*.noarch.rpm dist/ami/files/scylla-ami.noarch.rpm
+        cp build/$PRODUCT-ami/build/RPMS/noarch/$PRODUCT-ami-`cat build/$PRODUCT-ami/build/SCYLLA-VERSION-FILE`-`cat build/$PRODUCT-ami/build/SCYLLA-RELEASE-FILE`.*.noarch.rpm dist/ami/files/$PRODUCT-ami.noarch.rpm
     fi
+    if [ ! -f dist/ami/files/$PRODUCT-python3.x86_64.rpm ]; then
+        reloc/python3/build_reloc.sh
+        reloc/python3/build_rpm.sh
+        cp build/redhat/RPMS/x86_64/$PRODUCT-python3*.x86_64.rpm dist/ami/files/$PRODUCT-python3.x86_64.rpm
+    fi
+
+    SCYLLA_VERSION=$(rpm -q --qf %{VERSION}-%{RELEASE} dist/ami/files/$PRODUCT.x86_64.rpm || true)
+    SCYLLA_AMI_VERSION=$(rpm -q --qf %{VERSION}-%{RELEASE} dist/ami/files/$PRODUCT-ami.noarch.rpm || true)
+    SCYLLA_JMX_VERSION=$(rpm -q --qf %{VERSION}-%{RELEASE} dist/ami/files/$PRODUCT-jmx.noarch.rpm || true)
+    SCYLLA_TOOLS_VERSION=$(rpm -q --qf %{VERSION}-%{RELEASE} dist/ami/files/$PRODUCT-tools.noarch.rpm || true)
+    SCYLLA_PYTHON3_VERSION=$(rpm -q --qf %{VERSION}-%{RELEASE} dist/ami/files/$PRODUCT-python3.x86_64.rpm || true)
+else
+    if [ -z "$REPO_FOR_INSTALL" ]; then
+        print_usage
+        exit 1
+    fi
+    if [ ! -f /usr/bin/yumdownloader ]; then
+        if is_redhat_variant; then
+            sudo yum install /usr/bin/yumdownloader
+        else
+            sudo apt-get install yum-utils
+        fi
+    fi
+    if [ ! -f /usr/bin/curl ]; then
+        pkg_install curl
+    fi
+    TMPREPO=$(mktemp -u -p /etc/yum.repos.d/ --suffix .repo)
+    sudo curl -o $TMPREPO $REPO_FOR_INSTALL
+    rm -rf build/ami_packages
+    mkdir -p build/ami_packages
+    yumdownloader --downloaddir build/ami_packages/ $PRODUCT $PRODUCT-kernel-conf $PRODUCT-conf $PRODUCT-server $PRODUCT-debuginfo $PRODUCT-ami $PRODUCT-jmx $PRODUCT-tools-core $PRODUCT-tools $PRODUCT-python3
+    sudo rm -f $TMPREPO
+    SCYLLA_VERSION=$(rpm -q --qf %{VERSION}-%{RELEASE} build/ami_packages/$PRODUCT-[0-9]*.rpm || true)
+    SCYLLA_AMI_VERSION=$(rpm -q --qf %{VERSION}-%{RELEASE} build/ami_packages/$PRODUCT-ami-*.rpm || true)
+    SCYLLA_JMX_VERSION=$(rpm -q --qf %{VERSION}-%{RELEASE} build/ami_packages/$PRODUCT-jmx-*.rpm || true)
+    SCYLLA_TOOLS_VERSION=$(rpm -q --qf %{VERSION}-%{RELEASE} build/ami_packages/$PRODUCT-tools-[0-9]*.rpm || true)
+    SCYLLA_PYTHON3_VERSION=$(rpm -q --qf %{VERSION}-%{RELEASE} build/ami_packages/$PRODUCT-python3-*.rpm || true)
 fi
 
 cd dist/ami
@@ -112,17 +182,17 @@ if [ ! -f variables.json ]; then
 fi
 
 if [ ! -d packer ]; then
-    EXPECTED="ed697ace39f8bb7bf6ccd78e21b2075f53c0f23cdfb5276c380a053a7b906853  packer_1.0.0_linux_amd64.zip"
-    wget -nv https://releases.hashicorp.com/packer/1.0.0/packer_1.0.0_linux_amd64.zip -O packer_1.0.0_linux_amd64.zip
-    CSUM=`sha256sum packer_1.0.0_linux_amd64.zip`
+    EXPECTED="5e51808299135fee7a2e664b09f401b5712b5ef18bd4bad5bc50f4dcd8b149a1  packer_1.3.2_linux_amd64.zip"
+    wget -nv https://releases.hashicorp.com/packer/1.3.2/packer_1.3.2_linux_amd64.zip -O packer_1.3.2_linux_amd64.zip
+    CSUM=`sha256sum packer_1.3.2_linux_amd64.zip`
     if [ "$CSUM" != "$EXPECTED" ]; then
         echo "Error while downloading packer. Checksum doesn't match! ($CSUM)"
         exit 1
     fi
     mkdir packer
     cd packer
-    unzip -x ../packer_1.0.0_linux_amd64.zip
+    unzip -x ../packer_1.3.2_linux_amd64.zip
     cd -
 fi
 
-packer/packer build -var-file=variables.json -var install_args="$INSTALL_ARGS" -var region="$REGION" -var source_ami="$AMI" -var ssh_username="$SSH_USERNAME" scylla.json
+env PACKER_LOG=1 PACKER_LOG_PATH=../../build/ami.log packer/packer build -var-file=variables.json -var install_args="$INSTALL_ARGS" -var region="$REGION" -var source_ami="$AMI" -var ssh_username="$SSH_USERNAME" -var scylla_version="$SCYLLA_VERSION" -var scylla_ami_version="$SCYLLA_AMI_VERSION" -var scylla_jmx_version="$SCYLLA_JMX_VERSION" -var scylla_tools_version="$SCYLLA_TOOLS_VERSION" -var scylla_python3_version="$SCYLLA_PYTHON3_VERSION" scylla.json

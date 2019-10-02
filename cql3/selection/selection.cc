@@ -39,12 +39,14 @@
  * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <boost/range/adaptor/transformed.hpp>
-#include <boost/range/adaptor/filtered.hpp>
+#include <boost/range/adaptors.hpp>
+#include <boost/range/algorithm/equal.hpp>
+#include <boost/range/algorithm/transform.hpp>
 
 #include "cql3/selection/selection.hh"
 #include "cql3/selection/selector_factories.hh"
 #include "cql3/result_set.hh"
+#include "cql3/restrictions/multi_column_restriction.hh"
 
 namespace cql3 {
 
@@ -113,9 +115,11 @@ protected:
     class simple_selectors : public selectors {
     private:
         std::vector<bytes_opt> _current;
+        bool _first = true; ///< Whether the next row we receive is the first in its group.
     public:
         virtual void reset() override {
             _current.clear();
+            _first = true;
         }
 
         virtual std::vector<bytes_opt> get_output_row(cql_serialization_format sf) override {
@@ -123,7 +127,13 @@ protected:
         }
 
         virtual void add_input_row(cql_serialization_format sf, result_set_builder& rs) override {
-            _current = std::move(*rs.current);
+            // GROUP BY calls add_input_row() repeatedly without reset() in between, and it expects
+            // the output to be the first value encountered:
+            // https://cassandra.apache.org/doc/latest/cql/dml.html#grouping-results
+            if (_first) {
+                _current = std::move(*rs.current);
+                _first = false;
+            }
         }
 
         virtual bool is_aggregate() {
@@ -146,11 +156,7 @@ public:
             factories->contains_write_time_selector_factory(),
             factories->contains_ttl_selector_factory())
         , _factories(std::move(factories))
-    {
-        if (_factories->does_aggregation() && !_factories->contains_only_aggregate_functions()) {
-            throw exceptions::invalid_request_exception("the select clause must either contains only aggregates or none");
-        }
-    }
+    { }
 
     virtual bool uses_function(const sstring& ks_name, const sstring& function_name) const override {
         return _factories->uses_function(ks_name, function_name);
@@ -163,7 +169,7 @@ public:
     }
 
     virtual bool is_aggregate() const override {
-        return _factories->contains_only_aggregate_functions();
+        return _factories->does_aggregation();
     }
 protected:
     class selectors_with_processing : public selectors {
@@ -183,7 +189,7 @@ protected:
         }
 
         virtual bool is_aggregate() override {
-            return _factories->contains_only_aggregate_functions();
+            return _factories->does_aggregation();
         }
 
         virtual std::vector<bytes_opt> get_output_row(cql_serialization_format sf) override {
@@ -215,7 +221,7 @@ protected:
     auto cds = boost::copy_range<std::vector<const column_definition*>>(
         columns |
         boost::adaptors::filtered([](const column_definition& c) {
-            return !c.is_view_virtual();
+            return !c.is_hidden_from_cql();
         }) |
         boost::adaptors::transformed([](const column_definition& c) {
             return &c;
@@ -262,9 +268,13 @@ selection::collect_metadata(schema_ptr schema, const std::vector<::shared_ptr<ra
     return r;
 }
 
-result_set_builder::result_set_builder(const selection& s, gc_clock::time_point now, cql_serialization_format sf)
+result_set_builder::result_set_builder(const selection& s, gc_clock::time_point now, cql_serialization_format sf,
+                                       std::vector<size_t> group_by_cell_indices)
     : _result_set(std::make_unique<result_set>(::make_shared<metadata>(*(s.get_result_metadata()))))
     , _selectors(s.new_selectors())
+    , _group_by_cell_indices(std::move(group_by_cell_indices))
+    , _last_group(_group_by_cell_indices.size())
+    , _group_began(false)
     , _now(now)
     , _cql_serialization_format(sf)
 {
@@ -310,29 +320,56 @@ void result_set_builder::add_collection(const column_definition& def, bytes_view
     // timestamps, ttls meaningless for collections
 }
 
-void result_set_builder::new_row() {
-    if (current) {
-        _selectors->add_input_row(_cql_serialization_format, *this);
-        if (!_selectors->is_aggregate()) {
-            _result_set->add_row(_selectors->get_output_row(_cql_serialization_format));
-            _selectors->reset();
-        }
+void result_set_builder::update_last_group() {
+    _group_began = true;
+    boost::transform(_group_by_cell_indices, _last_group.begin(), [this](size_t i) { return (*current)[i]; });
+}
+
+bool result_set_builder::last_group_ended() const {
+    if (!_group_began) {
+        return false;
+    }
+    if (_last_group.empty()) {
+        return !_selectors->is_aggregate();
+    }
+    using boost::adaptors::reversed;
+    using boost::adaptors::transformed;
+    return !boost::equal(
+            _last_group | reversed,
+            _group_by_cell_indices | reversed | transformed([this](size_t i) { return (*current)[i]; }));
+}
+
+void result_set_builder::flush_selectors() {
+    _result_set->add_row(_selectors->get_output_row(_cql_serialization_format));
+    _selectors->reset();
+}
+
+void result_set_builder::process_current_row(bool more_rows_coming) {
+    if (!current) {
+        return;
+    }
+    if (last_group_ended()) {
+        flush_selectors();
+    }
+    update_last_group();
+    _selectors->add_input_row(_cql_serialization_format, *this);
+    if (more_rows_coming) {
         current->clear();
     } else {
-        // FIXME: we use optional<> here because we don't have an end_row() signal
-        //        instead, !current means that new_row has never been called, so this
-        //        call to new_row() does not end a previous row.
-        current.emplace();
+        flush_selectors();
     }
 }
 
+void result_set_builder::new_row() {
+    process_current_row(/*more_rows_coming=*/true);
+    // FIXME: we use optional<> here because we don't have an end_row() signal
+    //        instead, !current means that new_row has never been called, so this
+    //        call to new_row() does not end a previous row.
+    current.emplace();
+}
+
 std::unique_ptr<result_set> result_set_builder::build() {
-    if (current) {
-        _selectors->add_input_row(_cql_serialization_format, *this);
-        _result_set->add_row(_selectors->get_output_row(_cql_serialization_format));
-        _selectors->reset();
-        current = std::experimental::nullopt;
-    }
+    process_current_row(/*more_rows_coming=*/false);
     if (_result_set->empty() && _selectors->is_aggregate()) {
         _result_set->add_row(_selectors->get_output_row(_cql_serialization_format));
     }
@@ -346,54 +383,59 @@ bool result_set_builder::restrictions_filter::do_filter(const selection& selecti
                                                          const query::result_row_view& row) const {
     static logging::logger rlogger("restrictions_filter");
 
-    if (_current_partition_key_does_not_match || _current_static_row_does_not_match || _remaining == 0) {
+    if (_current_partition_key_does_not_match || _current_static_row_does_not_match || _remaining == 0 || _per_partition_remaining == 0) {
         return false;
+    }
+
+    auto clustering_columns_restrictions = _restrictions->get_clustering_columns_restrictions();
+    if (clustering_columns_restrictions->is_multi_column()) {
+        auto multi_column_restriction = dynamic_pointer_cast<cql3::restrictions::multi_column_restriction>(clustering_columns_restrictions);
+        clustering_key_prefix ckey = clustering_key_prefix::from_exploded(clustering_key);
+        return multi_column_restriction->is_satisfied_by(*_schema, ckey, _options);
     }
 
     auto static_row_iterator = static_row.iterator();
     auto row_iterator = row.iterator();
     auto non_pk_restrictions_map = _restrictions->get_non_pk_restriction();
-    auto partition_key_restrictions_map = _restrictions->get_single_column_partition_key_restrictions();
-    auto clustering_key_restrictions_map = _restrictions->get_single_column_clustering_key_restrictions();
     for (auto&& cdef : selection.get_columns()) {
         switch (cdef->kind) {
         case column_kind::static_column:
             // fallthrough
         case column_kind::regular_column: {
             auto& cell_iterator = (cdef->kind == column_kind::static_column) ? static_row_iterator : row_iterator;
+            std::optional<query::result_bytes_view> result_view_opt;
             if (cdef->type->is_multi_cell()) {
-                cell_iterator.next_collection_cell();
-                auto restr_it = non_pk_restrictions_map.find(cdef);
-                if (restr_it == non_pk_restrictions_map.end()) {
-                    continue;
-                }
-                throw exceptions::invalid_request_exception("Collection filtering is not supported yet");
+                result_view_opt = cell_iterator.next_collection_cell();
             } else {
                 auto cell = cell_iterator.next_atomic_cell();
-
-                auto restr_it = non_pk_restrictions_map.find(cdef);
-                if (restr_it == non_pk_restrictions_map.end()) {
-                    continue;
-                }
-                restrictions::single_column_restriction& restriction = *restr_it->second;
-
-                bool regular_restriction_matches;
                 if (cell) {
-                    regular_restriction_matches = cell->value().with_linearized([&restriction, this](bytes_view data) {
-                        return restriction.is_satisfied_by(data, _options);
-                    });
-                } else {
-                    regular_restriction_matches = restriction.is_satisfied_by(bytes(), _options);
+                    result_view_opt = cell->value();
                 }
-                if (!regular_restriction_matches) {
-                    _current_static_row_does_not_match = (cdef->kind == column_kind::static_column);
-                    return false;
-                }
-
+            }
+            auto restr_it = non_pk_restrictions_map.find(cdef);
+            if (restr_it == non_pk_restrictions_map.end()) {
+                continue;
+            }
+            restrictions::single_column_restriction& restriction = *restr_it->second;
+            bool regular_restriction_matches;
+            if (result_view_opt) {
+                regular_restriction_matches = result_view_opt->with_linearized([&restriction, this](bytes_view data) {
+                    return restriction.is_satisfied_by(data, _options);
+                });
+            } else {
+                regular_restriction_matches = restriction.is_satisfied_by(bytes(), _options);
+            }
+            if (!regular_restriction_matches) {
+                _current_static_row_does_not_match = (cdef->kind == column_kind::static_column);
+                return false;
             }
             }
             break;
         case column_kind::partition_key: {
+            if (_skip_pk_restrictions) {
+                continue;
+            }
+            auto partition_key_restrictions_map = _restrictions->get_single_column_partition_key_restrictions();
             auto restr_it = partition_key_restrictions_map.find(cdef);
             if (restr_it == partition_key_restrictions_map.end()) {
                 continue;
@@ -408,6 +450,10 @@ bool result_set_builder::restrictions_filter::do_filter(const selection& selecti
             }
             break;
         case column_kind::clustering_key: {
+            if (_skip_ck_restrictions) {
+                continue;
+            }
+            auto clustering_key_restrictions_map = _restrictions->get_single_column_clustering_key_restrictions();
             auto restr_it = clustering_key_restrictions_map.find(cdef);
             if (restr_it == clustering_key_restrictions_map.end()) {
                 continue;
@@ -435,10 +481,30 @@ bool result_set_builder::restrictions_filter::operator()(const selection& select
     const bool accepted = do_filter(selection, partition_key, clustering_key, static_row, row);
     if (!accepted) {
         ++_rows_dropped;
-    } else if (_remaining > 0) {
-        --_remaining;
+    } else {
+        if (_remaining > 0) {
+            --_remaining;
+        }
+        if (_per_partition_remaining > 0) {
+            --_per_partition_remaining;
+        }
     }
     return accepted;
+}
+
+void result_set_builder::restrictions_filter::reset(const partition_key* key) {
+    _current_partition_key_does_not_match = false;
+    _current_static_row_does_not_match = false;
+    _rows_dropped = 0;
+    _per_partition_remaining = _per_partition_limit;
+    if (_is_first_partition_on_page && _per_partition_limit < std::numeric_limits<typeof(_per_partition_limit)>::max()) {
+        // If any rows related to this key were also present in the previous query,
+        // we need to take it into account as well.
+        if (key && _last_pkey && _last_pkey->equal(*_schema, *key)) {
+            _per_partition_remaining -= _rows_fetched_for_last_partition;
+        }
+        _is_first_partition_on_page = false;
+    }
 }
 
 api::timestamp_type result_set_builder::timestamp_of(size_t idx) {

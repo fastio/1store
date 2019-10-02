@@ -24,11 +24,12 @@
 #include <functional>
 #include <vector>
 
-#include <core/distributed.hh>
-#include "core/sstring.hh"
-#include "core/future.hh"
-#include "core/shared_ptr.hh"
+#include <seastar/core/distributed.hh>
+#include <seastar/core/sstring.hh>
+#include <seastar/core/future.hh>
+#include <seastar/core/shared_ptr.hh>
 
+#include "../db/view/view_update_generator.hh"
 #include "transport/messages/result_message_base.hh"
 #include "cql3/query_options_fwd.hh"
 #include "cql3/values.hh"
@@ -36,7 +37,6 @@
 #include "bytes.hh"
 #include "schema.hh"
 #include "tests/eventually.hh"
-#include "db/view/view_update_from_staging_generator.hh"
 
 class database;
 
@@ -54,12 +54,23 @@ namespace cql3 {
 
 class not_prepared_exception : public std::runtime_error {
 public:
-    not_prepared_exception(const cql3::prepared_cache_key_type& id) : std::runtime_error(sprint("Not prepared: %s", id)) {}
+    not_prepared_exception(const cql3::prepared_cache_key_type& id) : std::runtime_error(format("Not prepared: {}", id)) {}
 };
 
 namespace db {
     class config;
 }
+
+class cql_test_config {
+public:
+    seastar::shared_ptr<db::config> db_config;
+    std::set<sstring> disabled_features;
+
+    cql_test_config();
+    cql_test_config(const cql_test_config&);
+    cql_test_config(shared_ptr<db::config>);
+    ~cql_test_config();
+};
 
 class cql_test_env {
 public:
@@ -70,10 +81,16 @@ public:
     virtual future<::shared_ptr<cql_transport::messages::result_message>> execute_cql(
         const sstring& text, std::unique_ptr<cql3::query_options> qo) = 0;
 
+    /// Processes queries (which must be modifying queries) as a batch.
+    virtual future<::shared_ptr<cql_transport::messages::result_message>> execute_batch(
+        const std::vector<sstring_view>& queries, std::unique_ptr<cql3::query_options> qo) = 0;
+
     virtual future<cql3::prepared_cache_key_type> prepare(sstring query) = 0;
 
     virtual future<::shared_ptr<cql_transport::messages::result_message>> execute_prepared(
-        cql3::prepared_cache_key_type id, std::vector<cql3::raw_value> values) = 0;
+        cql3::prepared_cache_key_type id,
+        std::vector<cql3::raw_value> values,
+        db::consistency_level cl = db::consistency_level::ONE) = 0;
 
     virtual future<> create_table(std::function<schema(const sstring&)> schema_maker) = 0;
 
@@ -104,10 +121,8 @@ public:
 
     virtual db::view::view_builder& local_view_builder() = 0;
 
-    virtual db::view::view_update_from_staging_generator& local_view_update_generator() = 0;
+    virtual db::view::view_update_generator& local_view_update_generator() = 0;
 };
 
-future<> do_with_cql_env(std::function<future<>(cql_test_env&)> func);
-future<> do_with_cql_env(std::function<future<>(cql_test_env&)> func, const db::config&);
-future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func);
-future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func, const db::config&);
+future<> do_with_cql_env(std::function<future<>(cql_test_env&)> func, cql_test_config = {});
+future<> do_with_cql_env_thread(std::function<void(cql_test_env&)> func, cql_test_config = {});

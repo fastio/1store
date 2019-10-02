@@ -41,6 +41,7 @@
 
 #pragma once
 
+#include "function.hh"
 #include "types.hh"
 #include "cql3/cql3_type.hh"
 #include <vector>
@@ -73,7 +74,7 @@ public:
         return _arg_types;
     }
 
-    virtual data_type return_type() const {
+    virtual const data_type& return_type() const {
         return _return_type;
     }
 
@@ -92,7 +93,7 @@ public:
     }
 
     virtual sstring column_name(const std::vector<sstring>& column_names) override {
-        return sprint("%s(%s)", _name, join(", ", column_names));
+        return format("{}({})", _name, join(", ", column_names));
     }
 
     virtual void print(std::ostream& os) const override;
@@ -106,9 +107,9 @@ abstract_function::print(std::ostream& os) const {
         if (i > 0) {
             os << ", ";
         }
-        os << _arg_types[i]->as_cql3_type()->to_string();
+        os << _arg_types[i]->as_cql3_type().to_string();
     }
-    os << ") -> " << _return_type->as_cql3_type()->to_string();
+    os << ") -> " << _return_type->as_cql3_type().to_string();
 }
 
 }

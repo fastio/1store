@@ -95,7 +95,7 @@ shared_ptr<compressor> compressor::create(const std::map<sstring, sstring>& opti
         return create(i->second, [&options](const sstring& key) -> opt_string {
             auto i = options.find(key);
             if (i == options.end()) {
-                return std::experimental::nullopt;
+                return std::nullopt;
             }
             return { i->second };
         });
@@ -108,7 +108,8 @@ thread_local const shared_ptr<compressor> compressor::snappy = make_shared<snapp
 thread_local const shared_ptr<compressor> compressor::deflate = make_shared<deflate_processor>(namespace_prefix + "DeflateCompressor");
 
 const sstring compression_parameters::SSTABLE_COMPRESSION = "sstable_compression";
-const sstring compression_parameters::CHUNK_LENGTH_KB = "chunk_length_kb";
+const sstring compression_parameters::CHUNK_LENGTH_KB = "chunk_length_in_kb";
+const sstring compression_parameters::CHUNK_LENGTH_KB_ERR = "chunk_length_kb";
 const sstring compression_parameters::CRC_CHECK_CHANCE = "crc_check_chance";
 
 compression_parameters::compression_parameters()
@@ -127,12 +128,14 @@ compression_parameters::compression_parameters(const std::map<sstring, sstring>&
 
     validate_options(options);
 
-    auto chunk_length = options.find(CHUNK_LENGTH_KB);
+    auto chunk_length = options.find(CHUNK_LENGTH_KB) != options.end() ?
+        options.find(CHUNK_LENGTH_KB) : options.find(CHUNK_LENGTH_KB_ERR);
+
     if (chunk_length != options.end()) {
         try {
             _chunk_length = std::stoi(chunk_length->second) * 1024;
         } catch (const std::exception& e) {
-            throw exceptions::syntax_exception(sstring("Invalid integer value ") + chunk_length->second + " for " + CHUNK_LENGTH_KB);
+            throw exceptions::syntax_exception(sstring("Invalid integer value ") + chunk_length->second + " for " + chunk_length->first);
         }
     }
     auto crc_chance = options.find(CRC_CHECK_CHANCE);
@@ -149,11 +152,13 @@ void compression_parameters::validate() {
     if (_chunk_length) {
         auto chunk_length = _chunk_length.value();
         if (chunk_length <= 0) {
-            throw exceptions::configuration_exception(sstring("Invalid negative or null ") + CHUNK_LENGTH_KB);
+            throw exceptions::configuration_exception(
+                fmt::sprintf("Invalid negative or null for %s/%s", CHUNK_LENGTH_KB, CHUNK_LENGTH_KB_ERR));
         }
         // _chunk_length must be a power of two
         if (chunk_length & (chunk_length - 1)) {
-            throw exceptions::configuration_exception(sstring(CHUNK_LENGTH_KB) + " must be a power of 2.");
+            throw exceptions::configuration_exception(
+                fmt::sprintf("%s/%s must be a power of 2.", CHUNK_LENGTH_KB, CHUNK_LENGTH_KB_ERR));
         }
     }
     if (_crc_check_chance && (_crc_check_chance.value() < 0.0 || _crc_check_chance.value() > 1.0)) {
@@ -192,6 +197,7 @@ void compression_parameters::validate_options(const std::map<sstring, sstring>& 
     static std::set<sstring> keywords({
         sstring(SSTABLE_COMPRESSION),
         sstring(CHUNK_LENGTH_KB),
+        sstring(CHUNK_LENGTH_KB_ERR),
         sstring(CRC_CHECK_CHANCE),
     });
     std::set<sstring> ckw;
@@ -200,7 +206,7 @@ void compression_parameters::validate_options(const std::map<sstring, sstring>& 
     }
     for (auto&& opt : options) {
         if (!keywords.count(opt.first) && !ckw.count(opt.first)) {
-            throw exceptions::configuration_exception(sprint("Unknown compression option '%s'.", opt.first));
+            throw exceptions::configuration_exception(format("Unknown compression option '{}'.", opt.first));
         }
     }
 }
@@ -241,7 +247,7 @@ size_t lz4_processor::compress(const char* input, size_t input_len,
     output[1] = (input_len >> 8) & 0xFF;
     output[2] = (input_len >> 16) & 0xFF;
     output[3] = (input_len >> 24) & 0xFF;
-#ifdef SEASTAR_HAVE_LZ4_COMPRESS_DEFAULT
+#ifdef HAVE_LZ4_COMPRESS_DEFAULT
     auto ret = LZ4_compress_default(input, output + 4, input_len, LZ4_compressBound(input_len));
 #else
     auto ret = LZ4_compress(input, output + 4, input_len);

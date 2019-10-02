@@ -21,26 +21,93 @@
 
 bash seastar/install-dependencies.sh
 
-if [ "$ID" = "ubuntu" ]; then
-    echo "Adding /etc/apt/sources.list.d/scylla.list"
+debian_base_packages=(
+    python3-pyparsing
+    libsnappy-dev
+    libjsoncpp-dev
+    rapidjson-dev
+    scylla-libthrift010-dev
+    scylla-antlr35-c++-dev
+    thrift-compiler
+    git
+    pigz
+)
 
-    if wget "http://downloads.scylladb.com/deb/3rdparty/${VERSION_CODENAME}/scylla-3rdparty.list" -q -O /dev/null; then
-        echo "deb  [trusted=yes arch=amd64] http://downloads.scylladb.com/deb/3rdparty/${VERSION_CODENAME} ${VERSION_CODENAME} scylladb/multiverse" > /etc/apt/sources.list.d/scylla-3rdparty.list
+fedora_packages=(
+    yaml-cpp-devel
+    thrift-devel
+    antlr3-tool
+    antlr3-C++-devel
+    jsoncpp-devel
+    rapidjson-devel
+    snappy-devel
+    systemd-devel
+    git
+    python
+    sudo
+    java-1.8.0-openjdk-headless
+    ant
+    ant-junit
+    maven
+    pystache
+    patchelf
+    python3
+    python3-PyYAML
+    python3-pyudev
+    python3-setuptools
+    python3-urwid
+    python3-pyparsing
+    python3-requests
+    python3-pyudev
+    python3-setuptools
+    python3-magic
+    python3-psutil
+    python3-cassandra-driver
+    dnf-utils
+    pigz
+    net-tools
+    tar
+    gzip
+    gawk
+    util-linux
+    ethtool
+    hwloc
+)
+
+centos_packages=(
+    yaml-cpp-devel
+    thrift-devel
+    scylla-antlr35-tool
+    scylla-antlr35-C++-devel
+    jsoncpp-devel snappy-devel
+    rapidjson-devel
+    scylla-boost163-static
+    scylla-python34-pyparsing20
+    systemd-devel
+    pigz
+)
+
+if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ]; then
+    apt-get -y install "${debian_base_packages[@]}"
+    if [ "$VERSION_ID" = "8" ]; then
+        apt-get -y install libsystemd-dev scylla-antlr35 libyaml-cpp-dev
+    elif [ "$VERSION_ID" = "14.04" ]; then
+        apt-get -y install scylla-antlr35 libyaml-cpp-dev
+    elif [ "$VERSION_ID" = "9" ]; then
+        apt-get -y install libsystemd-dev antlr3 scylla-libyaml-cpp05-dev
     else
-        echo "Packages are not available for your Ubuntu release yet, using the Xenial (16.04) list instead"
-
-        echo "deb  [trusted=yes arch=amd64] http://downloads.scylladb.com/deb/3rdparty/xenial xenial scylladb/multiverse" > /etc/apt/sources.list.d/scylla-3rdparty.list
+        apt-get -y install libsystemd-dev antlr3 libyaml-cpp-dev
     fi
-
-    apt -y update
-
-    apt -y install libsystemd-dev python3-pyparsing libsnappy-dev libjsoncpp-dev libyaml-cpp-dev libthrift-dev antlr3-c++-dev antlr3 thrift-compiler
-elif [ "$ID" = "debian" ]; then
-    apt -y install libyaml-cpp-dev libjsoncpp-dev libsnappy-dev
-    echo antlr3 and thrift still missing - waiting for ppa
+    echo -e "Configure example:\n\t./configure.py --enable-dpdk --mode=release --static-thrift --static-boost --static-yaml-cpp --compiler=/opt/scylladb/bin/g++-7 --cflags=\"-I/opt/scylladb/include -L/opt/scylladb/lib/x86-linux-gnu/\" --ldflags=\"-Wl,-rpath=/opt/scylladb/lib\""
 elif [ "$ID" = "fedora" ]; then
-    yum install -y yaml-cpp-devel thrift-devel antlr3-tool antlr3-C++-devel jsoncpp-devel snappy-devel
+    if rpm -q --quiet yum-utils; then
+        echo
+        echo "This script will install dnf-utils package, witch will conflict with currently installed package: yum-utils"
+        echo "Please remove the package and try to run this script again."
+        exit 1
+    fi
+    yum install -y "${fedora_packages[@]}"
 elif [ "$ID" = "centos" ]; then
-    yum install -y yaml-cpp-devel thrift-devel scylla-antlr35-tool scylla-antlr35-C++-devel jsoncpp-devel snappy-devel scylla-boost163-static scylla-python34-pyparsing20 systemd-devel
+    yum install -y "${centos_packages[@]}"
     echo -e "Configure example:\n\tpython3.4 ./configure.py --enable-dpdk --mode=release --static-boost --compiler=/opt/scylladb/bin/g++-7.3 --python python3.4 --ldflag=-Wl,-rpath=/opt/scylladb/lib64 --cflags=-I/opt/scylladb/include --with-antlr3=/opt/scylladb/bin/antlr3"
 fi

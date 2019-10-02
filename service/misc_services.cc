@@ -44,6 +44,7 @@
 #include "gms/application_state.hh"
 #include "service/storage_service.hh"
 #include "service/view_update_backlog_broker.hh"
+#include "database.hh"
 
 #include <cstdlib>
 
@@ -92,7 +93,7 @@ cache_hitrate_calculator::cache_hitrate_calculator(seastar::sharded<database>& d
 {}
 
 void cache_hitrate_calculator::recalculate_timer() {
-    recalculate_hitrates().then_wrapped([p = shared_from_this()] (future<lowres_clock::duration> f) {
+    _done = recalculate_hitrates().then_wrapped([p = shared_from_this()] (future<lowres_clock::duration> f) {
         lowres_clock::duration d;
         if (f.failed()) {
             d = std::chrono::milliseconds(2000);
@@ -105,28 +106,19 @@ void cache_hitrate_calculator::recalculate_timer() {
 
 void cache_hitrate_calculator::run_on(size_t master, lowres_clock::duration d) {
     if (!_stopped) {
-        _me.invoke_on(master, [d] (cache_hitrate_calculator& local) {
+        // Do it in the background.
+        (void)_me.invoke_on(master, [d] (cache_hitrate_calculator& local) {
             local._timer.arm(d);
         }).handle_exception_type([] (seastar::no_sharded_instance_exception&) { /* ignore */ });
     }
 }
 
 future<lowres_clock::duration> cache_hitrate_calculator::recalculate_hitrates() {
-    struct stat {
-        float h = 0;
-        float m = 0;
-        stat& operator+=(stat& o) {
-            h += o.h;
-            m += o.m;
-            return *this;
-        }
-    };
-
-    static auto non_system_filter = [&] (const std::pair<utils::UUID, lw_shared_ptr<column_family>>& cf) {
+    auto non_system_filter = [&] (const std::pair<utils::UUID, lw_shared_ptr<column_family>>& cf) {
         return _db.local().find_keyspace(cf.second->schema()->ks_name()).get_replication_strategy().get_type() != locator::replication_strategy_type::local;
     };
 
-    auto cf_to_cache_hit_stats = [] (database& db) {
+    auto cf_to_cache_hit_stats = [non_system_filter] (database& db) {
         return boost::copy_range<std::unordered_map<utils::UUID, stat>>(db.get_column_families() | boost::adaptors::filtered(non_system_filter) |
                 boost::adaptors::transformed([]  (const std::pair<utils::UUID, lw_shared_ptr<column_family>>& cf) {
             auto& stats = cf.second->get_row_cache().stats();
@@ -141,17 +133,20 @@ future<lowres_clock::duration> cache_hitrate_calculator::recalculate_hitrates() 
         return std::move(a);
     };
 
-    return _db.map_reduce0(cf_to_cache_hit_stats, std::unordered_map<utils::UUID, stat>(), sum_stats_per_cf).then([this] (std::unordered_map<utils::UUID, stat> rates) mutable {
+    return _db.map_reduce0(cf_to_cache_hit_stats, std::unordered_map<utils::UUID, stat>(), sum_stats_per_cf).then([this, non_system_filter] (std::unordered_map<utils::UUID, stat> rates) mutable {
         _diff = 0;
+        _gstate.reserve(_slen); // assume length did not change from previous iteration
+        _slen = 0;
+        _rates = std::move(rates);
         // set calculated rates on all shards
-        return _db.invoke_on_all([this, rates = std::move(rates), cpuid = engine().cpu_id()] (database& db) {
-            sstring gstate;
-            for (auto& cf : db.get_column_families() | boost::adaptors::filtered(non_system_filter)) {
-                auto it = rates.find(cf.first);
-                if (it == rates.end()) { // a table may be added before map/reduce compltes and this code runs
-                    continue;
+        return _db.invoke_on_all([this, cpuid = engine().cpu_id(), non_system_filter] (database& db) {
+            return do_for_each(_rates, [this, cpuid, &db] (auto&& r) mutable {
+                auto it = db.get_column_families().find(r.first);
+                if (it == db.get_column_families().end()) { // a table may be added before map/reduce completes and this code runs
+                    return;
                 }
-                stat s = it->second;
+                auto& cf = *it;
+                stat& s = r.second;
                 float rate = 0;
                 if (s.h) {
                     rate = s.h / (s.h + s.m);
@@ -159,31 +154,33 @@ future<lowres_clock::duration> cache_hitrate_calculator::recalculate_hitrates() 
                 if (engine().cpu_id() == cpuid) {
                     // calculate max difference between old rate and new one for all cfs
                     _diff = std::max(_diff, std::abs(float(cf.second->get_global_cache_hit_rate()) - rate));
-                    gstate += sprint("%s.%s:%f;", cf.second->schema()->ks_name(), cf.second->schema()->cf_name(), rate);
+                    _gstate += format("{}.{}:{:0.6f};", cf.second->schema()->ks_name(), cf.second->schema()->cf_name(), rate);
                 }
                 cf.second->set_global_cache_hit_rate(cache_temperature(rate));
-            }
-            if (gstate.size()) {
-                auto& g = gms::get_local_gossiper();
-                auto& ss = get_local_storage_service();
-                return g.add_local_application_state(gms::application_state::CACHE_HITRATES, ss.value_factory.cache_hitrates(std::move(gstate)));
-            }
-            return make_ready_future<>();
+            });
         });
     }).then([this] {
-        // if max difference during this round is big schedule next recalculate earlier
-        if (_diff < 0.01) {
-            return std::chrono::milliseconds(2000);
-        } else {
-            return std::chrono::milliseconds(500);
-        }
+        auto& g = gms::get_local_gossiper();
+        auto& ss = get_local_storage_service();
+        _slen = _gstate.size();
+        return g.add_local_application_state(gms::application_state::CACHE_HITRATES, ss.value_factory.cache_hitrates(_gstate)).then([this] {
+            // if max difference during this round is big schedule next recalculate earlier
+            if (_diff < 0.01) {
+                return std::chrono::milliseconds(2000);
+            } else {
+                return std::chrono::milliseconds(500);
+            }
+        });
+    }).finally([this] {
+        _gstate = std::string(); // free memory, do not trust clear() to do that for string
+        _rates.clear();
     });
 }
 
 future<> cache_hitrate_calculator::stop() {
     _timer.cancel();
     _stopped = true;
-    return make_ready_future<>();
+    return std::move(_done);
 }
 
 
@@ -204,7 +201,8 @@ future<> view_update_backlog_broker::start() {
                 auto backlog = _sp.local().get_view_update_backlog();
                 auto now = api::timestamp_type(std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::system_clock::now().time_since_epoch()).count());
-                _gossiper.add_local_application_state(
+                //FIXME: discarded future.
+                (void)_gossiper.add_local_application_state(
                         gms::application_state::VIEW_BACKLOG,
                         gms::versioned_value(seastar::format("{}:{}:{}", backlog.current, backlog.max, now)));
                 sleep_abortable(gms::gossiper::INTERVAL, _as).get();

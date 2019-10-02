@@ -28,15 +28,15 @@
 #include "database.hh"
 #include "schema.hh"
 #include "schema_builder.hh"
-#include "core/thread.hh"
+#include <seastar/core/thread.hh>
 #include "sstables/index_reader.hh"
 #include "tests/test_services.hh"
+#include "tests/sstable_test_env.hh"
 #include "tmpdir.hh"
-#include <boost/filesystem.hpp>
 #include <array>
 
-static auto la = sstables::sstable::version_types::la;
-static auto big = sstables::sstable::format_types::big;
+constexpr auto la = sstables::sstable::version_types::la;
+constexpr auto big = sstables::sstable::format_types::big;
 
 class column_family_test {
     lw_shared_ptr<column_family> _cf;
@@ -45,6 +45,11 @@ public:
 
     void add_sstable(sstables::shared_sstable sstable) {
         _cf->_sstables->insert(std::move(sstable));
+    }
+
+    void rebuild_sstable_list(const std::vector<sstables::shared_sstable>& new_sstables,
+            const std::vector<sstables::shared_sstable>& sstables_to_remove) {
+        _cf->rebuild_sstable_list(new_sstables, sstables_to_remove);
     }
 
     static void update_sstables_known_generation(column_family& cf, unsigned generation) {
@@ -166,11 +171,6 @@ public:
         });
     }
 
-    static sstable_ptr make_test_sstable(size_t buffer_size, schema_ptr schema, sstring dir, unsigned long generation, sstable::version_types v,
-            sstable::format_types f, gc_clock::time_point now = gc_clock::now()) {
-        return sstables::make_sstable(std::move(schema), dir, generation, v, f, now, default_io_error_handler_gen(), buffer_size);
-    }
-
     // Used to create synthetic sstables for testing leveled compaction strategy.
     void set_values_for_leveled_strategy(uint64_t fake_data_size, uint32_t sstable_level, int64_t max_timestamp, sstring first_key, sstring last_key) {
         _sst->_data_file_size = fake_data_size;
@@ -183,6 +183,7 @@ public:
         _sst->_components->summary.first_key.value = bytes(reinterpret_cast<const signed char*>(first_key.c_str()), first_key.size());
         _sst->_components->summary.last_key.value = bytes(reinterpret_cast<const signed char*>(last_key.c_str()), last_key.size());
         _sst->set_first_and_last_keys();
+        _sst->_run_identifier = utils::make_random_uuid();
     }
 
     void set_values(sstring first_key, sstring last_key, stats_metadata stats) {
@@ -193,6 +194,7 @@ public:
         _sst->_components->summary.last_key.value = bytes(reinterpret_cast<const signed char*>(last_key.c_str()), last_key.size());
         _sst->set_first_and_last_keys();
         _sst->_components->statistics.contents[metadata_type::Compaction] = std::make_unique<compaction_metadata>();
+        _sst->_run_identifier = utils::make_random_uuid();
     }
 
     void rewrite_toc_without_scylla_component() {
@@ -215,14 +217,18 @@ public:
     }
 };
 
+inline auto replacer_fn_no_op() {
+    return [](std::vector<shared_sstable> removed, std::vector<shared_sstable> added) -> void {};
+}
+
 inline sstring get_test_dir(const sstring& name, const sstring& ks, const sstring& cf)
 {
-    return seastar::sprint("tests/sstables/%s/%s/%s-1c6ace40fad111e7b9cf000000000002", name, ks, cf);
+    return seastar::format("tests/sstables/{}/{}/{}-1c6ace40fad111e7b9cf000000000002", name, ks, cf);
 }
 
 inline sstring get_test_dir(const sstring& name, const schema_ptr s)
 {
-    return seastar::sprint("tests/sstables/%s/%s/%s-1c6ace40fad111e7b9cf000000000002", name, s->ks_name(), s->cf_name());
+    return seastar::format("tests/sstables/{}/{}/{}-1c6ace40fad111e7b9cf000000000002", name, s->ks_name(), s->cf_name());
 }
 
 inline std::array<sstables::sstable::version_types, 3> all_sstable_versions = {
@@ -236,19 +242,6 @@ GCC6_CONCEPT( requires requires (AsyncAction aa, sstables::sstable::version_type
 inline
 future<> for_each_sstable_version(AsyncAction action) {
     return seastar::do_for_each(all_sstable_versions, std::move(action));
-}
-
-inline future<sstable_ptr> reusable_sst(schema_ptr schema, sstring dir,
-        unsigned long generation, sstable_version_types version = la) {
-    auto sst = sstables::make_sstable(std::move(schema), dir, generation, version, big);
-    auto fut = sst->load();
-    return std::move(fut).then([sst = std::move(sst)] {
-        return make_ready_future<sstable_ptr>(std::move(sst));
-    });
-}
-
-inline future<> working_sst(schema_ptr schema, sstring dir, unsigned long generation) {
-    return reusable_sst(std::move(schema), dir, generation).then([] (auto ptr) { return make_ready_future<>(); });
 }
 
 inline schema_ptr composite_schema() {
@@ -640,7 +633,8 @@ public:
             , _listing(_f.list_directory([this] (directory_entry de) { return _remove(de); })) {
     }
     ~test_setup() {
-        _f.close().finally([save = _f] {});
+        // FIXME: discarded future.
+        (void)_f.close().finally([save = _f] {});
     }
 protected:
     future<> _create_directory(sstring name) {
@@ -649,7 +643,7 @@ protected:
 
     future<> _remove(directory_entry de) {
         sstring t = _path + "/" + de.name;
-        return engine().file_type(t).then([t] (std::experimental::optional<directory_entry_type> det) {
+        return engine().file_type(t).then([t] (std::optional<directory_entry_type> det) {
             auto f = make_ready_future<>();
 
             if (!det) {
@@ -681,36 +675,27 @@ public:
         });
     }
 
-    static future<> do_with_test_directory(std::function<future<> ()>&& fut, sstring p = path()) {
-        return seastar::async([p, fut = std::move(fut)] {
-            storage_service_for_tests ssft;
-            boost::filesystem::create_directories(std::string(p));
-            fut().get();
-            test_setup::empty_test_dir(p).get();
-            // FIXME: this removes only the last component in the path that often contains: `test-name/ks/cf-uuid'
-            engine().remove_file(p).get();
-        });
-    }
-
-    static future<> do_with_tmp_directory(std::function<future<> (sstring tmpdir_path)>&& fut) {
+    static future<> do_with_tmp_directory(std::function<future<> (test_env&, sstring tmpdir_path)>&& fut) {
         return seastar::async([fut = std::move(fut)] {
             storage_service_for_tests ssft;
-            auto tmp = make_lw_shared<tmpdir>();
-            fut(tmp->path).get();
+            auto tmp = tmpdir();
+            test_env env;
+            fut(env, tmp.path().string()).get();
         });
     }
 
-    static future<> do_with_cloned_tmp_directory(sstring src, std::function<future<> (sstring srcdir_path, sstring destdir_path)>&& fut) {
+    static future<> do_with_cloned_tmp_directory(sstring src, std::function<future<> (test_env&, sstring srcdir_path, sstring destdir_path)>&& fut) {
         return seastar::async([fut = std::move(fut), src = std::move(src)] {
             storage_service_for_tests ssft;
-            auto src_dir = make_lw_shared<tmpdir>();
-            auto dest_dir = make_lw_shared<tmpdir>();
-            for (const auto& entry : boost::filesystem::directory_iterator(src.c_str())) {
-                boost::filesystem::copy(entry.path(), boost::filesystem::path(src_dir->path)/entry.path().filename());
+            auto src_dir = tmpdir();
+            auto dest_dir = tmpdir();
+            for (const auto& entry : std::filesystem::directory_iterator(src.c_str())) {
+                std::filesystem::copy(entry.path(), src_dir.path() / entry.path().filename());
             }
-            auto dest_path = boost::filesystem::path(dest_dir->path)/src.c_str();
-            boost::filesystem::create_directories(dest_path);
-            fut(src_dir->path, dest_path.string()).get();
+            auto dest_path = dest_dir.path() / src.c_str();
+            std::filesystem::create_directories(dest_path);
+            test_env env;
+            fut(env, src_dir.path().string(), dest_path.string()).get();
         });
     }
 };

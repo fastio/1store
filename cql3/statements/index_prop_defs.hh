@@ -42,10 +42,10 @@
 #pragma once
 
 #include "property_definitions.hh"
-#include "core/sstring.hh"
+#include <seastar/core/sstring.hh>
 
 #include <unordered_map>
-#include <experimental/optional>
+#include <optional>
 
 typedef std::unordered_map<sstring, sstring> index_options_map;
 
@@ -58,7 +58,7 @@ public:
     static constexpr auto KW_OPTIONS = "options";
 
     bool is_custom = false;
-    std::experimental::optional<sstring> custom_class;
+    std::optional<sstring> custom_class;
 
     void validate();
     index_options_map get_raw_options();

@@ -70,6 +70,7 @@ static bool has_clustering_keys(const schema& s, const query::read_command& cmd)
                     dht::partition_range_vector ranges)
                     : _has_clustering_keys(has_clustering_keys(*s, *cmd))
                     , _max(cmd->row_limit)
+                    , _per_partition_limit(cmd->slice.partition_row_limit())
                     , _schema(std::move(s))
                     , _selection(selection)
                     , _state(state)
@@ -89,6 +90,7 @@ static bool has_clustering_keys(const schema& s, const query::read_command& cmd)
             _cmd->is_first_page = false;
             _last_replicas = state->get_last_replicas();
             _query_read_repair_decision = state->get_query_read_repair_decision();
+            _rows_fetched_for_last_partition = state->get_rows_fetched_for_last_partition();
         } else {
             _cmd->query_uuid = utils::make_random_uuid();
             _cmd->is_first_page = true;
@@ -147,43 +149,6 @@ static bool has_clustering_keys(const schema& s, const query::read_command& cmd)
                 qlogger.trace("Result ranges {}", ranges);
             };
 
-            // Because of #1446 we don't have a comparator to use with
-            // range<clustering_key_prefix> which would produce correct results.
-            // This means we cannot reuse the same logic for dealing with
-            // partition and clustering keys.
-            auto modify_ck_ranges = [reversed] (const schema& s, auto& ranges, auto& lo) {
-                typedef typename std::remove_reference_t<decltype(ranges)>::value_type range_type;
-                typedef typename range_type::bound bound_type;
-
-                auto cmp = [reversed, bv_cmp = bound_view::compare(s)] (const auto& a, const auto& b) {
-                    return reversed ? bv_cmp(b, a) : bv_cmp(a, b);
-                };
-                auto start_bound = [reversed] (const auto& range) -> const bound_view& {
-                    return reversed ? range.second : range.first;
-                };
-                auto end_bound = [reversed] (const auto& range) -> const bound_view& {
-                    return reversed ? range.first : range.second;
-                };
-                clustering_key_prefix::equality eq(s);
-
-                auto it = ranges.begin();
-                while (it != ranges.end()) {
-                    auto range = bound_view::from_range(*it);
-                    if (cmp(end_bound(range), lo) || eq(end_bound(range).prefix(), lo)) {
-                        qlogger.trace("Remove ck range {}", *it);
-                        it = ranges.erase(it);
-                        continue;
-                    } else if (cmp(start_bound(range), lo)) {
-                        assert(cmp(lo, end_bound(range)));
-                        auto r = reversed ? range_type(it->start(), bound_type { lo, false })
-                                          : range_type(bound_type { lo, false }, it->end());
-                        qlogger.trace("Modify ck range {} -> {}", *it, r);
-                        *it = std::move(r);
-                    }
-                    ++it;
-                }
-            };
-
             // last ck can be empty depending on whether we
             // deserialized state or not. This case means "last page ended on
             // something-not-bound-by-clustering" (i.e. a static row, alone)
@@ -196,7 +161,7 @@ static bool has_clustering_keys(const schema& s, const query::read_command& cmd)
             if (has_ck) {
                 query::clustering_row_ranges row_ranges = _cmd->slice.default_row_ranges();
                 clustering_key_prefix ckp = clustering_key_prefix::from_exploded(*_schema, _last_ckey->explode(*_schema));
-                modify_ck_ranges(*_schema, row_ranges, ckp);
+                query::trim_clustering_row_ranges_to(*_schema, row_ranges, ckp, reversed);
 
                 _cmd->slice.set_range(*_schema, *_last_pkey, row_ranges);
             }
@@ -212,6 +177,7 @@ static bool has_clustering_keys(const schema& s, const query::read_command& cmd)
                     query::partition_slice::option::send_clustering_key>();
         }
         _cmd->row_limit = max_rows;
+        maybe_adjust_per_partition_limit(page_size);
 
         qlogger.debug("Fetching {}, page size={}, max_rows={}",
                 _cmd->cf_id, page_size, max_rows
@@ -223,7 +189,7 @@ static bool has_clustering_keys(const schema& s, const query::read_command& cmd)
                 std::move(command),
                 std::move(ranges),
                 _options.get_consistency(),
-                {timeout, _state.get_trace_state(), std::move(_last_replicas), _query_read_repair_decision});
+                {timeout, _state.get_permit(), _state.get_trace_state(), std::move(_last_replicas), _query_read_repair_decision});
     }
 
     future<> query_pager::fetch_page(cql3::selection::result_set_builder& builder, uint32_t page_size, gc_clock::time_point now, db::timeout_clock::time_point timeout) {
@@ -242,7 +208,7 @@ static bool has_clustering_keys(const schema& s, const query::read_command& cmd)
                         _options.get_cql_serialization_format()),
                 [this, page_size, now, timeout](auto& builder) {
                     return this->fetch_page(builder, page_size, now, timeout).then([&builder] {
-                       return builder.build();
+                        return builder.build();
                     });
                 });
     }
@@ -280,13 +246,17 @@ public:
             qr.query_result->ensure_counts();
             _stats.filtered_rows_read_total += *qr.query_result->row_count();
             handle_result(cql3::selection::result_set_builder::visitor(builder, *_schema, *_selection,
-                          cql3::selection::result_set_builder::restrictions_filter(_filtering_restrictions, _options, _max)),
+                          cql3::selection::result_set_builder::restrictions_filter(_filtering_restrictions, _options, _max, _schema, _per_partition_limit, _last_pkey, _rows_fetched_for_last_partition)),
                           std::move(qr.query_result), page_size, now);
         });
     }
 protected:
     virtual uint32_t max_rows_to_fetch(uint32_t page_size) override {
         return page_size;
+    }
+
+    virtual void maybe_adjust_per_partition_limit(uint32_t page_size) const override {
+        _cmd->slice.set_partition_row_limit(page_size);
     }
 };
 
@@ -296,8 +266,9 @@ class query_pager::query_result_visitor : public Base {
 public:
     uint32_t total_rows = 0;
     uint32_t dropped_rows = 0;
-    std::experimental::optional<partition_key> last_pkey;
-    std::experimental::optional<clustering_key> last_ckey;
+    uint32_t last_partition_row_count = 0;
+    std::optional<partition_key> last_pkey;
+    std::optional<clustering_key> last_ckey;
 
     query_result_visitor(Base&& v) : Base(std::move(v)) { }
 
@@ -309,6 +280,7 @@ public:
         total_rows += std::max(row_count, 1u);
         last_pkey = key;
         last_ckey = { };
+        last_partition_row_count = row_count;
         visitor::accept_new_partition(key, row_count);
     }
     void accept_new_row(const clustering_key& key,
@@ -322,7 +294,9 @@ public:
         visitor::accept_new_row(static_row, row);
     }
     void accept_partition_end(const query::result_row_view& static_row) {
-        dropped_rows += visitor::accept_partition_end(static_row);
+        const uint32_t dropped = visitor::accept_partition_end(static_row);
+        dropped_rows += dropped;
+        last_partition_row_count -= dropped;
     }
 };
 
@@ -356,6 +330,14 @@ public:
             row_count = v.total_rows - v.dropped_rows;
             _max = _max - row_count;
             _exhausted = (v.total_rows < page_size && !results->is_short_read() && v.dropped_rows == 0) || _max == 0;
+            // If per partition limit is defined, we need to accumulate rows fetched for last partition key if the key matches
+            if (_cmd->slice.partition_row_limit() < query::max_rows) {
+                if (_last_pkey && v.last_pkey && _last_pkey->equal(*_schema, *v.last_pkey)) {
+                    _rows_fetched_for_last_partition += v.last_partition_row_count;
+                } else {
+                    _rows_fetched_for_last_partition = v.last_partition_row_count;
+                }
+            }
             _last_pkey = v.last_pkey;
             _last_ckey = v.last_ckey;
         } else {
@@ -384,7 +366,7 @@ public:
     }
 
     ::shared_ptr<const paging_state> query_pager::state() const {
-        return ::make_shared<paging_state>(_last_pkey.value_or(partition_key::make_empty()), _last_ckey, _exhausted ? 0 : _max, _cmd->query_uuid, _last_replicas, _query_read_repair_decision);
+        return ::make_shared<paging_state>(_last_pkey.value_or(partition_key::make_empty()), _last_ckey, _exhausted ? 0 : _max, _cmd->query_uuid, _last_replicas, _query_read_repair_decision, _rows_fetched_for_last_partition);
     }
 
 }
@@ -426,6 +408,11 @@ bool service::pager::query_pagers::may_need_paging(const schema& s, uint32_t pag
         dht::partition_range_vector ranges,
         cql3::cql_stats& stats,
         ::shared_ptr<cql3::restrictions::statement_restrictions> filtering_restrictions) {
+    // If partition row limit is applied to paging, we still need to fall back
+    // to filtering the results to avoid extraneous rows on page breaks.
+    if (!filtering_restrictions && cmd->slice.partition_row_limit() < query::max_rows) {
+        filtering_restrictions = ::make_shared<cql3::restrictions::statement_restrictions>(s, true);
+    }
     if (filtering_restrictions) {
         return ::make_shared<filtering_query_pager>(std::move(s), std::move(selection), state,
                     options, std::move(cmd), std::move(ranges), std::move(filtering_restrictions), stats);

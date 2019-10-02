@@ -26,6 +26,7 @@
 #include "service/storage_service.hh"
 #include "db/config.hh"
 #include "utils/histogram.hh"
+#include "database.hh"
 
 namespace api {
 
@@ -44,6 +45,10 @@ static future<json::json_return_type>  sum_timed_rate_as_obj(distributed<proxy>&
         m = val;
         return make_ready_future<json::json_return_type>(m);
     });
+}
+
+httpd::utils_json::rate_moving_average_and_histogram get_empty_moving_average() {
+    return timer_to_json(utils::rate_moving_average_and_histogram());
 }
 
 static future<json::json_return_type>  sum_timed_rate_as_long(distributed<proxy>& d, utils::timed_rate_moving_average proxy::stats::*f) {
@@ -76,12 +81,9 @@ void set_storage_proxy(http_context& ctx, routes& r) {
         return make_ready_future<json::json_return_type>(0);
     });
 
-    sp::get_hinted_handoff_enabled.set(r, [](std::unique_ptr<request> req)  {
-        //TBD
-        // FIXME
-        // hinted handoff is not supported currently,
-        // so we should return false
-        return make_ready_future<json::json_return_type>(false);
+    sp::get_hinted_handoff_enabled.set(r, [&ctx](std::unique_ptr<request> req)  {
+        auto enabled = ctx.db.local().get_config().hinted_handoff_enabled();
+        return make_ready_future<json::json_return_type>(enabled);
     });
 
     sp::set_hinted_handoff_enabled.set(r, [](std::unique_ptr<request> req)  {
@@ -375,6 +377,29 @@ void set_storage_proxy(http_context& ctx, routes& r) {
 
     sp::get_write_metrics_latency_histogram.set(r, [&ctx](std::unique_ptr<request> req) {
         return sum_timer_stats(ctx.sp, &proxy::stats::write);
+    });
+    sp::get_cas_write_metrics_latency_histogram.set(r, [&ctx](std::unique_ptr<request> req) {
+        //TBD
+        // FIXME
+        // cas is not supported yet, so just return empty moving average
+
+        return make_ready_future<json::json_return_type>(get_empty_moving_average());
+    });
+
+    sp::get_cas_read_metrics_latency_histogram.set(r, [&ctx](std::unique_ptr<request> req) {
+        //TBD
+        // FIXME
+        // cas is not supported yet, so just return empty moving average
+
+        return make_ready_future<json::json_return_type>(get_empty_moving_average());
+    });
+
+    sp::get_view_write_metrics_latency_histogram.set(r, [&ctx](std::unique_ptr<request> req) {
+        //TBD
+        // FIXME
+        // No View metrics are available, so just return empty moving average
+
+        return make_ready_future<json::json_return_type>(get_empty_moving_average());
     });
 
     sp::get_read_metrics_latency_histogram.set(r, [&ctx](std::unique_ptr<request> req) {

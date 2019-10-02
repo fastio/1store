@@ -42,7 +42,7 @@
 #include "bytes.hh"
 #include "keys.hh"
 #include "paging_state.hh"
-#include "core/simple-stream.hh"
+#include <seastar/core/simple-stream.hh>
 #include "idl/keys.dist.hh"
 #include "idl/uuid.dist.hh"
 #include "idl/paging_state.dist.hh"
@@ -57,17 +57,19 @@
 #include "message/messaging_service.hh"
 
 service::pager::paging_state::paging_state(partition_key pk,
-        std::experimental::optional<clustering_key> ck,
+        std::optional<clustering_key> ck,
         uint32_t rem,
         utils::UUID query_uuid,
         replicas_per_token_range last_replicas,
-        std::experimental::optional<db::read_repair_decision> query_read_repair_decision)
+        std::optional<db::read_repair_decision> query_read_repair_decision,
+        uint32_t rows_fetched_for_last_partition)
     : _partition_key(std::move(pk))
     , _clustering_key(std::move(ck))
     , _remaining(rem)
     , _query_uuid(query_uuid)
     , _last_replicas(std::move(last_replicas))
-    , _query_read_repair_decision(query_read_repair_decision) {
+    , _query_read_repair_decision(query_read_repair_decision)
+    , _rows_fetched_for_last_partition(rows_fetched_for_last_partition) {
 }
 
 ::shared_ptr<service::pager::paging_state> service::pager::paging_state::deserialize(

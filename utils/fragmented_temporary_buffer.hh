@@ -79,6 +79,20 @@ public:
         }
         _fragments.erase(_fragments.begin(), it);
     }
+
+    // Linear complexity, invalidates views and istreams
+    void remove_suffix(size_t n) noexcept {
+        _size_bytes -= n;
+        auto it = _fragments.rbegin();
+        while (it->size() < n) {
+            n -= it->size();
+            ++it;
+        }
+        if (n) {
+            it->trim(it->size() - n);
+        }
+        _fragments.erase(it.base(), _fragments.end());
+    }
 };
 
 class fragmented_temporary_buffer::view {
@@ -293,11 +307,25 @@ private:
         }
         return obj;
     }
+
+    [[gnu::noinline]] [[gnu::cold]]
+    void skip_slow(size_t n) noexcept {
+        auto left = std::min<size_t>(n, bytes_left());
+        while (left) {
+            auto this_length = std::min<size_t>(left, _current_end - _current_position);
+            left -= this_length;
+            if (left) {
+                next_fragment();
+            } else {
+                _current_position += this_length;
+            }
+        }
+    }
 public:
     struct default_exception_thrower {
         [[noreturn]] [[gnu::cold]]
         static void throw_out_of_range(size_t attempted_read, size_t actual_left) {
-            throw std::out_of_range(sprint("attempted to read %d bytes from a %d byte buffer", attempted_read, actual_left));
+            throw std::out_of_range(format("attempted to read {:d} bytes from a {:d} byte buffer", attempted_read, actual_left));
         }
     };
     GCC6_CONCEPT(static_assert(fragmented_temporary_buffer_concepts::ExceptionThrower<default_exception_thrower>));
@@ -311,6 +339,14 @@ public:
 
     size_t bytes_left() const noexcept {
         return _bytes_left ? _bytes_left - (_current_position - _current->get()) : 0;
+    }
+
+    void skip(size_t n) noexcept {
+        auto new_end = _current_position + n;
+        if (__builtin_expect(new_end > _current_end, false)) {
+            return skip_slow(n);
+        }
+        _current_position = new_end;
     }
 
     template<typename T, typename ExceptionThrower = default_exception_thrower>
@@ -400,15 +436,15 @@ public:
         _left = length;
         return repeat_until_value([this, length, &in] {
             if (!_left) {
-                return make_ready_future<stdx::optional<fragmented_temporary_buffer>>(fragmented_temporary_buffer(std::move(_fragments), length));
+                return make_ready_future<std::optional<fragmented_temporary_buffer>>(fragmented_temporary_buffer(std::move(_fragments), length));
             }
             return in.read_up_to(_left).then([this] (temporary_buffer<char> buf) {
                 if (buf.empty()) {
-                    return stdx::make_optional(fragmented_temporary_buffer());
+                    return std::make_optional(fragmented_temporary_buffer());
                 }
                 _left -= buf.size();
                 _fragments.emplace_back(std::move(buf));
-                return stdx::optional<fragmented_temporary_buffer>();
+                return std::optional<fragmented_temporary_buffer>();
             });
         });
     }

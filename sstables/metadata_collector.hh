@@ -74,6 +74,7 @@ struct column_stats {
     utils::streaming_histogram tombstone_histogram;
 
     bool has_legacy_counter_shards;
+    bool capped_local_deletion_time = false;
 
     column_stats() :
         cells_count(0),
@@ -81,9 +82,6 @@ struct column_stats {
         rows_count(0),
         start_offset(0),
         partition_size(0),
-        timestamp_tracker(),
-        local_deletion_time_tracker(std::numeric_limits<int32_t>::max(), std::numeric_limits<int32_t>::max()),
-        ttl_tracker(0, 0),
         tombstone_histogram(TOMBSTONE_HISTOGRAM_BIN_SIZE),
         has_legacy_counter_shards(false)
         {
@@ -96,11 +94,45 @@ struct column_stats {
     void update_timestamp(api::timestamp_type value) {
         timestamp_tracker.update(value);
     }
+
     void update_local_deletion_time(int32_t value) {
         local_deletion_time_tracker.update(value);
     }
+    void update_local_deletion_time(gc_clock::time_point value) {
+        bool capped;
+        int32_t ldt = adjusted_local_deletion_time(value, capped);
+        update_local_deletion_time(ldt);
+        capped_local_deletion_time |= capped;
+    }
+    void update_local_deletion_time_and_tombstone_histogram(int32_t value) {
+        local_deletion_time_tracker.update(value);
+        tombstone_histogram.update(value);
+    }
+    void update_local_deletion_time_and_tombstone_histogram(gc_clock::time_point value) {
+        bool capped;
+        int32_t ldt = adjusted_local_deletion_time(value, capped);
+        update_local_deletion_time_and_tombstone_histogram(ldt);
+        capped_local_deletion_time |= capped;
+    }
     void update_ttl(int32_t value) {
         ttl_tracker.update(value);
+    }
+    void update_ttl(gc_clock::duration value) {
+        ttl_tracker.update(gc_clock::as_int32(value));
+    }
+    void update(const deletion_time& dt) {
+        assert(!dt.live());
+        update_timestamp(dt.marked_for_delete_at);
+        update_local_deletion_time_and_tombstone_histogram(dt.local_deletion_time);
+    }
+    void do_update(const tombstone& t) {
+        update_timestamp(t.timestamp);
+        update_local_deletion_time_and_tombstone_histogram(t.deletion_time);
+    }
+    void update(const tombstone& t) {
+        if (t) {
+            do_update(t);
+        }
     }
 };
 
@@ -114,14 +146,14 @@ public:
     }
 private:
     // EH of 150 can track a max value of 1697806495183, i.e., > 1.5PB
-    utils::estimated_histogram _estimated_row_size{150};
+    utils::estimated_histogram _estimated_partition_size{150};
     // EH of 114 can track a max value of 2395318855, i.e., > 2B cells
     utils::estimated_histogram _estimated_cells_count{114};
     db::replay_position _replay_position;
     min_max_tracker<api::timestamp_type> _timestamp_tracker;
     uint64_t _repaired_at = 0;
-    min_max_tracker<int32_t> _local_deletion_time_tracker;
-    min_max_tracker<int32_t> _ttl_tracker;
+    min_max_tracker<int32_t> _local_deletion_time_tracker{std::numeric_limits<int32_t>::max(), std::numeric_limits<int32_t>::max()};
+    min_max_tracker<int32_t> _ttl_tracker{0, 0};
     double _compression_ratio = NO_COMPRESSION_RATIO;
     std::set<int> _ancestors;
     utils::streaming_histogram _estimated_tombstone_drop_time{TOMBSTONE_HISTOGRAM_BIN_SIZE};
@@ -159,8 +191,8 @@ public:
         _cardinality.offer_hashed(hashed);
     }
 
-    void add_row_size(uint64_t row_size) {
-        _estimated_row_size.add(row_size);
+    void add_partition_size(uint64_t partition_size) {
+        _estimated_partition_size.add(partition_size);
     }
 
     void add_cells_count(uint64_t cells_count) {
@@ -215,7 +247,7 @@ public:
         _timestamp_tracker.update(stats.timestamp_tracker);
         _local_deletion_time_tracker.update(stats.local_deletion_time_tracker);
         _ttl_tracker.update(stats.ttl_tracker);
-        add_row_size(stats.partition_size);
+        add_partition_size(stats.partition_size);
         add_cells_count(stats.cells_count);
         merge_tombstone_histogram(stats.tombstone_histogram);
         update_has_legacy_counter_shards(stats.has_legacy_counter_shards);
@@ -232,7 +264,7 @@ public:
     }
 
     void construct_stats(stats_metadata& m) {
-        m.estimated_row_size = std::move(_estimated_row_size);
+        m.estimated_partition_size = std::move(_estimated_partition_size);
         m.estimated_cells_count = std::move(_estimated_cells_count);
         m.position = _replay_position;
         m.min_timestamp = _timestamp_tracker.min();
@@ -254,5 +286,3 @@ public:
 };
 
 }
-
-

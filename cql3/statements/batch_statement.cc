@@ -40,6 +40,7 @@
 #include "batch_statement.hh"
 #include "raw/batch_statement.hh"
 #include "db/config.hh"
+#include "database.hh"
 #include <seastar/core/execution_stage.hh>
 
 namespace {
@@ -170,7 +171,7 @@ void batch_statement::validate()
                         | boost::adaptors::uniqued) != 1))) {
         throw exceptions::invalid_request_exception("Batch with conditions cannot span multiple tables");
     }
-    std::experimental::optional<bool> raw_counter;
+    std::optional<bool> raw_counter;
     for (auto& s : _statements) {
         if (raw_counter && s.statement->is_raw_counter_shard_write() != *raw_counter) {
             throw exceptions::invalid_request_exception("Cannot mix raw and regular counter statements in batch");
@@ -191,20 +192,21 @@ const std::vector<batch_statement::single_statement>& batch_statement::get_state
     return _statements;
 }
 
-future<std::vector<mutation>> batch_statement::get_mutations(service::storage_proxy& storage, const query_options& options, db::timeout_clock::time_point timeout, bool local, api::timestamp_type now, tracing::trace_state_ptr trace_state) {
+future<std::vector<mutation>> batch_statement::get_mutations(service::storage_proxy& storage, const query_options& options, db::timeout_clock::time_point timeout, bool local, api::timestamp_type now, tracing::trace_state_ptr trace_state,
+                                                             service_permit permit) {
     // Do not process in parallel because operations like list append/prepend depend on execution order.
     using mutation_set_type = std::unordered_set<mutation, mutation_hash_by_key, mutation_equals_by_key>;
-    return do_with(mutation_set_type(), [this, &storage, &options, timeout, now, local, trace_state] (auto& result) {
+    return do_with(mutation_set_type(), [this, &storage, &options, timeout, now, local, trace_state, permit = std::move(permit)] (auto& result) mutable {
         result.reserve(_statements.size());
         _stats.statements_in_batches += _statements.size();
         return do_for_each(boost::make_counting_iterator<size_t>(0),
                            boost::make_counting_iterator<size_t>(_statements.size()),
-                           [this, &storage, &options, now, local, &result, timeout, trace_state] (size_t i) {
+                           [this, &storage, &options, now, local, &result, timeout, trace_state, permit = std::move(permit)] (size_t i) {
             auto&& statement = _statements[i].statement;
             statement->inc_cql_stats();
             auto&& statement_options = options.for_statement(i);
             auto timestamp = _attrs->get_timestamp(now, statement_options);
-            return statement->get_mutations(storage, statement_options, timeout, local, timestamp, trace_state).then([&result] (auto&& more) {
+            return statement->get_mutations(storage, statement_options, timeout, local, timestamp, trace_state, permit).then([&result] (auto&& more) {
                 for (auto&& m : more) {
                     // We want unordered_set::try_emplace(), but we don't have it
                     auto pos = result.find(m);
@@ -246,7 +248,7 @@ void batch_statement::verify_batch_size(const std::vector<mutation>& mutations) 
             for (auto&& m : mutations) {
                 ks_cf_pairs.insert(m.schema()->ks_name() + "." + m.schema()->cf_name());
             }
-            return sprint("Batch of prepared statements for %s is of size %d, exceeding specified %s threshold of %d by %d.",
+            return format("Batch of prepared statements for {} is of size {:d}, exceeding specified {} threshold of {:d} by {:d}.",
                     join(", ", ks_cf_pairs), size, type, threshold, size - threshold);
         };
         if (size > fail_threshold) {
@@ -294,8 +296,9 @@ future<shared_ptr<cql_transport::messages::result_message>> batch_statement::do_
     }
 
     auto timeout = db::timeout_clock::now() + options.get_timeout_config().*get_timeout_config_selector();
-    return get_mutations(storage, options, timeout, local, now, query_state.get_trace_state()).then([this, &storage, &options, timeout, tr_state = query_state.get_trace_state()] (std::vector<mutation> ms) mutable {
-        return execute_without_conditions(storage, std::move(ms), options.get_consistency(), timeout, std::move(tr_state));
+    return get_mutations(storage, options, timeout, local, now, query_state.get_trace_state(), query_state.get_permit()).then([this, &storage, &options, timeout, tr_state = query_state.get_trace_state(),
+                                                                                                                               permit = query_state.get_permit()] (std::vector<mutation> ms) mutable {
+        return execute_without_conditions(storage, std::move(ms), options.get_consistency(), timeout, std::move(tr_state), std::move(permit));
     }).then([] {
         return make_ready_future<shared_ptr<cql_transport::messages::result_message>>(
                 make_shared<cql_transport::messages::result_message::void_message>());
@@ -307,7 +310,8 @@ future<> batch_statement::execute_without_conditions(
         std::vector<mutation> mutations,
         db::consistency_level cl,
         db::timeout_clock::time_point timeout,
-        tracing::trace_state_ptr tr_state)
+        tracing::trace_state_ptr tr_state,
+        service_permit permit)
 {
     // FIXME: do we need to do this?
 #if 0
@@ -334,7 +338,7 @@ future<> batch_statement::execute_without_conditions(
             mutate_atomic = false;
         }
     }
-    return storage.mutate_with_triggers(std::move(mutations), cl, timeout, mutate_atomic, std::move(tr_state));
+    return storage.mutate_with_triggers(std::move(mutations), cl, timeout, mutate_atomic, std::move(tr_state), std::move(permit));
 }
 
 future<shared_ptr<cql_transport::messages::result_message>> batch_statement::execute_with_conditions(
@@ -396,8 +400,8 @@ std::unique_ptr<prepared_statement>
 batch_statement::prepare(database& db, cql_stats& stats) {
     auto&& bound_names = get_bound_variables();
 
-    stdx::optional<sstring> first_ks;
-    stdx::optional<sstring> first_cf;
+    std::optional<sstring> first_ks;
+    std::optional<sstring> first_cf;
     bool have_multiple_cfs = false;
 
     std::vector<cql3::statements::batch_statement::single_statement> statements;

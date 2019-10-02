@@ -39,8 +39,9 @@
 
 #include "cql3/statements/create_type_statement.hh"
 #include "prepared_statement.hh"
-
+#include "database.hh"
 #include "service/migration_manager.hh"
+#include "user_types_metadata.hh"
 
 namespace cql3 {
 
@@ -81,15 +82,15 @@ void create_type_statement::validate(service::storage_proxy& proxy, const servic
     try {
         auto&& ks = proxy.get_db().local().find_keyspace(keyspace());
         if (type_exists_in(ks) && !_if_not_exists) {
-            throw exceptions::invalid_request_exception(sprint("A user type of name %s already exists", _name.to_string()));
+            throw exceptions::invalid_request_exception(format("A user type of name {} already exists", _name.to_string()));
         }
     } catch (no_such_keyspace& e) {
-        throw exceptions::invalid_request_exception(sprint("Cannot add type in unknown keyspace %s", keyspace()));
+        throw exceptions::invalid_request_exception(format("Cannot add type in unknown keyspace {}", keyspace()));
     }
 
     for (auto&& type : _column_types) {
         if (type->is_counter()) {
-            throw exceptions::invalid_request_exception(sprint("A user type cannot contain counters"));
+            throw exceptions::invalid_request_exception(format("A user type cannot contain counters"));
         }
     }
 }
@@ -101,7 +102,7 @@ void create_type_statement::check_for_duplicate_names(user_type type)
         for (auto j = i +  1; j < names.cend(); ++j) {
             if (*i == *j) {
                 throw exceptions::invalid_request_exception(
-                        sprint("Duplicate field name %s in type %s", to_hex(*i), type->get_name_as_string()));
+                        format("Duplicate field name {} in type {}", to_hex(*i), type->get_name_as_string()));
             }
         }
     }
@@ -122,7 +123,7 @@ inline user_type create_type_statement::create_type(database& db)
     }
 
     for (auto&& column_type : _column_types) {
-        field_types.push_back(column_type->prepare(db, keyspace())->get_type());
+        field_types.push_back(column_type->prepare(db, keyspace()).get_type());
     }
 
     return user_type_impl::get_instance(keyspace(), _name.get_user_type_name(),

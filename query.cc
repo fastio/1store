@@ -51,7 +51,7 @@ std::ostream& operator<<(std::ostream& out, const partition_slice& ps) {
     if (ps._specific_ranges) {
         out << ", specific=[" << *ps._specific_ranges << "]";
     }
-    out << ", options=" << sprint("%x", ps.options.mask()); // FIXME: pretty print options
+    out << ", options=" << format("{:x}", ps.options.mask()); // FIXME: pretty print options
     out << ", cql_format=" << ps.cql_format();
     out << ", partition_row_limit=" << ps._partition_row_limit;
     return out << "}";
@@ -71,9 +71,47 @@ std::ostream& operator<<(std::ostream& out, const specific_ranges& s) {
     return out << "{" << s._pk << " : " << join(", ", s._ranges) << "}";
 }
 
+void trim_clustering_row_ranges_to(const schema& s, clustering_row_ranges& ranges, position_in_partition_view pos, bool reversed) {
+    auto cmp = [reversed, cmp = position_in_partition::composite_tri_compare(s)] (const auto& a, const auto& b) {
+        return reversed ? cmp(b, a) : cmp(a, b);
+    };
+    auto start_bound = [reversed] (const auto& range) -> position_in_partition_view {
+        return reversed ? position_in_partition_view::for_range_end(range) : position_in_partition_view::for_range_start(range);
+    };
+    auto end_bound = [reversed] (const auto& range) -> position_in_partition_view {
+        return reversed ? position_in_partition_view::for_range_start(range) : position_in_partition_view::for_range_end(range);
+    };
+
+    auto it = ranges.begin();
+    while (it != ranges.end()) {
+        if (cmp(end_bound(*it), pos) <= 0) {
+            it = ranges.erase(it);
+            continue;
+        } else if (cmp(start_bound(*it), pos) <= 0) {
+            assert(cmp(pos, end_bound(*it)) < 0);
+            auto r = reversed ?
+                clustering_range(it->start(), clustering_range::bound(pos.key(), pos.get_bound_weight() != bound_weight::before_all_prefixed)) :
+                clustering_range(clustering_range::bound(pos.key(), pos.get_bound_weight() != bound_weight::after_all_prefixed), it->end());
+            *it = std::move(r);
+        }
+        ++it;
+    }
+}
+
+void trim_clustering_row_ranges_to(const schema& s, clustering_row_ranges& ranges, const clustering_key& key, bool reversed) {
+    if (key.is_full(s)) {
+        return trim_clustering_row_ranges_to(s, ranges,
+                reversed ? position_in_partition_view::before_key(key) : position_in_partition_view::after_key(key), reversed);
+    }
+    auto full_key = key;
+    clustering_key::make_full(s, full_key);
+    return trim_clustering_row_ranges_to(s, ranges,
+            reversed ? position_in_partition_view::after_key(full_key) : position_in_partition_view::before_key(full_key), reversed);
+}
+
 partition_slice::partition_slice(clustering_row_ranges row_ranges,
-    std::vector<column_id> static_columns,
-    std::vector<column_id> regular_columns,
+    query::column_id_vector static_columns,
+    query::column_id_vector regular_columns,
     option_set options,
     std::unique_ptr<specific_ranges> specific_ranges,
     cql_serialization_format cql_format,

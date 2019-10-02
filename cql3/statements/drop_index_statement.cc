@@ -44,6 +44,7 @@
 #include "service/migration_manager.hh"
 #include "service/storage_service.hh"
 #include "schema_builder.hh"
+#include "database.hh"
 
 namespace cql3 {
 
@@ -56,11 +57,21 @@ drop_index_statement::drop_index_statement(::shared_ptr<index_name> index_name, 
 {
 }
 
+// A "drop index" statement does not specify the base table's name, just an
+// index name. Nevertheless, the virtual column_family() method is supposed
+// to return a reasonable table name. If the index doesn't exist, we return
+// an empty name (this commonly happens with "if exists").
 const sstring& drop_index_statement::column_family() const
 {
-    auto cfm = lookup_indexed_table();
-    assert(cfm);
-    return cfm->cf_name();
+    auto& db = service::get_local_storage_proxy().get_db().local();
+    if (db.has_keyspace(keyspace())) {
+        auto schema = db.find_indexed_table(keyspace(), _index_name);
+        if (schema) {
+            return schema->cf_name();
+        }
+    }
+    // Return the empty name stored by the superclass
+    return cf_statement::column_family();
 }
 
 future<> drop_index_statement::check_access(const service::client_state& state)
@@ -111,7 +122,7 @@ schema_ptr drop_index_statement::lookup_indexed_table() const
 {
     auto& db = service::get_local_storage_proxy().get_db().local();
     if (!db.has_keyspace(keyspace())) {
-        throw exceptions::keyspace_not_defined_exception(sprint("Keyspace %s does not exist", keyspace()));
+        throw exceptions::keyspace_not_defined_exception(format("Keyspace {} does not exist", keyspace()));
     }
     auto cfm = db.find_indexed_table(keyspace(), _index_name);
     if (cfm) {
@@ -121,7 +132,7 @@ schema_ptr drop_index_statement::lookup_indexed_table() const
         return nullptr;
     }
     throw exceptions::invalid_request_exception(
-            sprint("Index '%s' could not be found in any of the tables of keyspace '%s'", _index_name, keyspace()));
+            format("Index '{}' could not be found in any of the tables of keyspace '{}'", _index_name, keyspace()));
 }
 
 }

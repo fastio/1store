@@ -36,6 +36,7 @@
 #include "partition_version.hh"
 #include "flat_mutation_reader.hh"
 #include "mutation_cleaner.hh"
+#include "sstables/types.hh"
 
 class frozen_mutation;
 
@@ -142,101 +143,26 @@ private:
     mutation_source_opt _underlying;
     uint64_t _flushed_memory = 0;
 
-    class encoding_stats_collector {
+    class memtable_encoding_stats_collector : public encoding_stats_collector {
     private:
-        min_max_tracker<api::timestamp_type> timestamp;
-        min_tracker<int32_t> min_local_deletion_time;
-        min_tracker<int32_t> min_ttl;
+        max_tracker<api::timestamp_type> max_timestamp;
 
-        void update_timestamp(api::timestamp_type ts) {
-            if (ts != api::missing_timestamp) {
-                timestamp.update(ts);
-            }
-        }
+        void update_timestamp(api::timestamp_type ts);
 
     public:
-        encoding_stats_collector()
-            : timestamp(encoding_stats::timestamp_epoch, 0)
-            , min_local_deletion_time(encoding_stats::deletion_time_epoch)
-            , min_ttl(encoding_stats::ttl_epoch)
-        {}
+        memtable_encoding_stats_collector();
+        void update(atomic_cell_view cell);
 
-        void update(atomic_cell_view cell) {
-            update_timestamp(cell.timestamp());
-            if (cell.is_live_and_has_ttl()) {
-                min_ttl.update(cell.ttl().count());
-                min_local_deletion_time.update(cell.expiry().time_since_epoch().count());
-            } else if (!cell.is_live()) {
-                min_local_deletion_time.update(cell.deletion_time().time_since_epoch().count());
-            }
-        }
+        void update(tombstone tomb);
 
-        void update(tombstone tomb) {
-            if (tomb) {
-                update_timestamp(tomb.timestamp);
-                min_local_deletion_time.update(tomb.deletion_time.time_since_epoch().count());
-            }
-        }
+        void update(const ::schema& s, const row& r, column_kind kind);
+        void update(const range_tombstone& rt);
+        void update(const row_marker& marker);
+        void update(const ::schema& s, const deletable_row& dr);
+        void update(const ::schema& s, const mutation_partition& mp);
 
-        void update(const schema& s, const row& r, column_kind kind) {
-            r.for_each_cell([this, &s, kind](column_id id, const atomic_cell_or_collection& item) {
-                auto& col = s.column_at(kind, id);
-                if (col.is_atomic()) {
-                    update(item.as_atomic_cell(col));
-                } else {
-                    auto ctype = static_pointer_cast<const collection_type_impl>(col.type);
-                  item.as_collection_mutation().data.with_linearized([&] (bytes_view bv) {
-                    auto mview = ctype->deserialize_mutation_form(bv);
-                    update(mview.tomb);
-                    for (auto& entry : mview.cells) {
-                        update(entry.second);
-                    }
-                  });
-                }
-            });
-        }
-
-        void update(const range_tombstone& rt) {
-            update(rt.tomb);
-        }
-
-        void update(const row_marker& marker) {
-            update_timestamp(marker.timestamp());
-            if (!marker.is_missing()) {
-                if (!marker.is_live()) {
-                    min_local_deletion_time.update(marker.deletion_time().time_since_epoch().count());
-                } else if (marker.is_expiring()) {
-                    min_ttl.update(marker.ttl().count());
-                    min_local_deletion_time.update(marker.expiry().time_since_epoch().count());
-                }
-            }
-        }
-
-        void update(const schema& s, const deletable_row& dr) {
-            update(dr.marker());
-            row_tombstone row_tomb = dr.deleted_at();
-            update(row_tomb.regular());
-            update(row_tomb.tomb());
-            update(s, dr.cells(), column_kind::regular_column);
-        }
-
-        void update(const schema& s, const mutation_partition& mp) {
-            update(mp.partition_tombstone());
-            update(s, mp.static_row(), column_kind::static_column);
-            for (auto&& row_entry : mp.clustered_rows()) {
-                update(s, row_entry.row());
-            }
-            for (auto&& rt : mp.row_tombstones()) {
-                update(rt);
-            }
-        }
-
-        encoding_stats get() const {
-            return { timestamp.min(), min_local_deletion_time.get(), min_ttl.get() };
-        }
-
-        api::timestamp_type max_timestamp() const {
-            return timestamp.max();
+        api::timestamp_type get_max_timestamp() const {
+            return max_timestamp.get();
         }
     } _stats_collector;
 
@@ -287,12 +213,13 @@ public:
     logalloc::region_group* region_group() {
         return group();
     }
-    encoding_stats get_stats() const {
+
+    encoding_stats get_encoding_stats() const {
         return _stats_collector.get();
     }
 
     api::timestamp_type get_max_timestamp() const {
-        return _stats_collector.max_timestamp();
+        return _stats_collector.get_max_timestamp();
     }
 
     mutation_cleaner& cleaner() {

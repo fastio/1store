@@ -26,7 +26,7 @@
 #include "db/view/view_builder.hh"
 #include "sstables/compaction_manager.hh"
 
-#include "tests/test-utils.hh"
+#include <seastar/testing/test_case.hh>
 #include "tests/cql_test_env.hh"
 #include "tests/cql_assertions.hh"
 
@@ -117,8 +117,8 @@ SEASTAR_TEST_CASE(test_partial_delete_unselected_column_without_flush) {
 }
 
 SEASTAR_TEST_CASE(test_partial_delete_unselected_column_with_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_partial_delete_unselected_column(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -233,7 +233,7 @@ void test_partial_delete_selected_column(cql_test_env& e, std::function<void()>&
     });
 
     BOOST_TEST_PASSPOINT();
-    e.execute_cql("update cf using timestamp 15 and ttl 3 set b = 1 where p = 1 and c = 1").get();
+    e.execute_cql("update cf using timestamp 15 and ttl 100 set b = 1 where p = 1 and c = 1").get();
     maybe_flush();
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
@@ -245,7 +245,7 @@ void test_partial_delete_selected_column(cql_test_env& e, std::function<void()>&
         }});
     });
 
-    forward_jump_clocks(4s);
+    forward_jump_clocks(101s);
 
     BOOST_TEST_PASSPOINT();
     eventually([&] {
@@ -309,8 +309,8 @@ SEASTAR_TEST_CASE(test_partial_delete_selected_column_without_flush) {
 }
 
 SEASTAR_TEST_CASE(test_partial_delete_selected_column_with_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_partial_delete_selected_column(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -348,7 +348,7 @@ void test_update_column_in_view_pk_with_ttl(cql_test_env& e, std::function<void(
         assert_that(msg).is_rows().is_empty();
     });
 
-    e.execute_cql("update cf using ttl 5 set a = 10 where p = 1").get();
+    e.execute_cql("update cf using ttl 100 set a = 10 where p = 1").get();
     maybe_flush();
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf").get0();
@@ -370,7 +370,7 @@ void test_update_column_in_view_pk_with_ttl(cql_test_env& e, std::function<void(
         }});
     });
 
-    forward_jump_clocks(6s);
+    forward_jump_clocks(101s);
 
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf").get0();
@@ -385,8 +385,8 @@ SEASTAR_TEST_CASE(test_update_column_in_view_pk_with_ttl_without_flush) {
 }
 
 SEASTAR_TEST_CASE(test_update_column_in_view_pk_with_ttl_with_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_update_column_in_view_pk_with_ttl(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -401,9 +401,9 @@ SEASTAR_TEST_CASE(test_unselected_column_can_preserve_ttld_row_maker) {
                       "where p is not null and c is not null "
                       "primary key (c, p)").get();
 
-        e.execute_cql("insert into cf (p, c) values (0, 0) using ttl 60").get();
+        e.execute_cql("insert into cf (p, c) values (0, 0) using ttl 100").get();
         e.execute_cql("update cf using ttl 0 set v = 0 where p = 0 and c = 0").get();
-        forward_jump_clocks(65s);
+        forward_jump_clocks(101s);
         eventually([&] {
             auto msg = e.execute_cql("select * from vcf").get0();
             assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(0)}, {int32_type->decompose(0)}, }});
@@ -468,7 +468,7 @@ void test_update_column_not_in_view(cql_test_env& e, std::function<void()>&& may
         assert_that(msg).is_rows().is_empty();
     });
 
-    e.execute_cql("update cf using ttl 3 set v2 = 1 where p = 0 and c = 0").get();
+    e.execute_cql("update cf using ttl 100 set v2 = 1 where p = 0 and c = 0").get();
     maybe_flush();
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf").get0();
@@ -478,7 +478,7 @@ void test_update_column_not_in_view(cql_test_env& e, std::function<void()>&& may
         }});
     });
 
-    forward_jump_clocks(3s);
+    forward_jump_clocks(101s);
 
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf").get0();
@@ -505,8 +505,8 @@ SEASTAR_TEST_CASE(test_update_column_not_in_view_without_flush) {
 }
 
 SEASTAR_TEST_CASE(test_update_column_not_in_view_with_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_update_column_not_in_view(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -585,8 +585,8 @@ SEASTAR_TEST_CASE(test_partial_update_with_unselected_collections_without_flush)
 }
 
 SEASTAR_TEST_CASE(test_partial_update_with_unselected_collections_with_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_partial_update_with_unselected_collections(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -600,11 +600,11 @@ void test_unselected_columns_ttl(cql_test_env& e, std::function<void()>&& maybe_
                   "where p is not null and c is not null "
                   "primary key (c, p)").get();
 
-    e.execute_cql("insert into cf (p, c) values (1, 1) using ttl 3").get();
+    e.execute_cql("insert into cf (p, c) values (1, 1) using ttl 100").get();
     e.execute_cql("update cf using ttl 1000 set v = 0 where p = 1 and c = 1").get();
     maybe_flush();
 
-    forward_jump_clocks(4s);
+    forward_jump_clocks(101s);
 
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf").get0();
@@ -622,10 +622,10 @@ void test_unselected_columns_ttl(cql_test_env& e, std::function<void()>&& maybe_
     });
 
     e.execute_cql("insert into cf (p, c) values (1, 1)").get();
-    e.execute_cql("update cf using ttl 3 set v = 0 where p = 1 and c = 1").get();
-    e.execute_cql("insert into cf (p, c) values (3, 3) using ttl 3").get();
+    e.execute_cql("update cf using ttl 100 set v = 0 where p = 1 and c = 1").get();
+    e.execute_cql("insert into cf (p, c) values (3, 3) using ttl 100").get();
 
-    forward_jump_clocks(4s);
+    forward_jump_clocks(101s);
 
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
@@ -655,8 +655,8 @@ SEASTAR_TEST_CASE(test_unselected_columns_ttl_without_flush) {
 }
 
 SEASTAR_TEST_CASE(test_unselected_columns_ttl_with_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_unselected_columns_ttl(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -716,8 +716,8 @@ SEASTAR_TEST_CASE(test_partition_deletion_without_flush) {
 }
 
 SEASTAR_TEST_CASE(test_partition_deletion_with_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_partition_deletion(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -794,8 +794,8 @@ SEASTAR_TEST_CASE(test_commutative_row_deletion_without_flush) {
 }
 
 SEASTAR_TEST_CASE(test_commutative_row_deletion_with_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_commutative_row_deletion(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -812,7 +812,7 @@ SEASTAR_TEST_CASE(test_unselected_column_with_expired_marker) {
 
         e.execute_cql("update cf set a = 1 where p = 1 and c = 1").get();
         e.local_db().flush_all_memtables().get();
-        e.execute_cql("insert into cf (p, c) values (1, 1) using ttl 5").get();
+        e.execute_cql("insert into cf (p, c) values (1, 1) using ttl 100").get();
         e.local_db().flush_all_memtables().get();
         eventually([&] {
             auto msg = e.execute_cql("select * from vcf").get0();
@@ -823,7 +823,7 @@ SEASTAR_TEST_CASE(test_unselected_column_with_expired_marker) {
             }});
         });
 
-        forward_jump_clocks(6s);
+        forward_jump_clocks(101s);
 
         eventually([&] {
             auto msg = e.execute_cql("select * from vcf").get0();
@@ -917,8 +917,8 @@ SEASTAR_TEST_CASE(test_update_with_column_timestamp_smaller_than_pk_without_flus
 }
 
 SEASTAR_TEST_CASE(test_update_with_column_timestamp_smaller_than_pk_with_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_update_with_column_timestamp_smaller_than_pk(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -936,11 +936,11 @@ void test_expired_marker_with_limit(cql_test_env& e, std::function<void()>&& may
                   "primary key (a, p)").get();
 
     for (int i = 1; i <= 100; i++) {
-        e.execute_cql(sprint("insert into cf (p, a, b) values (%d, %d, %d)", i, i, i)).get();
+        e.execute_cql(format("insert into cf (p, a, b) values ({:d}, {:d}, {:d})", i, i, i)).get();
     }
     for (int i = 1; i <= 100; i++) {
         if (i % 50 != 0) {
-            e.execute_cql(sprint("delete a from cf where p = %d", i)).get();
+            e.execute_cql(format("delete a from cf where p = {:d}", i)).get();
         }
     }
 
@@ -948,11 +948,11 @@ void test_expired_marker_with_limit(cql_test_env& e, std::function<void()>&& may
 
     for (auto view : {"vcf1", "vcf2"}) {
         eventually([&] {
-            auto msg = e.execute_cql(sprint("select * from %s limit 1", view)).get0();
+            auto msg = e.execute_cql(format("select * from {} limit 1", view)).get0();
             assert_that(msg).is_rows().with_size(1);
-            msg = e.execute_cql(sprint("select * from %s limit 2", view)).get0();
+            msg = e.execute_cql(format("select * from {} limit 2", view)).get0();
             assert_that(msg).is_rows().with_size(2);
-            msg = e.execute_cql(sprint("select * from %s", view)).get0();
+            msg = e.execute_cql(format("select * from {}", view)).get0();
             assert_that(msg).is_rows().with_rows({
                 {{int32_type->decompose(50)}, {int32_type->decompose(50)}, {int32_type->decompose(50)}},
                 {{int32_type->decompose(100)}, {int32_type->decompose(100)}, {int32_type->decompose(100)}},
@@ -969,8 +969,8 @@ SEASTAR_TEST_CASE(test_expired_marker_with_limit_without_flush) {
 }
 
 SEASTAR_TEST_CASE(test_expired_marker_with_limit_with_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_expired_marker_with_limit(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -1067,8 +1067,8 @@ SEASTAR_TEST_CASE(test_update_with_column_timestamp_bigger_than_pk_without_flush
 }
 
 SEASTAR_TEST_CASE(test_update_with_column_timestamp_bigger_than_pk_with_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_update_with_column_timestamp_bigger_than_pk(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -1152,8 +1152,8 @@ SEASTAR_TEST_CASE(test_no_regular_base_column_in_view_pk_without_flush) {
 }
 
 SEASTAR_TEST_CASE(test_no_regular_base_column_in_view_pk_with_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_no_regular_base_column_in_view_pk(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -1177,7 +1177,7 @@ SEASTAR_TEST_CASE(test_shadowing_row_marker) {
             assert_that(msg).is_rows().is_empty();
         });
 
-        e.execute_cql("update cf using ttl 5 set v1 = 1 where p = 1").get();
+        e.execute_cql("update cf using ttl 100 set v1 = 1 where p = 1").get();
         e.local_db().flush_all_memtables().get();
         eventually([&] {
             auto msg = e.execute_cql("select * from vcf").get0();
@@ -1188,7 +1188,7 @@ SEASTAR_TEST_CASE(test_shadowing_row_marker) {
             }});
         });
 
-        forward_jump_clocks(6s);
+        forward_jump_clocks(101s);
 
         eventually([&] {
             auto msg = e.execute_cql("select * from vcf").get0();
@@ -1203,13 +1203,13 @@ void test_marker_timestamp_is_not_shadowed_by_previous_update(cql_test_env& e, s
                   "where p is not null and c is not null "
                   "primary key (c, p)").get();
 
-    e.execute_cql("insert into cf (p, c, v1, v2) VALUES(1, 1, 1, 1) using ttl 5").get();
+    e.execute_cql("insert into cf (p, c, v1, v2) VALUES(1, 1, 1, 1) using ttl 100").get();
     maybe_flush();
     e.execute_cql("update cf using ttl 1000 set v2 = 1 where p = 1 and c = 1").get();
     maybe_flush();
     e.execute_cql("delete v2 from cf where p = 1 and c = 1").get();
     maybe_flush();
-    forward_jump_clocks(6s);
+    forward_jump_clocks(101s);
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf").get0();
         assert_that(msg).is_rows().is_empty();
@@ -1223,8 +1223,8 @@ SEASTAR_TEST_CASE(test_marker_timestamp_is_not_shadowed_by_previous_update_witho
 }
 
 SEASTAR_TEST_CASE(test_marker_timestamp_is_not_shadowed_by_previous_updatewith_flush) {
-    db::config cfg;
-    cfg.enable_cache(false);
+    auto cfg = make_shared<db::config>();
+    cfg->enable_cache(false);
     return do_with_cql_env_thread([] (auto& e) {
         test_marker_timestamp_is_not_shadowed_by_previous_update(e, [&] {
             e.local_db().flush_all_memtables().get();
@@ -1321,7 +1321,7 @@ SEASTAR_TEST_CASE(test_3362_with_ttls) {
         // ttl - the older timestamp of this update looses, and we wrongly
         // remain with a ttl on the view row marker.
         BOOST_TEST_PASSPOINT();
-        e.execute_cql("update cf using timestamp 2 and ttl 5 set a = 1 where p = 1 and c = 1").get();
+        e.execute_cql("update cf using timestamp 2 and ttl 100 set a = 1 where p = 1 and c = 1").get();
         eventually([&] {
             auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
             assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(1)}, {int32_type->decompose(1)} }});
@@ -1332,10 +1332,10 @@ SEASTAR_TEST_CASE(test_3362_with_ttls) {
             auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
             assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(1)}, {int32_type->decompose(1)} }});
         });
-        // Pass the time 6 seconds forward. Cell 'a' will have expired, but
+        // Pass the time 101 seconds forward. Cell 'a' will have expired, but
         // cell 'b' will still exist, so the base row still exists and the
         // corresponding view row should also exist too.
-        forward_jump_clocks(6s);
+        forward_jump_clocks(101s);
         BOOST_TEST_PASSPOINT();
         // verify that the base row still exists (cell b didn't expire)
         eventually([&] {
@@ -1376,16 +1376,16 @@ void do_test_3362_no_ttls_with_collections(cql_test_env& e, collection_kind t) {
         suf = " : 17}";
         break;
     }
-    e.execute_cql(sprint("create table cf (p int, c int, a %s, primary key (p, c))", type)).get();
+    e.execute_cql(format("create table cf (p int, c int, a {}, primary key (p, c))", type)).get();
     e.execute_cql("create materialized view vcf as select p, c from cf "
             "where p is not null and c is not null "
             "primary key (p, c)").get();
-    e.execute_cql(sprint("update cf using timestamp 10 set a = a + %s2%s where p = 1 and c = 1", pref, suf)).get();
+    e.execute_cql(format("update cf using timestamp 10 set a = a + {}2{} where p = 1 and c = 1", pref, suf)).get();
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
         assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(1)}, {int32_type->decompose(1)} }});
     });
-    e.execute_cql(sprint("update cf using timestamp 20 set a = a + %s1%s where p = 1 and c = 1", pref, suf)).get();
+    e.execute_cql(format("update cf using timestamp 20 set a = a + {}1{} where p = 1 and c = 1", pref, suf)).get();
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
         assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(1)}, {int32_type->decompose(1)} }});
@@ -1393,7 +1393,7 @@ void do_test_3362_no_ttls_with_collections(cql_test_env& e, collection_kind t) {
     if (t == collection_kind::map) {
         e.execute_cql("delete a[1] from cf using timestamp 21 where p = 1 and c = 1").get();
     } else {
-        e.execute_cql(sprint("update cf using timestamp 21 set a = a - %s1%s where p = 1 and c = 1", pref, suf)).get();
+        e.execute_cql(format("update cf using timestamp 21 set a = a - {}1{} where p = 1 and c = 1", pref, suf)).get();
     }
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
@@ -1402,13 +1402,13 @@ void do_test_3362_no_ttls_with_collections(cql_test_env& e, collection_kind t) {
     if (t == collection_kind::map) {
         e.execute_cql("delete a[2] from cf using timestamp 11 where p = 1 and c = 1").get();
     } else {
-        e.execute_cql(sprint("update cf using timestamp 11 set a = a - %s2%s where p = 1 and c = 1", pref, suf)).get();
+        e.execute_cql(format("update cf using timestamp 11 set a = a - {}2{} where p = 1 and c = 1", pref, suf)).get();
     }
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
         assert_that(msg).is_rows().is_empty();
     });
-    e.execute_cql(sprint("update cf using timestamp 12 set a = a + %s2%s where p = 1 and c = 1", pref, suf)).get();
+    e.execute_cql(format("update cf using timestamp 12 set a = a + {}2{} where p = 1 and c = 1", pref, suf)).get();
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
         assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(1)}, {int32_type->decompose(1)} }});
@@ -1449,21 +1449,21 @@ void do_test_3362_with_ttls_with_collections(cql_test_env& e, collection_kind t)
         suf = " : 17}";
         break;
     }
-    e.execute_cql(sprint("create table cf (p int, c int, a %s, primary key (p, c))", type)).get();
+    e.execute_cql(format("create table cf (p int, c int, a {}, primary key (p, c))", type)).get();
     e.execute_cql("create materialized view vcf as select p, c from cf "
             "where p is not null and c is not null "
             "primary key (p, c)").get();
-    e.execute_cql(sprint("update cf using timestamp 2 and ttl 5 set a = a + %s1%s where p = 1 and c = 1", pref, suf)).get();
+    e.execute_cql(format("update cf using timestamp 2 and ttl 100 set a = a + {}1{} where p = 1 and c = 1", pref, suf)).get();
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
         assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(1)}, {int32_type->decompose(1)} }});
     });
-    e.execute_cql(sprint("update cf using timestamp 1 set a = a + %s2%s where p = 1 and c = 1", pref, suf)).get();
+    e.execute_cql(format("update cf using timestamp 1 set a = a + {}2{} where p = 1 and c = 1", pref, suf)).get();
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
         assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(1)}, {int32_type->decompose(1)} }});
     });
-    forward_jump_clocks(6s);
+    forward_jump_clocks(101s);
     eventually([&] {
         auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
         assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(1)}, {int32_type->decompose(1)} }});
@@ -1496,7 +1496,7 @@ SEASTAR_TEST_CASE(test_3362_with_ttls_frozen) {
                       "where p is not null and c is not null "
                       "primary key (p, c)").get();
         BOOST_TEST_PASSPOINT();
-        e.execute_cql("update cf using timestamp 2 and ttl 5 set a = {1,2} where p = 1 and c = 1").get();
+        e.execute_cql("update cf using timestamp 2 and ttl 100 set a = {1,2} where p = 1 and c = 1").get();
         eventually([&] {
             auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
             assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(1)}, {int32_type->decompose(1)} }});
@@ -1507,7 +1507,7 @@ SEASTAR_TEST_CASE(test_3362_with_ttls_frozen) {
             auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
             assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(1)}, {int32_type->decompose(1)} }});
         });
-        forward_jump_clocks(6s);
+        forward_jump_clocks(101s);
         BOOST_TEST_PASSPOINT();
         eventually([&] {
             auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
@@ -1535,7 +1535,7 @@ SEASTAR_TEST_CASE(test_3362_with_ttls_alter_add) {
         e.execute_cql("alter table cf add a int").get();
         e.execute_cql("alter table cf add b int").get();
         BOOST_TEST_PASSPOINT();
-        e.execute_cql("update cf using timestamp 2 and ttl 5 set a = 1 where p = 1 and c = 1").get();
+        e.execute_cql("update cf using timestamp 2 and ttl 100 set a = 1 where p = 1 and c = 1").get();
         eventually([&] {
             auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
             assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(1)}, {int32_type->decompose(1)} }});
@@ -1546,7 +1546,7 @@ SEASTAR_TEST_CASE(test_3362_with_ttls_alter_add) {
             auto msg = e.execute_cql("select * from vcf where p = 1 and c = 1").get0();
             assert_that(msg).is_rows().with_rows({{ {int32_type->decompose(1)}, {int32_type->decompose(1)} }});
         });
-        forward_jump_clocks(6s);
+        forward_jump_clocks(101s);
         BOOST_TEST_PASSPOINT();
         eventually([&] {
             auto msg = e.execute_cql("select * from cf where p = 1 and c = 1").get0();

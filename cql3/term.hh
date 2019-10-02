@@ -41,7 +41,7 @@
 
 #pragma once
 
-#include <experimental/optional>
+#include <optional>
 #include "variable_specifications.hh"
 #include "cql3/assignment_testable.hh"
 #include "cql3/query_options.hh"
@@ -104,7 +104,7 @@ public:
     virtual bool uses_function(const sstring& ks_name, const sstring& function_name) const = 0;
 
     virtual sstring to_string() const {
-        return sprint("term@%p", static_cast<const void*>(this));
+        return format("term@{:p}", static_cast<const void*>(this));
     }
 
     friend std::ostream& operator<<(std::ostream& out, const term& t) {
@@ -141,8 +141,7 @@ public:
         }
 
         friend std::ostream& operator<<(std::ostream& os, const raw& r) {
-            // FIXME: kill const_cast
-            return os << const_cast<raw&>(r).to_string();
+            return os << r.to_string();
         }
     };
 

@@ -47,9 +47,9 @@
 #include "cql3/statements/raw/cf_statement.hh"
 #include "cql3/cql_statement.hh"
 
-#include "core/shared_ptr.hh"
+#include <seastar/core/shared_ptr.hh>
 
-#include <experimental/optional>
+#include <optional>
 
 namespace cql3 {
 

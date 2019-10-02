@@ -29,13 +29,13 @@ public:
     enum class compact_storage { no, yes };
 private:
     schema::raw_schema _raw;
-    std::experimental::optional<compact_storage> _compact_storage;
-    std::experimental::optional<table_schema_version> _version;
-    std::experimental::optional<raw_view_info> _view_info;
+    std::optional<compact_storage> _compact_storage;
+    std::optional<table_schema_version> _version;
+    std::optional<raw_view_info> _view_info;
     schema_builder(const schema::raw_schema&);
 public:
     schema_builder(const sstring& ks_name, const sstring& cf_name,
-            std::experimental::optional<utils::UUID> = { },
+            std::optional<utils::UUID> = { },
             data_type regular_column_name_type = utf8_type);
     schema_builder(const schema_ptr);
 
@@ -239,12 +239,14 @@ public:
     column_definition& find_column(const cql3::column_identifier&);
     schema_builder& with_column(const column_definition& c);
     schema_builder& with_column(bytes name, data_type type, column_kind kind = column_kind::regular_column, column_view_virtual view_virtual = column_view_virtual::no);
-    schema_builder& with_column(bytes name, data_type type, column_kind kind, column_id component_index, column_view_virtual view_virtual = column_view_virtual::no);
+    schema_builder& with_column(bytes name, data_type type, column_kind kind, column_id component_index, column_view_virtual view_virtual = column_view_virtual::no, column_computation_ptr computation = nullptr);
+    schema_builder& with_computed_column(bytes name, data_type type, column_kind kind, column_computation_ptr computation);
     schema_builder& remove_column(bytes name);
     schema_builder& without_column(sstring name, api::timestamp_type timestamp);
     schema_builder& without_column(sstring name, data_type, api::timestamp_type timestamp);
     schema_builder& rename_column(bytes from, bytes to);
     schema_builder& alter_column_type(bytes name, data_type new_type);
+    schema_builder& mark_column_computed(bytes name, column_computation_ptr computation);
 
     // Adds information about collection that existed in the past but the column
     // has since been removed. For adding colllections that are still alive

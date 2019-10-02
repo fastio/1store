@@ -39,17 +39,17 @@
  * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define CRYPTOPP_ENABLE_NAMESPACE_WEAK 1
-
 #include "cql3/query_processor.hh"
 
-#include <cryptopp/md5.h>
 #include <seastar/core/metrics.hh>
 
 #include "cql3/CqlParser.hpp"
 #include "cql3/error_collector.hh"
 #include "cql3/statements/batch_statement.hh"
 #include "cql3/util.hh"
+#include "db/config.hh"
+#include "database.hh"
+#include "hashers.hh"
 
 namespace cql3 {
 
@@ -69,7 +69,7 @@ const std::chrono::minutes prepared_statements_cache::entry_expiry = std::chrono
 class query_processor::internal_state {
     service::query_state _qs;
 public:
-    internal_state() : _qs(service::client_state{service::client_state::internal_tag()}) {
+    internal_state() : _qs(service::client_state::for_internal_calls(), empty_service_permit()) {
     }
     operator service::query_state&() {
         return _qs;
@@ -83,34 +83,36 @@ public:
     operator const service::client_state&() const {
         return _qs.get_client_state();
     }
-    api::timestamp_type next_timestamp() {
-        return _qs.get_client_state().get_timestamp();
-    }
 };
 
-api::timestamp_type query_processor::next_timestamp() {
-    return _internal_state->next_timestamp();
-}
-
-query_processor::query_processor(service::storage_proxy& proxy, distributed<database>& db, query_processor::memory_config mcfg)
+query_processor::query_processor(service::storage_proxy& proxy, database& db, query_processor::memory_config mcfg)
         : _migration_subscriber{std::make_unique<migration_subscriber>(this)}
         , _proxy(proxy)
         , _db(db)
         , _internal_state(new internal_state())
         , _prepared_cache(prep_cache_log, mcfg.prepared_statment_cache_size)
-        , _authorized_prepared_cache(std::min(std::chrono::milliseconds(_db.local().get_config().permissions_validity_in_ms()),
+        , _authorized_prepared_cache(std::min(std::chrono::milliseconds(_db.get_config().permissions_validity_in_ms()),
                                               std::chrono::duration_cast<std::chrono::milliseconds>(prepared_statements_cache::entry_expiry)),
-                                     std::chrono::milliseconds(_db.local().get_config().permissions_update_interval_in_ms()),
+                                     std::chrono::milliseconds(_db.get_config().permissions_update_interval_in_ms()),
                                      mcfg.authorized_prepared_cache_size, authorized_prepared_statements_cache_log) {
     namespace sm = seastar::metrics;
+    using clevel = db::consistency_level;
+    sm::label cl_label("consistency_level");
 
-    _metrics.add_group(
-            "query_processor",
-            {
-                    sm::make_derive(
-                            "statements_prepared",
-                            _stats.prepare_invocations,
-                            sm::description("Counts a total number of parsed CQL requests."))});
+    std::vector<sm::metric_definition> qp_group;
+    qp_group.push_back(sm::make_derive(
+        "statements_prepared",
+        _stats.prepare_invocations,
+        sm::description("Counts a total number of parsed CQL requests.")));
+    for (auto cl = size_t(clevel::MIN_VALUE); cl <= size_t(clevel::MAX_VALUE); ++cl) {
+        qp_group.push_back(
+            sm::make_derive(
+                "queries",
+                _stats.queries_by_cl[cl],
+                sm::description("Counts queries by consistency level."),
+                {cl_label(clevel(cl))}));
+    }
+    _metrics.add_group("query_processor", qp_group);
 
     _metrics.add_group(
             "cql",
@@ -325,6 +327,8 @@ future<::shared_ptr<result_message>>
 query_processor::process_authorized_statement(const ::shared_ptr<cql_statement> statement, service::query_state& query_state, const query_options& options) {
     auto& client_state = query_state.get_client_state();
 
+    ++_stats.queries_by_cl[size_t(options.get_consistency())];
+
     statement->validate(_proxy, client_state);
 
     auto fut = statement->execute(_proxy, query_state, options);
@@ -362,7 +366,7 @@ query_processor::prepare(sstring query_string, const service::client_state& clie
 
 ::shared_ptr<cql_transport::messages::result_message::prepared>
 query_processor::get_stored_prepared_statement(
-        const std::experimental::string_view& query_string,
+        const std::string_view& query_string,
         const sstring& keyspace,
         bool for_thrift) {
     using namespace cql_transport::messages;
@@ -381,26 +385,18 @@ query_processor::get_stored_prepared_statement(
     }
 }
 
-static bytes md5_calculate(const std::experimental::string_view& s) {
-    constexpr size_t size = CryptoPP::Weak1::MD5::DIGESTSIZE;
-    CryptoPP::Weak::MD5 hash;
-    unsigned char digest[size];
-    hash.CalculateDigest(digest, reinterpret_cast<const unsigned char*>(s.data()), s.size());
-    return std::move(bytes{reinterpret_cast<const int8_t*>(digest), size});
-}
-
-static sstring hash_target(const std::experimental::string_view& query_string, const sstring& keyspace) {
-    return keyspace + query_string.to_string();
+static sstring hash_target(const std::string_view& query_string, const sstring& keyspace) {
+    return keyspace + std::string(query_string);
 }
 
 prepared_cache_key_type query_processor::compute_id(
-        const std::experimental::string_view& query_string,
+        const std::string_view& query_string,
         const sstring& keyspace) {
-    return prepared_cache_key_type(md5_calculate(hash_target(query_string, keyspace)));
+    return prepared_cache_key_type(md5_hasher::calculate(hash_target(query_string, keyspace)));
 }
 
 prepared_cache_key_type query_processor::compute_thrift_id(
-        const std::experimental::string_view& query_string,
+        const std::string_view& query_string,
         const sstring& keyspace) {
     auto target = hash_target(query_string, keyspace);
     uint32_t h = 0;
@@ -420,7 +416,7 @@ query_processor::get_statement(const sstring_view& query, const service::client_
         cf_stmt->prepare_keyspace(client_state);
     }
     ++_stats.prepare_invocations;
-    return statement->prepare(_db.local(), _cql_stats);
+    return statement->prepare(_db, _cql_stats);
 }
 
 ::shared_ptr<raw::parsed_statement>
@@ -432,12 +428,12 @@ query_processor::parse_statement(const sstring_view& query) {
         }
         return statement;
     } catch (const exceptions::recognition_exception& e) {
-        throw exceptions::syntax_exception(sprint("Invalid or malformed CQL query string: %s", e.what()));
+        throw exceptions::syntax_exception(format("Invalid or malformed CQL query string: {}", e.what()));
     } catch (const exceptions::cassandra_exception& e) {
         throw;
     } catch (const std::exception& e) {
         log.error("The statement: {} could not be parsed: {}", query, e.what());
-        throw exceptions::syntax_exception(sprint("Failed parsing statement: [%s] reason: %s", query, e.what()));
+        throw exceptions::syntax_exception(format("Failed parsing statement: [{}] reason: {}", query, e.what()));
     }
 }
 
@@ -449,7 +445,7 @@ query_options query_processor::make_internal_options(
         int32_t page_size) {
     if (p->bound_names.size() != values.size()) {
         throw std::invalid_argument(
-                sprint("Invalid number of values. Expecting %d but got %d", p->bound_names.size(), values.size()));
+                format("Invalid number of values. Expecting {:d} but got {:d}", p->bound_names.size(), values.size()));
     }
     auto ni = p->bound_names.begin();
     std::vector<cql3::raw_value> bound_values;
@@ -479,7 +475,7 @@ query_options query_processor::make_internal_options(
 statements::prepared_statement::checked_weak_ptr query_processor::prepare_internal(const sstring& query_string) {
     auto& p = _internal_statements[query_string];
     if (p == nullptr) {
-        auto np = parse_statement(query_string)->prepare(_db.local(), _cql_stats);
+        auto np = parse_statement(query_string)->prepare(_db, _cql_stats);
         np->statement->validate(_proxy, *_internal_state);
         p = std::move(np); // inserts it into map
     }
@@ -551,6 +547,36 @@ future<> query_processor::for_each_cql_result(
     });
 }
 
+future<> query_processor::for_each_cql_result(
+        ::shared_ptr<cql3::internal_query_state> state,
+         noncopyable_function<future<stop_iteration>(const cql3::untyped_result_set::row&)>&& f) {
+    // repeat can move the lambda's capture, so we need to hold f and it so the internal loop
+    // will be able to use it.
+    return do_with(noncopyable_function<future<stop_iteration>(const cql3::untyped_result_set::row&)>(std::move(f)),
+            untyped_result_set::rows_type::const_iterator(),
+            [state, this](noncopyable_function<future<stop_iteration>(const cql3::untyped_result_set::row&)>& f,
+                    untyped_result_set::rows_type::const_iterator& it) mutable {
+        return repeat([state, &f, &it, this]() mutable {
+            return this->execute_paged_internal(state).then([state, &f, &it, this](::shared_ptr<cql3::untyped_result_set> msg) mutable {
+                it = msg->begin();
+                return repeat_until_value([&it, &f, msg, state, this]() mutable {
+                    if (it == msg->end()) {
+                        return make_ready_future<std::optional<stop_iteration>>(std::optional<stop_iteration>(!this->has_more_results(state)));
+                    }
+
+                    return f(*it).then([&it, msg](stop_iteration i) {
+                        if (i == stop_iteration::yes) {
+                            return std::optional<stop_iteration>(i);
+                        }
+                        ++it;
+                        return std::optional<stop_iteration>();
+                    });
+                });
+            });
+        });
+    });
+}
+
 future<::shared_ptr<untyped_result_set>>
 query_processor::execute_paged_internal(::shared_ptr<internal_query_state> state) {
     return state->p->statement->execute(_proxy, *_internal_state, *state->opts).then(
@@ -613,7 +639,7 @@ query_processor::process(
     if (cache) {
         return process(prepare_internal(query_string), cl, timeout_config, values);
     } else {
-        auto p = parse_statement(query_string)->prepare(_db.local(), _cql_stats);
+        auto p = parse_statement(query_string)->prepare(_db, _cql_stats);
         p->statement->validate(_proxy, *_internal_state);
         auto checked_weak_ptr = p->checked_weak_from_this();
         return process(std::move(checked_weak_ptr), cl, timeout_config, values).finally([p = std::move(p)] {});
@@ -648,6 +674,7 @@ query_processor::process_batch(
         }).then([this, &query_state, &options, batch] {
             batch->validate();
             batch->validate(_proxy, query_state.get_client_state());
+            _stats.queries_by_cl[size_t(options.get_consistency())] += batch->get_statements().size();
             return batch->execute(_proxy, query_state, options);
         });
     });
@@ -703,7 +730,7 @@ void query_processor::migration_subscriber::on_update_view(
 }
 
 void query_processor::migration_subscriber::on_drop_keyspace(const sstring& ks_name) {
-    remove_invalid_prepared_statements(ks_name, std::experimental::nullopt);
+    remove_invalid_prepared_statements(ks_name, std::nullopt);
 }
 
 void query_processor::migration_subscriber::on_drop_column_family(const sstring& ks_name, const sstring& cf_name) {
@@ -727,7 +754,7 @@ void query_processor::migration_subscriber::on_drop_view(const sstring& ks_name,
 
 void query_processor::migration_subscriber::remove_invalid_prepared_statements(
         sstring ks_name,
-        std::experimental::optional<sstring> cf_name) {
+        std::optional<sstring> cf_name) {
     _qp->_prepared_cache.remove_if([&] (::shared_ptr<cql_statement> stmt) {
         return this->should_invalidate(ks_name, cf_name, stmt);
     });
@@ -735,9 +762,22 @@ void query_processor::migration_subscriber::remove_invalid_prepared_statements(
 
 bool query_processor::migration_subscriber::should_invalidate(
         sstring ks_name,
-        std::experimental::optional<sstring> cf_name,
+        std::optional<sstring> cf_name,
         ::shared_ptr<cql_statement> statement) {
     return statement->depends_on_keyspace(ks_name) && (!cf_name || statement->depends_on_column_family(*cf_name));
+}
+
+future<> query_processor::query(
+        const sstring& query_string,
+        const std::initializer_list<data_value>& values,
+        noncopyable_function<future<stop_iteration>(const cql3::untyped_result_set_row&)>&& f) {
+    return for_each_cql_result(create_paged_state(query_string, values), std::move(f));
+}
+
+future<> query_processor::query(
+        const sstring& query_string,
+        noncopyable_function<future<stop_iteration>(const cql3::untyped_result_set_row&)>&& f) {
+    return for_each_cql_result(create_paged_state(query_string, {}), std::move(f));
 }
 
 }

@@ -24,7 +24,7 @@
 #include "bytes_ostream.hh"
 #include "digest_algorithm.hh"
 #include "query-request.hh"
-#include <experimental/optional>
+#include <optional>
 #include <seastar/util/bool_class.hh>
 #include "seastarx.hh"
 
@@ -151,31 +151,7 @@ private:
 
     friend class result_memory_limiter;
 public:
-    // State of a accounter on another shard. Used to pass information about
-    // the size of the result so far in range queries.
-    class foreign_state {
-        size_t _used_memory;
-        size_t _max_result_size;
-    public:
-        foreign_state(size_t used_mem, size_t max_result_size)
-                : _used_memory(used_mem), _max_result_size(max_result_size) { }
-        size_t used_memory() const { return _used_memory; }
-        size_t max_result_size() const { return _max_result_size; }
-    };
-public:
     result_memory_accounter() = default;
-
-    // This constructor is used in cases when a result is produced on multiple
-    // shards (range queries). foreign_accounter is an accounter that, possibly,
-    // exist on the other shard and is used for merging the result. This
-    // accouter will learn how big the total result alread is and limit the
-    // part produced on this shard so that after merging the final result
-    // does not exceed the individual limit.
-    result_memory_accounter(result_memory_limiter& limiter, foreign_state fstate) noexcept
-        : _limiter(&limiter)
-        , _total_used_memory(fstate.used_memory())
-        , _maximum_result_size(fstate.max_result_size())
-    { }
 
     result_memory_accounter(result_memory_accounter&& other) noexcept
         : _limiter(std::exchange(other._limiter, nullptr))
@@ -201,10 +177,6 @@ public:
     }
 
     size_t used_memory() const { return _used_memory; }
-
-    foreign_state state_for_another_shard() {
-        return foreign_state(_used_memory, _maximum_result_size);
-    }
 
     // Consume n more bytes for the result. Returns stop_iteration::yes if
     // the result cannot grow any more (taking into account both individual
@@ -337,19 +309,19 @@ using short_read = bool_class<short_read_tag>;
 
 class result {
     bytes_ostream _w;
-    stdx::optional<result_digest> _digest;
-    stdx::optional<uint32_t> _row_count;
+    std::optional<result_digest> _digest;
+    std::optional<uint32_t> _row_count;
     api::timestamp_type _last_modified = api::missing_timestamp;
     short_read _short_read;
     query::result_memory_tracker _memory_tracker;
-    stdx::optional<uint32_t> _partition_count;
+    std::optional<uint32_t> _partition_count;
 public:
     class builder;
     class partition_writer;
     friend class result_merger;
 
     result();
-    result(bytes_ostream&& w, short_read sr, stdx::optional<uint32_t> c, stdx::optional<uint32_t> pc,
+    result(bytes_ostream&& w, short_read sr, std::optional<uint32_t> c, std::optional<uint32_t> pc,
            result_memory_tracker memory_tracker = { })
         : _w(std::move(w))
         , _row_count(c)
@@ -359,8 +331,8 @@ public:
     {
         w.reduce_chunk_count();
     }
-    result(bytes_ostream&& w, stdx::optional<result_digest> d, api::timestamp_type last_modified,
-           short_read sr, stdx::optional<uint32_t> c, stdx::optional<uint32_t> pc, result_memory_tracker memory_tracker = { })
+    result(bytes_ostream&& w, std::optional<result_digest> d, api::timestamp_type last_modified,
+           short_read sr, std::optional<uint32_t> c, std::optional<uint32_t> pc, result_memory_tracker memory_tracker = { })
         : _w(std::move(w))
         , _digest(d)
         , _row_count(c)
@@ -380,11 +352,11 @@ public:
         return _w;
     }
 
-    const stdx::optional<result_digest>& digest() const {
+    const std::optional<result_digest>& digest() const {
         return _digest;
     }
 
-    const stdx::optional<uint32_t>& row_count() const {
+    const std::optional<uint32_t>& row_count() const {
         return _row_count;
     }
 
@@ -396,7 +368,7 @@ public:
         return _short_read;
     }
 
-    const stdx::optional<uint32_t>& partition_count() const {
+    const std::optional<uint32_t>& partition_count() const {
         return _partition_count;
     }
 

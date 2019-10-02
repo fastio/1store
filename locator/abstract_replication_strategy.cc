@@ -22,7 +22,6 @@
 #include "locator/abstract_replication_strategy.hh"
 #include "utils/class_registrator.hh"
 #include "exceptions/exceptions.hh"
-#include "stdx.hh"
 
 namespace locator {
 
@@ -67,7 +66,7 @@ void abstract_replication_strategy::validate_replication_strategy(const sstring&
         for (auto&& item : config_options) {
             sstring key = item.first;
             if (!expected->count(key)) {
-                 throw exceptions::configuration_exception(sprint("Unrecognized strategy option {%s} passed to %s for keyspace %s", key, strategy_name, ks_name));
+                 throw exceptions::configuration_exception(format("Unrecognized strategy option {{{}}} passed to {} for keyspace {}", key, strategy_name, ks_name));
             }
         }
     }
@@ -82,7 +81,7 @@ std::vector<inet_address> abstract_replication_strategy::get_natural_endpoints(c
         auto endpoints = calculate_natural_endpoints(search_token, _token_metadata);
         cached_endpoints.emplace(key_token, endpoints);
 
-        return std::move(endpoints);
+        return endpoints;
     }
 
     ++_cache_hits_count;
@@ -133,11 +132,11 @@ insert_token_range_to_sorted_container_while_unwrapping(
     } else {
         ret.emplace_back(
                 dht::token_range::bound(prev_tok, false),
-                stdx::nullopt);
+                std::nullopt);
         // Insert in front to maintain sorded order
         ret.emplace(
                 ret.begin(),
-                stdx::nullopt,
+                std::nullopt,
                 dht::token_range::bound(tok, true));
     }
 }

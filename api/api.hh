@@ -21,13 +21,15 @@
 
 #pragma once
 
-#include "json/json_elements.hh"
+#include <seastar/json/json_elements.hh>
+#include <type_traits>
 #include <boost/lexical_cast.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
+#include <boost/units/detail/utility.hpp>
 #include "api/api-doc/utils.json.hh"
 #include "utils/histogram.hh"
-#include "http/exception.hh"
+#include <seastar/http/exception.hh>
 #include "api_init.hh"
 #include "seastarx.hh"
 
@@ -215,5 +217,43 @@ std::vector<T> concat(std::vector<T> a, std::vector<T>&& b) {
     a.insert(a.end(), b.begin(), b.end());
     return a;
 }
+
+template <class T, class Base = T>
+class req_param {
+public:
+    sstring name;
+    sstring param;
+    T value;
+
+    req_param(const request& req, sstring name, T default_val) : name(name) {
+        param = req.get_query_param(name);
+        if (param.empty()) {
+            value = default_val;
+            return;
+        }
+        try {
+            // boost::lexical_cast does not use boolalpha. Converting a
+            // true/false throws exceptions. We don't want that.
+            if constexpr (std::is_same_v<Base, bool>) {
+                // Cannot use boolalpha because we (probably) want to
+                // accept 1 and 0 as well as true and false. And True. And fAlse.
+                std::transform(param.begin(), param.end(), param.begin(), ::tolower);
+                if (param == "true" || param == "1") {
+                    value = T(true);
+                } else if (param == "false" || param == "0") {
+                    value = T(false);
+                } else {
+                    throw boost::bad_lexical_cast{};
+                }
+            } else {
+                value = T{boost::lexical_cast<Base>(param)};
+            }
+        } catch (boost::bad_lexical_cast&) {
+            throw bad_param_exception(format("{} ({}): type error - should be {}", name, param, boost::units::detail::demangle(typeid(Base).name())));
+        }
+    }
+
+    operator T() const { return value; }
+};
 
 }

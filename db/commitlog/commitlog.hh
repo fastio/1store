@@ -42,12 +42,13 @@
 
 #include <memory>
 
-#include "core/future.hh"
-#include "core/shared_ptr.hh"
-#include "core/stream.hh"
+#include <seastar/core/future.hh>
+#include <seastar/core/shared_ptr.hh>
+#include <seastar/core/stream.hh>
 #include "replay_position.hh"
 #include "commitlog_entry.hh"
 #include "db/timeout_clock.hh"
+#include "utils/fragmented_temporary_buffer.hh"
 
 namespace seastar { class file; }
 
@@ -128,12 +129,15 @@ public:
         sync_mode mode = sync_mode::PERIODIC;
         std::string fname_prefix = descriptor::FILENAME_PREFIX;
 
+        bool reuse_segments = true;
+        bool use_o_dsync = false;
+
         const db::extensions * extensions = nullptr;
     };
 
     struct descriptor {
     private:
-        descriptor(std::pair<uint64_t, uint32_t> p, const std::string& fname_prefix);
+        sstring _filename;
     public:
         static const std::string SEPARATOR;
         static const std::string FILENAME_PREFIX;
@@ -141,7 +145,7 @@ public:
 
         descriptor(descriptor&&) = default;
         descriptor(const descriptor&) = default;
-        descriptor(segment_id_type i, const std::string& fname_prefix, uint32_t v = 1);
+        descriptor(segment_id_type i, const std::string& fname_prefix, uint32_t v = 1, sstring = {});
         descriptor(replay_position p, const std::string& fname_prefix = FILENAME_PREFIX);
         descriptor(const sstring& filename, const std::string& fname_prefix = FILENAME_PREFIX);
 
@@ -340,22 +344,44 @@ public:
     future<std::vector<sstring>> list_existing_segments() const;
     future<std::vector<sstring>> list_existing_segments(const sstring& dir) const;
 
-    typedef std::function<future<>(temporary_buffer<char>, replay_position)> commit_load_reader_func;
+    typedef std::function<future<>(fragmented_temporary_buffer, replay_position)> commit_load_reader_func;
 
-    class segment_data_corruption_error: public std::runtime_error {
+    class segment_error : public std::exception {};
+
+    class segment_data_corruption_error: public segment_error {
+        std::string _msg;
     public:
         segment_data_corruption_error(std::string msg, uint64_t s)
-                : std::runtime_error(msg), _bytes(s) {
+                : _msg(std::move(msg)), _bytes(s) {
         }
         uint64_t bytes() const {
             return _bytes;
+        }
+        virtual const char* what() const noexcept {
+            return _msg.c_str();
         }
     private:
         uint64_t _bytes;
     };
 
-    static future<std::unique_ptr<subscription<temporary_buffer<char>, replay_position>>> read_log_file(
-            const sstring&, seastar::io_priority_class read_io_prio_class, commit_load_reader_func, position_type = 0, const db::extensions* = nullptr);
+    class invalid_segment_format : public segment_error {
+        static constexpr const char* _msg = "Not a scylla format commitlog file";
+    public:
+        virtual const char* what() const noexcept {
+            return _msg;
+        }
+    };
+
+    class header_checksum_error : public segment_error {
+        static constexpr const char* _msg = "Checksum error in file header";
+    public:
+        virtual const char* what() const noexcept {
+            return _msg;
+        }
+    };
+
+    static future<std::unique_ptr<subscription<fragmented_temporary_buffer, replay_position>>> read_log_file(
+            const sstring&, const sstring&, seastar::io_priority_class read_io_prio_class, commit_load_reader_func, position_type = 0, const db::extensions* = nullptr);
 private:
     commitlog(config);
 

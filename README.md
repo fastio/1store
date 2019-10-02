@@ -1,48 +1,94 @@
-# Pedis (Parallel Redis) [中文介绍](README_CN.md)
+# Scylla
 
-## What's Pedis?
+## Quick-start
 
-Pedis is the NoSQL data store using the SEASTAR framework, compatible with REDIS. The name of Pedis is an acronym of **P**arallel r**edis**, which with high throughput and low latency.
+To get the build going quickly, Scylla offers a [frozen toolchain](tools/toolchain/README.md)
+which would build and run Scylla using a pre-configured Docker image.
+Using the frozen toolchain will also isolate all of the installed
+dependencies in a Docker container.
+Assuming you have met the toolchain prerequisites, which is running
+Docker in user mode, building and running is as easy as:
 
-Pedis is built on [Scylla](https://www.scylladb.com/). Scylla is compatible with Apache Cassandra, which offers developers a dramatically higher-performing and resource effective NoSQL database to power modern and demanding applications.
+```bash
+$ ./tools/toolchain/dbuild ./configure.py
+$ ./tools/toolchain/dbuild ninja build/release/scylla
+$ ./tools/toolchain/dbuild ./build/release/scylla --developer-mode 1
+ ```
 
-## Pedis Vision
+Please see [HACKING.md](HACKING.md) for detailed information on building and developing Scylla.
 
-Pedis will rely on the open source community to polish REDIS clusters of ** easy to use **, ** high performance **, ** easy to operate and maintain **.
+**Note**: GCC >= 8.1.1 is required to compile Scylla.
 
-## Pedis data persistence mechanism
+## Running Scylla
 
-Pedis is compatible with REDIS protocol and implements common data structures in Redis 4.0.
+* Run Scylla
+```
+./build/release/scylla
 
-By analogy with MYSQL data, in Cylla, key space is equivalent to the database concept in MYSQL, and column family is equivalent to the table concept in MYSQL. Scylla clusters store data in specific keyspaces, specific tables. Therefore, when the Pedis cluster starts, the data that attempts to create keyspaces and tables for storing REDIS data structure. Pedis clusters will be stored in keyspaces called redis, where strings, lists, hashmap, set and Zset data are stored in redis. simple_objects, redis. lists, redis. maps, redis. set and redis. zset tables, respectively.
+```
 
-In addition, Scylla supports data in-memory storage mechanism, that is, data is stored only in memory, not in disk. In this configuration, Pedis data can be stored only in memory and deployed as a cache cluster.
+* run Scylla with one CPU and ./tmp as data directory
 
-## Data Consistency in Pedis Cluster
+```
+./build/release/scylla --datadir tmp --commitlog-directory tmp --smp 1
+```
 
-Scylla supports adjustable data consistency. Through this function, Scylla can achieve strong data consistency, and also can customize the level of read-write consistency. The formula "R + W > N" is often used to describe the implementation of adjustable data consistency. In this formula, R and W are determined by the number of nodes to read and write, respectively, by the level of consistency used. N is the replication factor. The most common way to achieve strong consistency is to use the QUORUM consistency level for reading and writing, which is often defined as a number larger than half of one node.
+* For more run options:
+```
+./build/release/scylla --help
+```
 
-Therefore, Pedis cluster will also have adjustable data consistency function, which can set different levels of read-write consistency to meet business needs.
+## Scylla APIs and compatibility
+By default, Scylla is compatible with Apache Cassandra and its APIs - CQL and
+Thrift. There is also experimental support for the API of Amazon DynamoDB,
+but being experimental it needs to be explicitly enabled to be used. For more
+information on how to enable the experimental DynamoDB compatibility in Scylla,
+and the current limitations of this feature, see
+[Alternator](docs/alternator/alternator.md) and
+[Getting started with Alternator](docs/alternator/getting-started.md).
 
-## Pedis Cluster Data and Scylla Cluster Data Interoperability
+## Building Fedora RPM
 
-The data written through REDIS protocol is stored in a specific keyspace & table in the cluster. The data in keyspace & table can also be read and written through Cassandra protocol. That is to say, data in PEDIS cluster can be accessed either through REDIS protocol or Cassandra protocol. This brings good flexibility to applications.
+As a pre-requisite, you need to install [Mock](https://fedoraproject.org/wiki/Mock) on your machine:
 
-## Planning
+```
+# Install mock:
+sudo yum install mock
 
-At present, the Pedis project needs to complete the following tasks:
+# Add user to the "mock" group:
+usermod -a -G mock $USER && newgrp mock
+```
 
-* Support Redis 4.0 protocol (priority support Redis strings, hashmap, set, Zset data structure related protocols);
-* Improve test cases;
-* Publish the first available version;
+Then, to build an RPM, run:
 
-## Getting started
+```
+./dist/redhat/build_rpm.sh
+```
 
-* ```git clone git@github.com:fastio/pedis.git```
-* ``` git submodule update --init --recursive```
-* ```sudo ./install-dependencies.sh```
-* ```./configure.py --mode=release --with=pedis```
-* ```ninja-build -j16``` # Assuming 16 system threads.
-* ```build/release/pedis --max-io-requests 1024 --smp 2```
+The built RPM is stored in ``/var/lib/mock/<configuration>/result`` directory.
+For example, on Fedora 21 mock reports the following:
 
+```
+INFO: Done(scylla-server-0.00-1.fc21.src.rpm) Config(default) 20 minutes 7 seconds
+INFO: Results and/or logs in: /var/lib/mock/fedora-21-x86_64/result
+```
 
+## Building Fedora-based Docker image
+
+Build a Docker image with:
+
+```
+cd dist/docker
+docker build -t <image-name> .
+```
+
+Run the image with:
+
+```
+docker run -p $(hostname -i):9042:9042 -i -t <image name>
+```
+
+## Contributing to Scylla
+
+[Hacking howto](HACKING.md)
+[Guidelines for contributing](CONTRIBUTING.md)

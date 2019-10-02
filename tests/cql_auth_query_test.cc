@@ -19,7 +19,7 @@
  * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <experimental/string_view>
+#include <string_view>
 
 #include <seastar/core/future.hh>
 #include <seastar/core/shared_ptr.hh>
@@ -36,38 +36,37 @@
 #include "cql3/statements/create_role_statement.hh"
 #include "db/config.hh"
 #include "exceptions/exceptions.hh"
-#include "stdx.hh"
 #include "seastarx.hh"
 #include "service/client_state.hh"
 #include "tests/cql_test_env.hh"
-#include "tests/test-utils.hh"
+#include <seastar/testing/test_case.hh>
 
-static const auto alice = stdx::string_view("alice");
-static const auto bob = stdx::string_view("bob");
+static const auto alice = std::string_view("alice");
+static const auto bob = std::string_view("bob");
 
-static db::config db_config_with_auth() {
-    db::config config;
-    config.authorizer("CassandraAuthorizer");
-    config.authenticator("PasswordAuthenticator");
+static shared_ptr<db::config> db_config_with_auth() {
+    shared_ptr<db::config> config_ptr = make_shared<db::config>();
+    auto& config = *config_ptr;
+    config.authorizer.set("CassandraAuthorizer");
+    config.authenticator.set("PasswordAuthenticator");
 
     // Disable time-based caching so that changing permissions of a user is reflected immediately.
-    config.permissions_validity_in_ms(0);
+    config.permissions_validity_in_ms.set(0);
 
-    return config;
+    return config_ptr;
 }
 
 //
 // These functions must be called inside Seastar threads.
 //
 
-static void create_user_if_not_exists(cql_test_env& env, stdx::string_view user_name) {
-    env.execute_cql(sprint("CREATE USER IF NOT EXISTS %s WITH PASSWORD '%s'", user_name, user_name)).get();
+static void create_user_if_not_exists(cql_test_env& env, std::string_view user_name) {
+    env.execute_cql(format("CREATE USER IF NOT EXISTS {} WITH PASSWORD '{}'", user_name, user_name)).get();
 }
 
 // Invoke `f` as though the user indicated with `user_name` had logged in. The current logged in user is restored after
 // `f` is invoked.
-template <typename Function>
-static void with_user(cql_test_env& env, stdx::string_view user_name, Function&& f) {
+static void with_user(cql_test_env& env, std::string_view user_name, noncopyable_function<void ()> f) {
     auto& cs = env.local_client_state();
     auto old_user = cs.user();
 
@@ -83,12 +82,11 @@ static void with_user(cql_test_env& env, stdx::string_view user_name, Function&&
 
 // Ensure that invoking the CQL query as a specific user throws `exceptions::unauthorized_exception`, but that, after
 // invoking `resolve` as a superuser, the same CQL query does not throw.
-template <class Function>
 void verify_unauthorized_then_ok(
         cql_test_env& env,
-        stdx::string_view user_name,
-        stdx::string_view cql_query,
-        Function&& resolve) {
+        std::string_view user_name,
+        std::string_view cql_query,
+        noncopyable_function<void ()> resolve) {
     const auto cql_query_string = sstring(cql_query);
 
     with_user(env, user_name, [&env, &cql_query_string] {
@@ -275,9 +273,9 @@ SEASTAR_TEST_CASE(revoke_role_restrictions) {
 ///
 static void verify_default_permissions(
         cql_test_env& env,
-        stdx::string_view user,
-        stdx::string_view grant_query,
-        stdx::string_view creation_query,
+        std::string_view user,
+        std::string_view grant_query,
+        std::string_view creation_query,
         const auth::resource& r) {
     create_user_if_not_exists(env, user);
     env.execute_cql(sstring(grant_query)).get0();

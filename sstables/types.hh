@@ -23,7 +23,7 @@
 
 #include <seastar/util/gcc6-concepts.hh>
 #include "disk_types.hh"
-#include "core/enum.hh"
+#include <seastar/core/enum.hh>
 #include "bytes.hh"
 #include "gc_clock.hh"
 #include "tombstone.hh"
@@ -38,6 +38,7 @@
 #include <type_traits>
 #include "version.hh"
 #include "encoding_stats.hh"
+#include "utils/UUID.hh"
 
 // While the sstable code works with char, bytes_view works with int8_t
 // (signed char). Rather than change all the code, let's do a cast.
@@ -296,7 +297,7 @@ struct compaction_metadata : public metadata_base<compaction_metadata> {
 };
 
 struct stats_metadata : public metadata_base<stats_metadata> {
-    utils::estimated_histogram estimated_row_size;
+    utils::estimated_histogram estimated_partition_size;
     utils::estimated_histogram estimated_cells_count;
     db::replay_position position;
     int64_t min_timestamp;
@@ -322,7 +323,7 @@ struct stats_metadata : public metadata_base<stats_metadata> {
         switch (v) {
         case sstable_version_types::mc:
             return f(
-                estimated_row_size,
+                estimated_partition_size,
                 estimated_cells_count,
                 position,
                 min_timestamp,
@@ -346,7 +347,7 @@ struct stats_metadata : public metadata_base<stats_metadata> {
         case sstable_version_types::ka:
         case sstable_version_types::la:
             return f(
-                estimated_row_size,
+                estimated_partition_size,
                 estimated_cells_count,
                 position,
                 min_timestamp,
@@ -410,16 +411,17 @@ struct serialization_header : public metadata_base<serialization_header> {
     }
 
     // mc serialization header minimum values are delta-encoded based on the default timestamp epoch times
+    // Note: following conversions rely on min_*_base.value being unsigned to prevent signed integer overflow
     api::timestamp_type get_min_timestamp() const {
         return static_cast<api::timestamp_type>(min_timestamp_base.value + encoding_stats::timestamp_epoch);
     }
 
-    int32_t get_min_ttl() const {
-        return static_cast<int32_t>(min_ttl_base.value) + encoding_stats::ttl_epoch;
+    int64_t get_min_ttl() const {
+        return static_cast<int64_t>(min_ttl_base.value + encoding_stats::ttl_epoch);
     }
 
-    int32_t get_min_local_deletion_time() const {
-        return static_cast<int32_t>(min_local_deletion_time_base.value) + encoding_stats::deletion_time_epoch;
+    int64_t get_min_local_deletion_time() const {
+        return static_cast<int64_t>(min_local_deletion_time_base.value + encoding_stats::deletion_time_epoch);
     }
 };
 
@@ -455,7 +457,9 @@ enum sstable_feature : uint8_t {
     NonCompoundPIEntries = 0,       // See #2993
     NonCompoundRangeTombstones = 1, // See #2986
     ShadowableTombstones = 2, // See #3885
-    End = 4,
+    CorrectStaticCompact = 3, // See #4139
+    CorrectEmptyCounters = 4, // See #4363
+    End = 5,
 };
 
 // Scylla-specific features enabled for a particular sstable.
@@ -493,6 +497,16 @@ enum class scylla_metadata_type : uint32_t {
     Sharding = 1,
     Features = 2,
     ExtensionAttributes = 3,
+    RunIdentifier = 4,
+};
+
+struct run_identifier {
+    // UUID is used for uniqueness across nodes, such that an imported sstable
+    // will not have its run identifier conflicted with the one of a local sstable.
+    utils::UUID id;
+
+    template <typename Describer>
+    auto describe_type(sstable_version_types v, Describer f) { return f(id); }
 };
 
 struct scylla_metadata {
@@ -501,12 +515,19 @@ struct scylla_metadata {
     disk_set_of_tagged_union<scylla_metadata_type,
             disk_tagged_union_member<scylla_metadata_type, scylla_metadata_type::Sharding, sharding_metadata>,
             disk_tagged_union_member<scylla_metadata_type, scylla_metadata_type::Features, sstable_enabled_features>,
-            disk_tagged_union_member<scylla_metadata_type, scylla_metadata_type::ExtensionAttributes, extension_attributes>
+            disk_tagged_union_member<scylla_metadata_type, scylla_metadata_type::ExtensionAttributes, extension_attributes>,
+            disk_tagged_union_member<scylla_metadata_type, scylla_metadata_type::RunIdentifier, run_identifier>
             > data;
 
-    bool has_feature(sstable_feature f) const {
+    sstable_enabled_features get_features() const {
         auto features = data.get<scylla_metadata_type::Features, sstable_enabled_features>();
-        return features && features->is_enabled(f);
+        if (!features) {
+            return sstable_enabled_features{};
+        }
+        return *features;
+    }
+    bool has_feature(sstable_feature f) const {
+        return get_features().is_enabled(f);
     }
     const extension_attributes* get_extension_attributes() const {
         return data.get<scylla_metadata_type::ExtensionAttributes, extension_attributes>();
@@ -518,6 +539,10 @@ struct scylla_metadata {
             ext = data.get<scylla_metadata_type::ExtensionAttributes, extension_attributes>();
         }
         return *ext;
+    }
+    std::optional<utils::UUID> get_optional_run_identifier() const {
+        auto* m = data.get<scylla_metadata_type::RunIdentifier, run_identifier>();
+        return m ? std::make_optional(m->id) : std::nullopt;
     }
 
     template <typename Describer>
@@ -547,10 +572,30 @@ struct hash<sstables::metadata_type> : enum_hash<sstables::metadata_type> {};
 namespace sstables {
 
 // Special value to represent expired (i.e., 'dead') liveness info
-constexpr static uint32_t expired_liveness_ttl = std::numeric_limits<int32_t>::max();
+constexpr static int64_t expired_liveness_ttl = std::numeric_limits<int32_t>::max();
 
-inline bool is_expired_liveness_ttl(uint32_t ttl) {
+inline bool is_expired_liveness_ttl(int64_t ttl) {
     return ttl == expired_liveness_ttl;
+}
+
+inline bool is_expired_liveness_ttl(gc_clock::duration ttl) {
+    return is_expired_liveness_ttl(ttl.count());
+}
+
+// Corresponding to Cassandra's NO_DELETION_TIME
+constexpr static int64_t no_deletion_time = std::numeric_limits<int32_t>::max();
+
+// Corresponding to Cassandra's MAX_DELETION_TIME
+constexpr static int64_t max_deletion_time = std::numeric_limits<int32_t>::max() - 1;
+
+inline int32_t adjusted_local_deletion_time(gc_clock::time_point local_deletion_time, bool& capped) {
+    int64_t ldt = local_deletion_time.time_since_epoch().count();
+    if (ldt <= max_deletion_time) {
+        capped = false;
+        return static_cast<int32_t>(ldt);
+    }
+    capped = true;
+    return static_cast<int32_t>(max_deletion_time);
 }
 
 struct statistics {

@@ -19,11 +19,12 @@
  * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "md5_hasher.hh"
+#include "hashers.hh"
 #include "random_partitioner.hh"
 #include "utils/class_registrator.hh"
 #include "utils/div_ceil.hh"
 #include <boost/multiprecision/cpp_int.hpp>
+#include <boost/lexical_cast.hpp>
 
 namespace dht {
 
@@ -47,7 +48,8 @@ static token cppint_to_token(boost::multiprecision::uint128_t i) {
         return minimum_token();
     }
     if (i > cppint127_max) {
-        throw std::runtime_error(sprint("RandomPartitioner value %s must be within [0, 2 ^ 127]", i));
+        throw std::runtime_error(format("RandomPartitioner value {} must be within [0, 2 ^ 127]",
+                boost::lexical_cast<std::string>(i)));
     }
     std::vector<int8_t> t;
     while (i) {
@@ -63,7 +65,7 @@ static token cppint_to_token(boost::multiprecision::uint128_t i) {
 // Convert a 16 bytes long raw byte array to token. Byte 0 is the most significant byte.
 static token bytes_to_token(bytes digest) {
     if (digest.size() != 16) {
-        throw std::runtime_error(sprint("RandomPartitioner digest should be 16 bytes, it is %d", digest.size()));
+        throw std::runtime_error(format("RandomPartitioner digest should be 16 bytes, it is {:d}", digest.size()));
     }
     // Translates the bytes array to signed integer i,
     // abs(i) is stored in token's _data array.

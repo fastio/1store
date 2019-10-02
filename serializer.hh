@@ -21,14 +21,16 @@
 #pragma once
 
 #include <vector>
+#include <unordered_set>
+#include <list>
 #include <array>
-#include "core/sstring.hh"
+#include <seastar/core/sstring.hh>
 #include <unordered_map>
-#include <experimental/optional>
+#include <optional>
 #include "enum_set.hh"
 #include "utils/managed_bytes.hh"
 #include "bytes_ostream.hh"
-#include "core/simple-stream.hh"
+#include <seastar/core/simple-stream.hh>
 #include "boost/variant/variant.hpp"
 #include "bytes_ostream.hh"
 #include "utils/input_stream.hh"
@@ -53,7 +55,7 @@ class buffer_view {
     FragmentIterator _next;
 public:
     using fragment_type = bytes_view;
-    
+
     class iterator {
         bytes_view _current;
         size_t _left = 0;
@@ -197,7 +199,21 @@ struct integral_serializer {
     }
 };
 
-template<> struct serializer<bool> : public integral_serializer<int8_t> {};
+template<> struct serializer<bool> {
+    template <typename Input>
+    static bool read(Input& i) {
+        return deserialize_integral<uint8_t>(i);
+    }
+    template< typename Output>
+    static void write(Output& out, bool v) {
+        serialize_integral(out, uint8_t(v));
+    }
+    template <typename Input>
+    static void skip(Input& i) {
+        read(i);
+    }
+
+};
 template<> struct serializer<int8_t> : public integral_serializer<int8_t> {};
 template<> struct serializer<uint8_t> : public integral_serializer<uint8_t> {};
 template<> struct serializer<int16_t> : public integral_serializer<int16_t> {};

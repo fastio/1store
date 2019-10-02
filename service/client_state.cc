@@ -50,29 +50,37 @@
 #include "db/schema_tables.hh"
 #include "tracing/trace_keyspace_helper.hh"
 #include "storage_service.hh"
+#include "database.hh"
 
 void service::client_state::set_login(::shared_ptr<auth::authenticated_user> user) {
     if (user == nullptr) {
         throw std::invalid_argument("Must provide user");
     }
     _user = std::move(user);
-    if (_is_request_copy) {
-        _user_is_dirty = true;
-    }
 }
 
-future<> service::client_state::check_user_exists() {
+future<> service::client_state::check_user_can_login() {
     if (auth::is_anonymous(*_user)) {
         return make_ready_future();
     }
 
-    return _auth_service->underlying_role_manager().exists(*_user->name).then([user = _user](bool exists) mutable {
+    const auto& role_manager = _auth_service->underlying_role_manager();
+
+    return role_manager.exists(*_user->name).then([user = _user](bool exists) mutable {
         if (!exists) {
             throw exceptions::authentication_exception(
-                            sprint("User %s doesn't exist - create it with CREATE USER query first",
+                            format("User {} doesn't exist - create it with CREATE USER query first",
                                             *user->name));
         }
         return make_ready_future();
+    }).then([user = _user, &role_manager] {
+        return role_manager.can_login(*user->name).then([user = std::move(user)](bool can_login) {
+            if (!can_login) {
+                throw exceptions::authentication_exception(format("{} is not permitted to log in", *user->name));
+            }
+
+            return make_ready_future();
+        });
     });
 }
 
@@ -86,18 +94,6 @@ void service::client_state::ensure_not_anonymous() const {
     validate_login();
     if (auth::is_anonymous(*_user)) {
         throw exceptions::unauthorized_exception("You have to be logged in and not anonymous to perform this request");
-    }
-}
-
-void service::client_state::merge(const client_state& other) {
-    if (other._dirty) {
-        _keyspace = other._keyspace;
-    }
-    if (_user == nullptr) {
-        _user = other._user;
-    }
-    if (_auth_state != other._auth_state) {
-        _auth_state = other._auth_state;
     }
 }
 
@@ -172,7 +168,7 @@ future<> service::client_state::has_access(const sstring& ks, auth::permission p
                 && (p == auth::permission::DROP);
 
         if (dropping_anything_in_tracing || dropping_auth_keyspace) {
-            throw exceptions::unauthorized_exception(sprint("Cannot %s %s", auth::permissions::to_string(p), resource));
+            throw exceptions::unauthorized_exception(format("Cannot {} {}", auth::permissions::to_string(p), resource));
         }
     }
 
@@ -181,7 +177,7 @@ future<> service::client_state::has_access(const sstring& ks, auth::permission p
         for (auto cf : { db::system_keyspace::LOCAL, db::system_keyspace::PEERS }) {
             tmp.insert(auth::make_data_resource(db::system_keyspace::NAME, cf));
         }
-        for (auto cf : db::schema_tables::ALL) {
+        for (auto cf : db::schema_tables::all_table_names(db::schema_features::full())) {
             tmp.insert(auth::make_data_resource(db::schema_tables::NAME, cf));
         }
         return tmp;
@@ -192,7 +188,7 @@ future<> service::client_state::has_access(const sstring& ks, auth::permission p
     }
     if (alteration_permissions.contains(p)) {
         if (auth::is_protected(*_auth_service, resource)) {
-            throw exceptions::unauthorized_exception(sprint("%s is protected", resource));
+            throw exceptions::unauthorized_exception(format("{} is protected", resource));
         }
     }
 
@@ -221,8 +217,7 @@ future<> service::client_state::ensure_has_permission(auth::permission p, const 
     return check_has_permission(p, r).then([this, p, &r](bool ok) {
         if (!ok) {
             throw exceptions::unauthorized_exception(
-                sprint(
-                        "User %s has no %s permission on %s or any of its parents",
+                format("User {} has no {} permission on {} or any of its parents",
                         *_user,
                         auth::permissions::to_string(p),
                         r));
@@ -230,45 +225,19 @@ future<> service::client_state::ensure_has_permission(auth::permission p, const 
     });
 }
 
-auth::service* service::client_state::local_auth_service_copy(const service::client_state& orig) const {
-    if (orig._auth_service && _cpu_of_origin != orig._cpu_of_origin) {
-        // if moved to a different shard - return a pointer to the local auth_service instance
-        return &service::get_local_storage_service().get_local_auth_service();
+void service::client_state::set_keyspace(database& db, sstring keyspace) {
+    // Skip keyspace validation for non-authenticated users. Apparently, some client libraries
+    // call set_keyspace() before calling login(), and we have to handle that.
+    if (_user && !db.has_keyspace(keyspace)) {
+        throw exceptions::invalid_request_exception(format("Keyspace '{}' does not exist", keyspace));
     }
-    return orig._auth_service;
-}
-
-::shared_ptr<auth::authenticated_user> service::client_state::local_user_copy(const service::client_state& orig) const {
-    if (orig._user) {
-        if (_cpu_of_origin != orig._cpu_of_origin) {
-            // if we moved to another shard create a local copy of authenticated_user
-            return ::make_shared<auth::authenticated_user>(*orig._user);
-        } else {
-            return orig._user;
-        }
-    }
-    return nullptr;
-}
-
-service::client_state::client_state(service::client_state::request_copy_tag, const service::client_state& orig, api::timestamp_type ts)
-        : _keyspace(orig._keyspace)
-        , _cpu_of_origin(engine().cpu_id())
-        , _user(local_user_copy(orig))
-        , _auth_state(orig._auth_state)
-        , _is_internal(orig._is_internal)
-        , _is_thrift(orig._is_thrift)
-        , _is_request_copy(true)
-        , _remote_address(orig._remote_address)
-        , _auth_service(local_auth_service_copy(orig))
-        , _request_ts(ts)
-{
-    assert(!orig._trace_state_ptr);
+    _keyspace = keyspace;
 }
 
 future<> service::client_state::ensure_exists(const auth::resource& r) const {
     return _auth_service->exists(r).then([&r](bool exists) {
         if (!exists) {
-            throw exceptions::invalid_request_exception(sprint("%s doesn't exist.", r));
+            throw exceptions::invalid_request_exception(format("{} doesn't exist.", r));
         }
 
         return make_ready_future<>();

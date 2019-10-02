@@ -41,30 +41,34 @@
 
 #pragma once
 
-#include "cql3/restrictions/abstract_restriction.hh"
+#include <optional>
+
+#include "cql3/restrictions/restriction.hh"
 #include "cql3/restrictions/term_slice.hh"
 #include "cql3/term.hh"
 #include "cql3/abstract_marker.hh"
-#include "core/shared_ptr.hh"
+#include <seastar/core/shared_ptr.hh>
 #include "schema.hh"
 #include "to_string.hh"
 #include "exceptions/exceptions.hh"
 #include "keys.hh"
 #include "mutation_partition.hh"
+#include "utils/like_matcher.hh"
 
 namespace cql3 {
 
 namespace restrictions {
 
-class single_column_restriction : public abstract_restriction {
+class single_column_restriction : public restriction {
 protected:
     /**
      * The definition of the column to which apply the restriction.
      */
     const column_definition& _column_def;
 public:
-    single_column_restriction(const column_definition& column_def)
-        : _column_def(column_def)
+    single_column_restriction(op op, const column_definition& column_def)
+        : restriction(op)
+        , _column_def(column_def)
     { }
 
     const column_definition& get_column_def() const {
@@ -84,8 +88,11 @@ public:
     }
 #endif
 
-    virtual bool has_supporting_index(const secondary_index::secondary_index_manager& index_manager) const override {
+    virtual bool has_supporting_index(const secondary_index::secondary_index_manager& index_manager, allow_local_index allow_local) const override {
         for (const auto& index : index_manager.list_indexes()) {
+            if (!allow_local && index.metadata().local()) {
+                continue;
+            }
             if (is_supported_by(index))
                 return true;
         }
@@ -93,7 +100,7 @@ public:
     }
 
     virtual bool is_supported_by(const secondary_index::index& index) const = 0;
-    using abstract_restriction::is_satisfied_by;
+    using restriction::is_satisfied_by;
     virtual bool is_satisfied_by(bytes_view data, const query_options& options) const = 0;
     virtual ::shared_ptr<single_column_restriction> apply_to(const column_definition& cdef) = 0;
 #if 0
@@ -111,7 +118,7 @@ public:
     class IN;
     class IN_with_values;
     class IN_with_marker;
-
+    class LIKE;
     class slice;
     class contains;
 
@@ -128,20 +135,16 @@ private:
     ::shared_ptr<term> _value;
 public:
     EQ(const column_definition& column_def, ::shared_ptr<term> value)
-        : single_column_restriction(column_def)
+        : single_column_restriction(op::EQ, column_def)
         , _value(std::move(value))
     { }
 
     virtual bool uses_function(const sstring& ks_name, const sstring& function_name) const override {
-        return abstract_restriction::term_uses_function(_value, ks_name, function_name);
+        return restriction::term_uses_function(_value, ks_name, function_name);
     }
 
     virtual bool is_supported_by(const secondary_index::index& index) const override {
         return index.supports_expression(_column_def, cql3::operator_type::EQ);
-    }
-
-    virtual bool is_EQ() const override {
-        return true;
     }
 
     virtual std::vector<bytes_opt> values(const query_options& options) const override {
@@ -155,12 +158,11 @@ public:
     }
 
     virtual sstring to_string() const override {
-        return sprint("EQ(%s)", _value->to_string());
+        return format("EQ({})", _value->to_string());
     }
 
     virtual void merge_with(::shared_ptr<restriction> other) {
-        throw exceptions::invalid_request_exception(sprint(
-            "%s cannot be restricted by more than one relation if it includes an Equal", _column_def.name_as_text()));
+        throw exceptions::invalid_request_exception(format("{} cannot be restricted by more than one relation if it includes an Equal", _column_def.name_as_text()));
     }
 
     virtual bool is_satisfied_by(const schema& schema,
@@ -186,20 +188,15 @@ public:
 class single_column_restriction::IN : public single_column_restriction {
 public:
     IN(const column_definition& column_def)
-        : single_column_restriction(column_def)
+        : single_column_restriction(op::IN, column_def)
     { }
-
-    virtual bool is_IN() const override {
-        return true;
-    }
 
     virtual bool is_supported_by(const secondary_index::index& index) const override {
         return index.supports_expression(_column_def, cql3::operator_type::IN);
     }
 
     virtual void merge_with(::shared_ptr<restriction> r) override {
-        throw exceptions::invalid_request_exception(sprint(
-            "%s cannot be restricted by more than one relation if it includes a IN", _column_def.name_as_text()));
+        throw exceptions::invalid_request_exception(format("{} cannot be restricted by more than one relation if it includes a IN", _column_def.name_as_text()));
     }
 
     virtual bool is_satisfied_by(const schema& schema,
@@ -240,7 +237,7 @@ public:
     { }
 
     virtual bool uses_function(const sstring& ks_name, const sstring& function_name) const override {
-        return abstract_restriction::term_uses_function(_values, ks_name, function_name);
+        return restriction::term_uses_function(_values, ks_name, function_name);
     }
 
     virtual std::vector<bytes_opt> values_raw(const query_options& options) const override {
@@ -252,7 +249,7 @@ public:
     }
 
     virtual sstring to_string() const override {
-        return sprint("IN(%s)", std::to_string(_values));
+        return format("IN({})", std::to_string(_values));
     }
 
     virtual ::shared_ptr<single_column_restriction> apply_to(const column_definition& cdef) override {
@@ -294,26 +291,22 @@ private:
     term_slice _slice;
 public:
     slice(const column_definition& column_def, statements::bound bound, bool inclusive, ::shared_ptr<term> term)
-        : single_column_restriction(column_def)
+        : single_column_restriction(op::SLICE, column_def)
         , _slice(term_slice::new_instance(bound, inclusive, std::move(term)))
     { }
 
     slice(const column_definition& column_def, term_slice slice)
-        : single_column_restriction(column_def)
+        : single_column_restriction(op::SLICE, column_def)
         , _slice(slice)
     { }
 
     virtual bool uses_function(const sstring& ks_name, const sstring& function_name) const override {
-        return (_slice.has_bound(statements::bound::START) && abstract_restriction::term_uses_function(_slice.bound(statements::bound::START), ks_name, function_name))
-                || (_slice.has_bound(statements::bound::END) && abstract_restriction::term_uses_function(_slice.bound(statements::bound::END), ks_name, function_name));
+        return (_slice.has_bound(statements::bound::START) && restriction::term_uses_function(_slice.bound(statements::bound::START), ks_name, function_name))
+                || (_slice.has_bound(statements::bound::END) && restriction::term_uses_function(_slice.bound(statements::bound::END), ks_name, function_name));
     }
 
     virtual bool is_supported_by(const secondary_index::index& index) const override {
         return _slice.is_supported_by(_column_def, index);
-    }
-
-    virtual bool is_slice() const override {
-        return true;
     }
 
     virtual std::vector<bytes_opt> values(const query_options& options) const override {
@@ -334,20 +327,17 @@ public:
 
     virtual void merge_with(::shared_ptr<restriction> r) override {
         if (!r->is_slice()) {
-            throw exceptions::invalid_request_exception(sprint(
-                "Column \"%s\" cannot be restricted by both an equality and an inequality relation", _column_def.name_as_text()));
+            throw exceptions::invalid_request_exception(format("Column \"{}\" cannot be restricted by both an equality and an inequality relation", _column_def.name_as_text()));
         }
 
         auto other_slice = static_pointer_cast<slice>(r);
 
         if (has_bound(statements::bound::START) && other_slice->has_bound(statements::bound::START)) {
-            throw exceptions::invalid_request_exception(sprint(
-                   "More than one restriction was found for the start bound on %s", _column_def.name_as_text()));
+            throw exceptions::invalid_request_exception(format("More than one restriction was found for the start bound on {}", _column_def.name_as_text()));
         }
 
         if (has_bound(statements::bound::END) && other_slice->has_bound(statements::bound::END)) {
-            throw exceptions::invalid_request_exception(sprint(
-                "More than one restriction was found for the end bound on %s", _column_def.name_as_text()));
+            throw exceptions::invalid_request_exception(format("More than one restriction was found for the end bound on {}", _column_def.name_as_text()));
         }
 
         _slice.merge(other_slice->_slice);
@@ -379,7 +369,7 @@ public:
 #endif
 
     virtual sstring to_string() const override {
-        return sprint("SLICE%s", _slice);
+        return format("SLICE{}", _slice);
     }
 
     virtual bool is_satisfied_by(const schema& schema,
@@ -394,6 +384,64 @@ public:
     }
 };
 
+class single_column_restriction::LIKE final : public single_column_restriction {
+private:
+    ::shared_ptr<term> _value;
+    /// Matches cell value against LIKE pattern.  Optional because it cannot be initialized in the
+    /// constructor when the pattern is a bind marker.  Mutable because it is initialized on demand
+    /// in is_satisfied_by().
+    mutable std::optional<like_matcher> _matcher;
+    mutable bytes_opt _last_pattern; ///< Pattern from which _matcher was last initialized.
+public:
+    LIKE(const column_definition& column_def, ::shared_ptr<term> value)
+        : single_column_restriction(op::LIKE, column_def)
+        , _value(value)
+    { }
+
+    virtual std::vector<bytes_opt> values(const query_options& options) const override {
+        std::vector<bytes_opt> v;
+        v.push_back(to_bytes_opt(_value->bind_and_get(options)));
+        return v;
+    }
+
+    virtual bool uses_function(const sstring& ks_name, const sstring& function_name) const override {
+        return false;
+    }
+
+    virtual bool is_supported_by(const secondary_index::index& index) const {
+        return index.supports_expression(_column_def, cql3::operator_type::LIKE);
+    }
+
+    virtual sstring to_string() const override {
+        return format("LIKE({})", _value->to_string());
+    }
+
+    virtual void merge_with(::shared_ptr<restriction> other) {
+        throw exceptions::invalid_request_exception(
+            format("{} cannot be restricted by more than one relation if it includes a LIKE",
+                   _column_def.name_as_text()));
+    }
+
+    virtual bool is_satisfied_by(const schema& schema,
+                                 const partition_key& key,
+                                 const clustering_key_prefix& ckey,
+                                 const row& cells,
+                                 const query_options& options,
+                                 gc_clock::time_point now) const override;
+    virtual bool is_satisfied_by(bytes_view data, const query_options& options) const override;
+    virtual ::shared_ptr<single_column_restriction> apply_to(const column_definition& cdef) override {
+        return ::make_shared<LIKE>(cdef, _value);
+    }
+
+  private:
+    /// If necessary, reinitializes _matcher and _last_pattern.
+    ///
+    /// Invoked from is_satisfied_by(), so must be const.
+    ///
+    /// @return true iff _value was successfully translated to LIKE pattern (regardless of initialization)
+    bool init_matcher(const query_options& options) const;
+};
+
 // This holds CONTAINS, CONTAINS_KEY, and map[key] = value restrictions because we might want to have any combination of them.
 class single_column_restriction::contains final : public single_column_restriction {
 private:
@@ -403,7 +451,7 @@ private:
     std::vector<::shared_ptr<term>> _entry_values;
 public:
     contains(const column_definition& column_def, ::shared_ptr<term> t, bool is_key)
-            : single_column_restriction(column_def) {
+            : single_column_restriction(op::CONTAINS, column_def) {
         if (is_key) {
             _keys.emplace_back(std::move(t));
         } else {
@@ -412,7 +460,8 @@ public:
     }
 
     contains(const column_definition& column_def, ::shared_ptr<term> map_key, ::shared_ptr<term> map_value)
-            : single_column_restriction(column_def) {
+            : single_column_restriction(op::CONTAINS, column_def)
+        {
         _entry_keys.emplace_back(std::move(map_key));
         _entry_values.emplace_back(std::move(map_value));
     }
@@ -421,14 +470,9 @@ public:
         return bind_and_get(_values, options);
     }
 
-    virtual bool is_contains() const override {
-        return true;
-    }
-
     virtual void merge_with(::shared_ptr<restriction> other_restriction) override {
         if (!other_restriction->is_contains()) {
-            throw exceptions::invalid_request_exception(sprint(
-                      "Collection column %s can only be restricted by CONTAINS, CONTAINS KEY, or map-entry equality",
+            throw exceptions::invalid_request_exception(format("Collection column {} can only be restricted by CONTAINS, CONTAINS KEY, or map-entry equality",
                       get_column_def().name_as_text()));
         }
 
@@ -484,14 +528,14 @@ public:
     }
 
     virtual bool uses_function(const sstring& ks_name, const sstring& function_name) const override {
-        return abstract_restriction::term_uses_function(_values, ks_name, function_name)
-            || abstract_restriction::term_uses_function(_keys, ks_name, function_name)
-            || abstract_restriction::term_uses_function(_entry_keys, ks_name, function_name)
-            || abstract_restriction::term_uses_function(_entry_values, ks_name, function_name);
+        return restriction::term_uses_function(_values, ks_name, function_name)
+            || restriction::term_uses_function(_keys, ks_name, function_name)
+            || restriction::term_uses_function(_entry_keys, ks_name, function_name)
+            || restriction::term_uses_function(_entry_values, ks_name, function_name);
     }
 
     virtual sstring to_string() const override {
-        return sprint("CONTAINS(values=%s, keys=%s, entryKeys=%s, entryValues=%s)",
+        return format("CONTAINS(values={}, keys={}, entryKeys={}, entryValues={})",
             std::to_string(_values), std::to_string(_keys), std::to_string(_entry_keys), std::to_string(_entry_values));
     }
 

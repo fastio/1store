@@ -1,4 +1,5 @@
-#!/usr/bin/python3
+#!/usr/bin/python2
+# -*- coding: utf-8 -*-
 #
 # Copyright 2018 ScyllaDB
 #
@@ -70,7 +71,7 @@ if __name__ == '__main__':
         rpms = glob.glob('/home/centos/scylla*.*.rpm')
         run('yum install -y {}'.format(' '.join(rpms)))
     else:
-        run('yum install -y scylla-ami')
+        run('yum install -y scylla-ami scylla-debuginfo')
 
     if args.repo_for_install:
         os.remove('/etc/yum.repos.d/scylla_install.repo')
@@ -85,9 +86,9 @@ if __name__ == '__main__':
         for l in lines:
             if not re.match(r'^ - mounts\n$', l):
                 f.write(l)
-    run('/usr/lib/scylla/scylla_setup --ntp-domain amazon --no-coredump-setup --no-sysconfig-setup --no-raid-setup --no-io-setup --no-bootparam-setup --no-ec2-check')
-    run('/usr/lib/scylla/scylla_sysconfig_setup --ami')
-    run('/usr/lib/scylla/scylla_bootparam_setup --ami')
+    run('/opt/scylladb/scripts/scylla_setup --ntp-domain amazon --no-coredump-setup --no-sysconfig-setup --no-raid-setup --no-io-setup --no-bootparam-setup --no-ec2-check')
+    run('/opt/scylladb/scripts/scylla_sysconfig_setup --ami')
+    run('/opt/scylladb/scripts/scylla_bootparam_setup --ami')
     os.remove('/home/centos/.ssh/authorized_keys')
     os.remove('/var/lib/scylla-housekeeping/housekeeping.uuid')
 
@@ -108,7 +109,7 @@ if __name__ == '__main__':
     mlkver = get_kver('/boot/vmlinuz-*el7.elrepo.x86_64')
     run('grubby --grub2 --set-default /boot/vmlinuz-{mlkver}'.format(mlkver=mlkver))
     with open('/etc/yum.conf', 'a') as f:
-        f.write('exclude=kernel kernel-devel')
+        f.write(u'exclude=kernel kernel-devel')
 
     run('dracut --verbose --add-drivers "ixgbevf nvme ena" --force --kver {c7kver}'.format(c7kver=c7kver))
     run('dracut --verbose --add-drivers "ixgbevf nvme ena" --force --kver {mlkver}'.format(mlkver=mlkver))

@@ -29,9 +29,9 @@
 #include <seastar/core/future.hh>
 #include "seastarx.hh"
 #include <unordered_set>
-#include <boost/filesystem.hpp>
 #include <gms/gossiper.hh>
 #include "utils/small_vector.hh"
+#include "lister.hh"
 
 namespace service {
 class storage_proxy;
@@ -41,8 +41,8 @@ class storage_service;
 namespace db {
 namespace hints {
 
-future<dev_t> get_device_id(boost::filesystem::path path);
-future<bool> is_mountpoint(boost::filesystem::path path);
+future<dev_t> get_device_id(const fs::path& path);
+future<bool> is_mountpoint(const fs::path& path);
 
 using timer_clock_type = seastar::lowres_clock;
 
@@ -111,7 +111,7 @@ private:
     /// \param path directory to scan
     /// \param ep_name end point ID (as a string)
     /// \return future that resolves when scanning is complete
-    future<> scan_one_ep_dir(boost::filesystem::path path, manager& shard_manager, ep_key_type ep_key);
+    future<> scan_one_ep_dir(fs::path path, manager& shard_manager, ep_key_type ep_key);
 };
 
 class resource_manager {
@@ -119,13 +119,11 @@ class resource_manager {
     const size_t _min_send_hint_budget;
     seastar::semaphore _send_limiter;
 
-    uint64_t _size_of_hints_in_progress = 0;
     space_watchdog::shard_managers_set _shard_managers;
     space_watchdog::per_device_limits_map _per_device_limits_map;
     space_watchdog _space_watchdog;
 
 public:
-    static constexpr uint64_t max_size_of_hints_in_progress = 10 * 1024 * 1024; // 10MB
     static constexpr size_t hint_segment_size_in_mb = 32;
     static constexpr size_t max_hints_per_ep_size_mb = 128; // 4 files 32MB each
     static constexpr size_t max_hints_send_queue_length = 128;
@@ -142,22 +140,6 @@ public:
     resource_manager& operator=(resource_manager&&) = delete;
 
     future<semaphore_units<semaphore_default_exception_factory>> get_send_units_for(size_t buf_size);
-
-    bool too_many_hints_in_progress() const {
-        return _size_of_hints_in_progress > max_size_of_hints_in_progress;
-    }
-
-    uint64_t size_of_hints_in_progress() const {
-        return _size_of_hints_in_progress;
-    }
-
-    inline void inc_size_of_hints_in_progress(int64_t delta) {
-        _size_of_hints_in_progress += delta;
-    }
-
-    inline void dec_size_of_hints_in_progress(int64_t delta) {
-        _size_of_hints_in_progress -= delta;
-    }
 
     future<> start(shared_ptr<service::storage_proxy> proxy_ptr, shared_ptr<gms::gossiper> gossiper_ptr, shared_ptr<service::storage_service> ss_ptr);
     void allow_replaying() noexcept;

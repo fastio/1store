@@ -26,15 +26,16 @@
 #include "cell_locking.hh"
 #include "mutation_reader.hh"
 #include "tests/sstable_utils.hh"
+#include "tests/test_services.hh"
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/statistics.hpp>
 #include <boost/range/irange.hpp>
 
 using namespace sstables;
 
-static db::nop_large_partition_handler nop_lp_handler;
+class perf_sstable_test_env {
+    test_env _env;
 
-class test_env {
 public:
     struct conf {
         unsigned partitions;
@@ -78,7 +79,7 @@ private:
         std::vector<schema::column> columns;
 
         for (unsigned i = 0; i < _cfg.num_columns; ++i) {
-            columns.push_back(schema::column{ to_bytes(sprint("column%04d", i)), utf8_type });
+            columns.push_back(schema::column{ to_bytes(format("column{:04d}", i)), utf8_type });
         }
 
         schema_builder builder(make_lw_shared(schema(generate_legacy_id("ks", "perf-test"), "ks", "perf-test",
@@ -99,7 +100,7 @@ private:
     }
 
 public:
-    test_env(conf cfg) : _cfg(std::move(cfg))
+    perf_sstable_test_env(conf cfg) : _cfg(std::move(cfg))
            , s(create_schema())
            , _distribution('@', '~')
            , _mt(make_lw_shared<memtable>(s))
@@ -109,8 +110,9 @@ public:
 
     future<> fill_memtable() {
         auto idx = boost::irange(0, int(_cfg.partitions / _cfg.sstables));
-        return do_for_each(idx.begin(), idx.end(), [this] (auto iteration) {
-            auto key = partition_key::from_deeply_exploded(*s, { this->random_key() });
+        auto local_keys = make_local_keys(int(_cfg.partitions / _cfg.sstables), s, _cfg.key_size);
+        return do_for_each(idx.begin(), idx.end(), [this, local_keys = std::move(local_keys)] (auto iteration) {
+            auto key = partition_key::from_deeply_exploded(*s, { local_keys.at(iteration) });
             auto mut = mutation(this->s, key);
             for (auto& cdef: this->s->regular_columns()) {
                 mut.set_clustered_cell(clustering_key::make_empty(), cdef, atomic_cell::make_live(*utf8_type, 0, utf8_type->decompose(this->random_column())));
@@ -121,7 +123,7 @@ public:
     }
 
     future<> load_sstables(unsigned iterations) {
-        _sst.push_back(make_sstable(s, this->dir(), 0, sstable::version_types::ka, sstable::format_types::big));
+        _sst.push_back(_env.make_sstable(s, this->dir(), 0, sstable::version_types::ka, sstable::format_types::big));
         return _sst.back()->load();
     }
 
@@ -137,11 +139,11 @@ public:
             size_t partitions = _mt->partition_count();
 
             test_setup::create_empty_test_dir(dir()).get();
-            auto sst = sstables::test::make_test_sstable(_cfg.buffer_size, s, dir(), idx, sstable::version_types::ka, sstable::format_types::big);
+            auto sst = _env.make_sstable(s, dir(), idx, sstable::version_types::ka, sstable::format_types::big, _cfg.buffer_size);
 
-            auto start = test_env::now();
+            auto start = perf_sstable_test_env::now();
             write_memtable_to_sstable_for_test(*_mt, sst).get();
-            auto end = test_env::now();
+            auto end = perf_sstable_test_env::now();
 
             _mt->revert_flushed_memory();
 
@@ -154,7 +156,7 @@ public:
         return test_setup::create_empty_test_dir(dir()).then([this, idx] {
             return seastar::async([this, idx] {
                 auto sst_gen = [this, gen = make_lw_shared<unsigned>(idx)] () mutable {
-                    return sstables::test::make_test_sstable(_cfg.buffer_size, s, dir(), (*gen)++, sstable::version_types::ka, sstable::format_types::big);
+                    return _env.make_sstable(s, dir(), (*gen)++, sstable::version_types::ka, sstable::format_types::big, _cfg.buffer_size);
                 };
 
                 std::vector<shared_sstable> ssts;
@@ -169,13 +171,11 @@ public:
                 cache_tracker tracker;
                 cell_locker_stats cl_stats;
                 auto cm = make_lw_shared<compaction_manager>();
-                column_family::config cfg;
-                cfg.large_partition_handler = &nop_lp_handler;
-                auto cf = make_lw_shared<column_family>(s, cfg, column_family::no_commitlog(), *cm, cl_stats, tracker);
+                auto cf = make_lw_shared<column_family>(s, column_family_test_config(), column_family::no_commitlog(), *cm, cl_stats, tracker);
 
-                auto start = test_env::now();
-                auto ret = sstables::compact_sstables(sstables::compaction_descriptor(std::move(ssts)), *cf, sst_gen).get0();
-                auto end = test_env::now();
+                auto start = perf_sstable_test_env::now();
+                auto ret = sstables::compact_sstables(sstables::compaction_descriptor(std::move(ssts)), *cf, sst_gen, sstables::replacer_fn_no_op()).get0();
+                auto end = perf_sstable_test_env::now();
 
                 auto partitions_per_sstable = _cfg.partitions / _cfg.sstables;
                 assert(ret.total_keys_written == partitions_per_sstable);
@@ -188,10 +188,10 @@ public:
 
     future<double> read_all_indexes(int idx) {
         return do_with(test(_sst[0]), [] (auto& sst) {
-            const auto start = test_env::now();
+            const auto start = perf_sstable_test_env::now();
 
             return sst.read_indexes().then([start] (const auto& indexes) {
-                auto end = test_env::now();
+                auto end = perf_sstable_test_env::now();
                 auto duration = std::chrono::duration<double>(end - start).count();
                 return indexes.size() / duration;
             });
@@ -200,7 +200,7 @@ public:
 
     future<double> read_sequential_partitions(int idx) {
         return do_with(_sst[0]->read_rows_flat(s), [this] (flat_mutation_reader& r) {
-            auto start = test_env::now();
+            auto start = perf_sstable_test_env::now();
             auto total = make_lw_shared<size_t>(0);
             auto done = make_lw_shared<bool>(false);
             return do_until([done] { return *done; }, [this, done, total, &r] {
@@ -217,7 +217,7 @@ public:
                     }
                 });
             }).then([total, start] {
-                auto end = test_env::now();
+                auto end = perf_sstable_test_env::now();
                 auto duration = std::chrono::duration<double>(end - start).count();
                 return *total / duration;
             });
@@ -228,7 +228,7 @@ public:
 // The function func should carry on with the test, and return the number of partitions processed.
 // time_runs will then map reduce it, and return the aggregate partitions / sec for the whole system.
 template <typename Func>
-future<> time_runs(unsigned iterations, unsigned parallelism, distributed<test_env>& dt, Func func) {
+future<> time_runs(unsigned iterations, unsigned parallelism, distributed<perf_sstable_test_env>& dt, Func func) {
     using namespace boost::accumulators;
     auto acc = make_lw_shared<accumulator_set<double, features<tag::mean, tag::error_of<tag::mean>>>>();
     auto idx = boost::irange(0, int(iterations));
@@ -242,6 +242,6 @@ future<> time_runs(unsigned iterations, unsigned parallelism, distributed<test_e
             });
         });
     }).then([acc, iterations, parallelism] {
-        std::cout << sprint("%.2f", mean(*acc)) << " +- " << sprint("%.2f", error_of<tag::mean>(*acc)) << " partitions / sec (" << iterations << " runs, " << parallelism << " concurrent ops)\n";
+        std::cout << format("{:.2f}", mean(*acc)) << " +- " << format("{:.2f}", error_of<tag::mean>(*acc)) << " partitions / sec (" << iterations << " runs, " << parallelism << " concurrent ops)\n";
     });
 }

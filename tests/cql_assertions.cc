@@ -40,7 +40,7 @@ rows_assertions::with_size(size_t size) {
     auto rs = _rows->rs().result_set();
     auto row_count = rs.size();
     if (row_count != size) {
-        fail(sprint("Expected %d row(s) but got %d", size, row_count));
+        fail(format("Expected {:d} row(s) but got {:d}", size, row_count));
     }
     return {*this};
 }
@@ -51,7 +51,7 @@ rows_assertions::is_empty() {
     auto row_count = rs.size();
     if (row_count != 0) {
         auto&& first_row = *rs.rows().begin();
-        fail(sprint("Expected no rows, but got %d. First row: %s", row_count, to_string(first_row)));
+        fail(format("Expected no rows, but got {:d}. First row: {}", row_count, to_string(first_row)));
     }
     return {*this};
 }
@@ -67,6 +67,33 @@ rows_assertions::is_not_empty() {
 }
 
 rows_assertions
+rows_assertions::rows_assertions::is_null() {
+    auto rs = _rows->rs().result_set();
+    for (auto&& row : rs.rows()) {
+        for (const bytes_opt& v : row) {
+            if (v) {
+                fail(format("Expected null values. Found: {}\n", v));
+            }
+        }
+    }
+    return {*this};
+}
+
+rows_assertions
+rows_assertions::rows_assertions::is_not_null() {
+    auto rs = _rows->rs().result_set();
+    for (auto&& row : rs.rows()) {
+        for (const bytes_opt& v : row) {
+            if (!v) {
+                fail(format("Expected non-null values. {}\n", to_string(row)));
+            }
+        }
+    }
+    return is_not_empty();
+}
+
+
+rows_assertions
 rows_assertions::with_row(std::initializer_list<bytes_opt> values) {
     auto rs = _rows->rs().result_set();
     std::vector<bytes_opt> expected_row(values);
@@ -75,32 +102,32 @@ rows_assertions::with_row(std::initializer_list<bytes_opt> values) {
             return {*this};
         }
     }
-    fail(sprint("Expected row not found: %s not in %s\n", to_string(expected_row), _rows));
+    fail(format("Expected row not found: {} not in {}\n", to_string(expected_row), _rows));
     return {*this};
 }
 
 // Verifies that the result has the following rows and only that rows, in that order.
 rows_assertions
-rows_assertions::with_rows(std::initializer_list<std::initializer_list<bytes_opt>> rows) {
+rows_assertions::with_rows(std::vector<std::vector<bytes_opt>> rows) {
     auto rs = _rows->rs().result_set();
     auto actual_i = rs.rows().begin();
     auto actual_end = rs.rows().end();
     int row_nr = 0;
     for (auto&& row : rows) {
         if (actual_i == actual_end) {
-            fail(sprint("Expected more rows (%d), got %d", rows.size(), rs.size()));
+            fail(format("Expected more rows ({:d}), got {:d}", rows.size(), rs.size()));
         }
         auto& actual = *actual_i;
         if (!std::equal(
             std::begin(row), std::end(row),
             std::begin(actual), std::end(actual))) {
-            fail(sprint("row %d differs, expected %s got %s", row_nr, to_string(row), to_string(actual)));
+            fail(format("row {:d} differs, expected {} got {}", row_nr, to_string(row), to_string(actual)));
         }
         ++actual_i;
         ++row_nr;
     }
     if (actual_i != actual_end) {
-        fail(sprint("Expected less rows (%d), got %d. Next row is: %s", rows.size(), rs.size(),
+        fail(format("Expected less rows ({:d}), got {:d}. Next row is: {}", rows.size(), rs.size(),
                     to_string(*actual_i)));
     }
     return {*this};
@@ -118,12 +145,12 @@ rows_assertions::with_rows_ignore_order(std::vector<std::vector<bytes_opt>> rows
                     std::begin(expected), std::end(expected));
         });
         if (found == std::end(actual)) {
-            fail(sprint("row %s not found in result set (%s)", to_string(expected),
+            fail(format("row {} not found in result set ({})", to_string(expected),
                ::join(", ", actual | boost::adaptors::transformed([] (auto& r) { return to_string(r); }))));
         }
     }
     if (rs.size() != rows.size()) {
-        fail(sprint("Expected more rows (%d), got %d", rs.size(), rows.size()));
+        fail(format("Expected different number of rows ({:d}), got {:d}", rows.size(), rs.size()));
     }
     return {*this};
 }
@@ -147,7 +174,22 @@ result_msg_assertions assert_that(shared_ptr<cql_transport::messages::result_mes
 rows_assertions rows_assertions::with_serialized_columns_count(size_t columns_count) {
     size_t serialized_column_count = _rows->rs().get_metadata().column_count();
     if (serialized_column_count != columns_count) {
-        fail(sprint("Expected %d serialized columns(s) but got %d", columns_count, serialized_column_count));
+        fail(format("Expected {:d} serialized columns(s) but got {:d}", columns_count, serialized_column_count));
     }
     return {*this};
+}
+
+shared_ptr<cql_transport::messages::result_message> cquery_nofail(
+        cql_test_env& env, const char* query, std::unique_ptr<cql3::query_options>&& qo, const std::experimental::source_location& loc) {
+    try {
+        if (qo) {
+            return env.execute_cql(query, std::move(qo)).get0();
+        } else {
+            return env.execute_cql(query).get0();
+        }
+    } catch (...) {
+        BOOST_FAIL(format("query '{}' failed: {}\n{}:{}: originally from here",
+                          query, std::current_exception(), loc.file_name(), loc.line()));
+    }
+    return shared_ptr<cql_transport::messages::result_message>(nullptr);
 }

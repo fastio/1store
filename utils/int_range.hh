@@ -34,12 +34,12 @@ unsigned cardinality(const int_range& r) {
 }
 
 inline
-unsigned cardinality(const stdx::optional<int_range>& ropt) {
+unsigned cardinality(const std::optional<int_range>& ropt) {
     return ropt ? cardinality(*ropt) : 0;
 }
 
 inline
-stdx::optional<int_range> intersection(const int_range& a, const int_range& b) {
+std::optional<int_range> intersection(const int_range& a, const int_range& b) {
     auto int_tri_cmp = [] (int x, int y) {
         return x < y ? -1 : (x > y ? 1 : 0);
     };
@@ -49,7 +49,7 @@ stdx::optional<int_range> intersection(const int_range& a, const int_range& b) {
 inline
 int_range make_int_range(int start_inclusive, int end_exclusive) {
     if (end_exclusive <= start_inclusive) {
-        throw std::runtime_error(sprint("invalid range: [%d, %d)", start_inclusive, end_exclusive));
+        throw std::runtime_error(format("invalid range: [{:d}, {:d})", start_inclusive, end_exclusive));
     }
     return int_range({start_inclusive}, {end_exclusive - 1});
 }

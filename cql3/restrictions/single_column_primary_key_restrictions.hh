@@ -46,6 +46,7 @@
 #include "cartesian_product.hh"
 #include "cql3/restrictions/primary_key_restrictions.hh"
 #include "cql3/restrictions/single_column_restrictions.hh"
+#include "cql3/cql_config.hh"
 #include <boost/algorithm/cxx11/all_of.hpp>
 #include <boost/range/adaptor/transformed.hpp>
 #include <boost/range/adaptor/filtered.hpp>
@@ -54,6 +55,29 @@
 namespace cql3 {
 
 namespace restrictions {
+
+namespace {
+
+template <typename ValueType>
+const char*
+restricted_component_name_v;
+
+template <>
+const char* restricted_component_name_v<partition_key> = "partition key";
+
+template <>
+const char* restricted_component_name_v<clustering_key> = "clustering key";
+
+
+inline
+void check_cartesian_product_size(size_t size, size_t max, const char* component_name) {
+    if (size > max) {
+        throw std::runtime_error(fmt::format("{} cartesian product size {} is greater than maximum {}",
+                component_name, size, max));
+    }
+}
+
+}
 
 /**
  * A set of single column restrictions on a primary key part (partition key or clustering key).
@@ -69,17 +93,13 @@ private:
     schema_ptr _schema;
     bool _allow_filtering;
     ::shared_ptr<single_column_restrictions> _restrictions;
-    bool _slice;
-    bool _contains;
-    bool _in;
+private:
+    static uint32_t max_cartesian_product_size(const restrictions_config& config);
 public:
     single_column_primary_key_restrictions(schema_ptr schema, bool allow_filtering)
         : _schema(schema)
         , _allow_filtering(allow_filtering)
         , _restrictions(::make_shared<single_column_restrictions>(schema))
-        , _slice(false)
-        , _contains(false)
-        , _in(false)
     { }
 
     // Convert another primary key restrictions type into this type, possibly using different schema
@@ -88,39 +108,16 @@ public:
         : _schema(schema)
         , _allow_filtering(other._allow_filtering)
         , _restrictions(::make_shared<single_column_restrictions>(schema))
-        , _slice(other._slice)
-        , _contains(other._contains)
-        , _in(other._in)
     {
         for (const auto& entry : other._restrictions->restrictions()) {
             const column_definition* other_cdef = entry.first;
             const column_definition* this_cdef = _schema->get_column_definition(other_cdef->name());
             if (!this_cdef) {
-                throw exceptions::invalid_request_exception(sprint("Base column %s not found in view index schema", other_cdef->name_as_text()));
+                throw exceptions::invalid_request_exception(format("Base column {} not found in view index schema", other_cdef->name_as_text()));
             }
             ::shared_ptr<single_column_restriction> restriction = entry.second;
             _restrictions->add_restriction(restriction->apply_to(*this_cdef));
         }
-    }
-
-    virtual bool is_on_token() const override {
-        return false;
-    }
-
-    virtual bool is_multi_column() const override {
-        return false;
-    }
-
-    virtual bool is_slice() const override {
-        return _slice;
-    }
-
-    virtual bool is_contains() const override {
-        return _contains;
-    }
-
-    virtual bool is_IN() const override {
-        return _in;
     }
 
     virtual bool is_all_eq() const override {
@@ -144,24 +141,19 @@ public:
             auto last_column = *_restrictions->last_column();
             auto new_column = restriction->get_column_def();
 
-            if (_slice && _schema->position(new_column) > _schema->position(last_column)) {
-                throw exceptions::invalid_request_exception(sprint(
-                    "Clustering column \"%s\" cannot be restricted (preceding column \"%s\" is restricted by a non-EQ relation)",
+            if (this->is_slice() && _schema->position(new_column) > _schema->position(last_column)) {
+                throw exceptions::invalid_request_exception(format("Clustering column \"{}\" cannot be restricted (preceding column \"{}\" is restricted by a non-EQ relation)",
                     new_column.name_as_text(), last_column.name_as_text()));
             }
 
             if (_schema->position(new_column) < _schema->position(last_column)) {
                 if (restriction->is_slice()) {
-                    throw exceptions::invalid_request_exception(sprint(
-                        "PRIMARY KEY column \"%s\" cannot be restricted (preceding column \"%s\" is restricted by a non-EQ relation)",
+                    throw exceptions::invalid_request_exception(format("PRIMARY KEY column \"{}\" cannot be restricted (preceding column \"{}\" is restricted by a non-EQ relation)",
                         last_column.name_as_text(), new_column.name_as_text()));
                 }
             }
         }
-
-        _slice |= restriction->is_slice();
-        _in |= restriction->is_IN();
-        _contains |= restriction->is_contains();
+        restriction::_ops.add(restriction->get_ops());
         _restrictions->add_restriction(restriction);
     }
 
@@ -191,8 +183,7 @@ public:
         }
         if (restriction->is_on_token()) {
             throw exceptions::invalid_request_exception(
-                    sprint(
-                            "Columns \"%s\" cannot be restricted by both a normal relation and a token relation",
+                    format("Columns \"{}\" cannot be restricted by both a normal relation and a token relation",
                             join(", ", get_column_defs())));
         }
         do_merge_with(::static_pointer_cast<single_column_restriction>(restriction));
@@ -209,7 +200,7 @@ public:
             std::vector<bytes_opt> values = r->values(options);
             for (auto&& val : values) {
                 if (!val) {
-                    throw exceptions::invalid_request_exception(sprint("Invalid null value for column %s", def->name_as_text()));
+                    throw exceptions::invalid_request_exception(format("Invalid null value for column {}", def->name_as_text()));
                 }
             }
             if (values.empty()) {
@@ -219,7 +210,10 @@ public:
         }
 
         std::vector<ValueType> result;
-        result.reserve(cartesian_product_size(value_vector));
+        auto size = cartesian_product_size(value_vector);
+        check_cartesian_product_size(size, max_cartesian_product_size(options.get_cql_config().restrictions),
+                restricted_component_name_v<ValueType>);
+        result.reserve(size);
         for (auto&& v : make_cartesian_product(value_vector)) {
             result.emplace_back(ValueType::from_optional_exploded(*_schema, std::move(v)));
         }
@@ -267,7 +261,7 @@ private:
             const column_definition* def = e.first;
             auto&& r = e.second;
 
-            if (vec_of_values.size() != _schema->position(*def) || r->is_contains()) {
+            if (vec_of_values.size() != _schema->position(*def) || r->is_contains() || r->is_LIKE()) {
                 // The prefixes built so far are the longest we can build,
                 // the rest of the constraints will have to be applied using filtering.
                 break;
@@ -275,7 +269,7 @@ private:
 
             if (r->is_slice()) {
                 if (cartesian_product_is_empty(vec_of_values)) {
-                    auto read_bound = [r, &options, this] (statements::bound b) -> std::experimental::optional<range_bound> {
+                    auto read_bound = [r, &options, this] (statements::bound b) -> std::optional<range_bound> {
                         if (!r->has_bound(b)) {
                             return {};
                         }
@@ -291,10 +285,13 @@ private:
                     if (def->type->is_reversed()) {
                         ranges.back().reverse();
                     }
-                    return std::move(ranges);
+                    return ranges;
                 }
 
-                ranges.reserve(cartesian_product_size(vec_of_values));
+                auto size = cartesian_product_size(vec_of_values);
+                check_cartesian_product_size(size, max_cartesian_product_size(options.get_cql_config().restrictions),
+                        restricted_component_name_v<ValueType>);
+                ranges.reserve(size);
                 for (auto&& prefix : make_cartesian_product(vec_of_values)) {
                     auto read_bound = [r, &prefix, &options, this](statements::bound bound) -> range_bound {
                         if (r->has_bound(bound)) {
@@ -320,7 +317,7 @@ private:
                     }
                 }
 
-                return std::move(ranges);
+                return ranges;
             }
 
             auto values = r->values(options);
@@ -335,12 +332,15 @@ private:
             vec_of_values.emplace_back(std::move(values));
         }
 
-        ranges.reserve(cartesian_product_size(vec_of_values));
+        auto size = cartesian_product_size(vec_of_values);
+        check_cartesian_product_size(size, max_cartesian_product_size(options.get_cql_config().restrictions),
+                restricted_component_name_v<ValueType>);
+        ranges.reserve(size);
         for (auto&& prefix : make_cartesian_product(vec_of_values)) {
             ranges.emplace_back(range_type::make_singular(ValueType::from_optional_exploded(*_schema, std::move(prefix))));
         }
 
-        return std::move(ranges);
+        return ranges;
     }
 
 public:
@@ -370,8 +370,8 @@ public:
         return _restrictions->restrictions();
     }
 
-    virtual bool has_supporting_index(const secondary_index::secondary_index_manager& index_manager) const override {
-        return _restrictions->has_supporting_index(index_manager);
+    virtual bool has_supporting_index(const secondary_index::secondary_index_manager& index_manager, allow_local_index allow_local) const override {
+        return _restrictions->has_supporting_index(index_manager, allow_local);
     }
 
 #if 0
@@ -392,7 +392,7 @@ public:
         return _restrictions->size();
     }
     sstring to_string() const override {
-        return sprint("Restrictions(%s)", join(", ", get_column_defs()));
+        return format("Restrictions({})", join(", ", get_column_defs()));
     }
 
     virtual bool is_satisfied_by(const schema& schema,
@@ -518,6 +518,22 @@ inline unsigned single_column_primary_key_restrictions<partition_key>::num_prefi
     // skip_filtering() is currently called only for clustering key
     // restrictions, so it doesn't matter what we return here.
     return 0;
+}
+
+//TODO(sarna): These should be transformed into actual class definitions after detemplatizing single_column_primary_key_restrictions<T>
+using single_column_partition_key_restrictions = single_column_primary_key_restrictions<partition_key>;
+using single_column_clustering_key_restrictions = single_column_primary_key_restrictions<clustering_key>;
+
+template <>
+inline
+uint32_t single_column_primary_key_restrictions<partition_key>::max_cartesian_product_size(const restrictions_config& config) {
+    return config.partition_key_restrictions_max_cartesian_product_size;
+}
+
+template <>
+inline
+uint32_t single_column_primary_key_restrictions<clustering_key>::max_cartesian_product_size(const restrictions_config& config) {
+    return config.clustering_key_restrictions_max_cartesian_product_size;
 }
 
 

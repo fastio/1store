@@ -25,17 +25,17 @@
 #include "dht/i_partitioner.hh"
 #include "locator/abstract_replication_strategy.hh"
 #include "index/secondary_index_manager.hh"
-#include "core/sstring.hh"
-#include "core/shared_ptr.hh"
+#include <seastar/core/sstring.hh>
+#include <seastar/core/shared_ptr.hh>
 #include <seastar/core/execution_stage.hh>
-#include "net/byteorder.hh"
+#include <seastar/net/byteorder.hh>
 #include "utils/UUID_gen.hh"
 #include "utils/UUID.hh"
 #include "utils/hash.hh"
 #include "db_clock.hh"
 #include "gc_clock.hh"
 #include <chrono>
-#include "core/distributed.hh"
+#include <seastar/core/distributed.hh>
 #include <functional>
 #include <cstdint>
 #include <unordered_map>
@@ -44,17 +44,18 @@
 #include <iosfwd>
 #include <boost/functional/hash.hpp>
 #include <boost/range/algorithm/find.hpp>
-#include <experimental/optional>
+#include <optional>
 #include <string.h>
 #include "types.hh"
 #include "compound.hh"
-#include "core/future.hh"
-#include "core/gate.hh"
+#include <seastar/core/future.hh>
+#include <seastar/core/gate.hh>
 #include "cql3/column_specification.hh"
 #include "db/commitlog/replay_position.hh"
 #include <limits>
 #include <cstddef>
 #include "schema.hh"
+#include "db/schema_features.hh"
 #include "timestamp.hh"
 #include "tombstone.hh"
 #include "atomic_cell.hh"
@@ -87,8 +88,10 @@
 #include "db/timeout_clock.hh"
 #include "querier.hh"
 #include "mutation_query.hh"
-#include "db/large_partition_handler.hh"
+#include "cache_temperature.hh"
 #include <unordered_set>
+#include "disk-error-handler.hh"
+#include "utils/updateable_value.hh"
 
 class cell_locker;
 class cell_locker_stats;
@@ -111,6 +114,7 @@ class sstable;
 class entry_descriptor;
 class compaction_descriptor;
 class foreign_sstable_open_info;
+class sstables_manager;
 
 }
 
@@ -124,7 +128,10 @@ class serializer;
 namespace db {
 class commitlog;
 class config;
+class extensions;
 class rp_handle;
+class data_listeners;
+class large_data_handler;
 
 namespace system_keyspace {
 void make(database& db, bool durable, bool volatile_testing_only);
@@ -164,7 +171,7 @@ private:
     seal_delayed_fn_type _seal_delayed_fn;
     std::function<schema_ptr()> _current_schema;
     dirty_memory_manager* _dirty_memory_manager;
-    std::experimental::optional<shared_promise<>> _flush_coalescing;
+    std::optional<shared_promise<>> _flush_coalescing;
     seastar::scheduling_group _compaction_scheduling_group;
 public:
     memtable_list(
@@ -198,6 +205,14 @@ public:
         return bool(_seal_immediate_fn);
     }
 
+    bool empty() const {
+        for (auto& m : _memtables) {
+           if (!m->empty()) {
+               return false;
+            }
+        }
+        return true;
+    }
     shared_memtable back() {
         return _memtables.back();
     }
@@ -271,6 +286,7 @@ using sstable_list = sstables::sstable_list;
 struct cf_stats {
     int64_t pending_memtables_flushes_count = 0;
     int64_t pending_memtables_flushes_bytes = 0;
+    int64_t failed_memtables_flushes_count = 0;
 
     // number of time the clustering filter was executed
     int64_t clustering_filter_count = 0;
@@ -283,20 +299,15 @@ struct cf_stats {
 
     // How many view updates were dropped due to overload.
     int64_t dropped_view_updates = 0;
-};
 
-class cache_temperature {
-    float hit_rate;
-    explicit cache_temperature(uint8_t hr) : hit_rate(hr/255.0f) {}
-public:
-    uint8_t get_serialized_temperature() const {
-        return hit_rate * 255;
-    }
-    cache_temperature() : hit_rate(0) {}
-    explicit cache_temperature(float hr) : hit_rate(hr) {}
-    explicit operator float() const { return hit_rate; }
-    static cache_temperature invalid() { return cache_temperature(-1.0f); }
-    friend struct ser::serializer<cache_temperature>;
+    // How many times view building was paused (e.g. due to node unavailability)
+    int64_t view_building_paused = 0;
+
+    // How many view updates were processed for all tables
+    uint64_t total_view_updates_pushed_local = 0;
+    uint64_t total_view_updates_pushed_remote = 0;
+    uint64_t total_view_updates_failed_local = 0;
+    uint64_t total_view_updates_failed_remote = 0;
 };
 
 class table;
@@ -314,7 +325,8 @@ public:
         bool enable_cache = true;
         bool enable_commitlog = true;
         bool enable_incremental_backups = false;
-        bool compaction_enforce_min_threshold = false;
+        utils::updateable_value<bool> compaction_enforce_min_threshold{false};
+        bool enable_dangerous_direct_import_of_cassandra_counters = false;
         ::dirty_memory_manager* dirty_memory_manager = &default_dirty_memory_manager;
         ::dirty_memory_manager* streaming_dirty_memory_manager = &default_dirty_memory_manager;
         reader_concurrency_semaphore* read_concurrency_semaphore;
@@ -327,9 +339,10 @@ public:
         seastar::scheduling_group statement_scheduling_group;
         seastar::scheduling_group streaming_scheduling_group;
         bool enable_metrics_reporting = false;
-        db::large_partition_handler* large_partition_handler;
+        sstables::sstables_manager* sstables_manager;
         db::timeout_semaphore* view_update_concurrency_semaphore;
         size_t view_update_concurrency_semaphore_limit;
+        db::data_listeners* data_listeners = nullptr;
     };
     struct no_commitlog {};
     struct stats {
@@ -447,12 +460,13 @@ private:
     // This semaphore ensures that an operation like snapshot won't have its selected
     // sstables deleted by compaction in parallel, a race condition which could
     // easily result in failure.
+    // Locking order: must be acquired either independently or after _sstables_lock
     seastar::semaphore _sstable_deletion_sem = {1};
     // There are situations in which we need to stop writing sstables. Flushers will take
     // the read lock, and the ones that wish to stop that process will take the write lock.
     rwlock _sstables_lock;
     mutable row_cache _cache; // Cache covers only sstables.
-    std::experimental::optional<int64_t> _sstable_generation = {};
+    std::optional<int64_t> _sstable_generation = {};
 
     db::replay_position _highest_rp;
     db::replay_position _lowest_allowed_rp;
@@ -466,7 +480,7 @@ private:
     seastar::gate _streaming_flush_gate;
     std::vector<view_ptr> _views;
 
-    std::unique_ptr<cell_locker> _counter_cell_locks;
+    std::unique_ptr<cell_locker> _counter_cell_locks; // Memory-intensive; allocate only when needed.
     void set_metrics();
     seastar::metrics::metric_groups _metrics;
 
@@ -497,6 +511,8 @@ private:
     utils::phased_barrier _pending_writes_phaser;
     // Corresponding phaser for in-progress reads.
     utils::phased_barrier _pending_reads_phaser;
+    // Corresponding phaser for in-progress streams
+    utils::phased_barrier _pending_streams_phaser;
 public:
     future<> add_sstable_and_update_cache(sstables::shared_sstable sst);
     void move_sstable_from_staging_in_thread(sstables::shared_sstable sst);
@@ -504,6 +520,11 @@ public:
         auto it = _sstables_staging.find(generation);
         return it != _sstables_staging.end() ? it->second : nullptr;
     }
+    sstables::shared_sstable make_sstable(sstring dir, int64_t generation, sstables::sstable_version_types v, sstables::sstable_format_types f,
+            io_error_handler_gen error_handler_gen);
+    sstables::shared_sstable make_sstable(sstring dir, int64_t generation, sstables::sstable_version_types v, sstables::sstable_format_types f);
+    sstables::shared_sstable make_sstable(sstring dir);
+    sstables::shared_sstable make_sstable();
 private:
     void update_stats_for_new_sstable(uint64_t disk_space_used_by_sstable, const std::vector<unsigned>& shards_for_the_sstable) noexcept;
     // Adds new sstable to the set of sstables
@@ -659,6 +680,15 @@ public:
     flat_mutation_reader make_streaming_reader(schema_ptr schema,
             const dht::partition_range_vector& ranges) const;
 
+    // Single range overload.
+    flat_mutation_reader make_streaming_reader(schema_ptr schema, const dht::partition_range& range,
+            const query::partition_slice& slice,
+            mutation_reader::forwarding fwd_mr = mutation_reader::forwarding::no) const;
+
+    flat_mutation_reader make_streaming_reader(schema_ptr schema, const dht::partition_range& range) {
+        return make_streaming_reader(schema, range, schema->full_slice());
+    }
+
     sstables::shared_sstable make_streaming_sstable_for_write(std::optional<sstring> subdir = {});
     sstables::shared_sstable make_streaming_staging_sstable() {
         return make_streaming_sstable_for_write("staging");
@@ -737,13 +767,7 @@ public:
 
     // SSTable writes are now allowed again, and generation is updated to new_generation if != -1
     // returns the amount of microseconds elapsed since we disabled writes.
-    std::chrono::steady_clock::duration enable_sstable_write(int64_t new_generation) {
-        if (new_generation != -1) {
-            update_sstables_known_generation(new_generation);
-        }
-        _sstables_lock.write_unlock();
-        return std::chrono::steady_clock::now() - _sstable_writes_disabled_at;
-    }
+    std::chrono::steady_clock::duration enable_sstable_write(int64_t new_generation);
 
     // Make sure the generation numbers are sequential, starting from "start".
     // Generations before "start" are left untouched.
@@ -774,7 +798,7 @@ public:
     // Cleanup is about discarding keys that are no longer relevant for a
     // given sstable, e.g. after node loses part of its token range because
     // of a newly added node.
-    future<> cleanup_sstables(sstables::compaction_descriptor descriptor);
+    future<> cleanup_sstables(sstables::compaction_descriptor descriptor, bool is_actual_cleanup);
 
     future<bool> snapshot_exists(sstring name);
 
@@ -803,8 +827,8 @@ public:
     future<std::unordered_set<sstring>> get_sstables_by_partition_key(const sstring& key) const;
 
     const sstables::sstable_set& get_sstable_set() const;
-    lw_shared_ptr<sstable_list> get_sstables() const;
-    lw_shared_ptr<sstable_list> get_sstables_including_compacted_undeleted() const;
+    lw_shared_ptr<const sstable_list> get_sstables() const;
+    lw_shared_ptr<const sstable_list> get_sstables_including_compacted_undeleted() const;
     const std::vector<sstables::shared_sstable>& compacted_undeleted_sstables() const;
     std::vector<sstables::shared_sstable> select_sstables(const dht::partition_range& range) const;
     std::vector<sstables::shared_sstable> candidates_for_compaction() const;
@@ -828,6 +852,10 @@ public:
 
     const stats& get_stats() const {
         return _stats;
+    }
+
+    const db::view::stats& get_view_stats() const {
+        return _view_stats;
     }
 
     ::cf_stats* cf_stats() {
@@ -868,6 +896,14 @@ public:
         return _pending_reads_phaser.advance_and_await();
     }
 
+    utils::phased_barrier::operation stream_in_progress() {
+        return _pending_streams_phaser.start();
+    }
+
+    future<> await_pending_streams() {
+        return _pending_streams_phaser.advance_and_await();
+    }
+
     void add_or_update_view(view_ptr v);
     void remove_view(view_ptr v);
     void clear_views();
@@ -882,9 +918,9 @@ public:
         return _index_manager;
     }
 
-    db::large_partition_handler* get_large_partition_handler() {
-        assert(_config.large_partition_handler);
-        return _config.large_partition_handler;
+    sstables::sstables_manager& get_sstables_manager() const {
+        assert(_config.sstables_manager);
+        return *_config.sstables_manager;
     }
 
     future<> populate_views(
@@ -896,8 +932,12 @@ public:
         return *_config.read_concurrency_semaphore;
     }
 
+    reader_concurrency_semaphore& streaming_read_concurrency_semaphore() {
+        return *_config.streaming_read_concurrency_semaphore;
+    }
+
 private:
-    future<row_locker::lock_holder> do_push_view_replica_updates(const schema_ptr& s, mutation&& m, db::timeout_clock::time_point timeout, mutation_source&& source) const;
+    future<row_locker::lock_holder> do_push_view_replica_updates(const schema_ptr& s, mutation&& m, db::timeout_clock::time_point timeout, mutation_source&& source, const io_priority_class& io_priority) const;
     std::vector<view_ptr> affected_views(const schema_ptr& base, const mutation& update) const;
     future<> generate_and_propagate_view_updates(const schema_ptr& base,
             std::vector<view_ptr>&& views,
@@ -944,13 +984,8 @@ private:
     future<> seal_active_streaming_memtable_immediate(flush_permit&&);
 
     // filter manifest.json files out
-    static bool manifest_json_filter(const lister::path&, const directory_entry& entry);
+    static bool manifest_json_filter(const fs::path&, const directory_entry& entry);
 
-    // Iterate over all partitions.  Protocol is the same as std::all_of(),
-    // so that iteration can be stopped by returning false.
-    // Func signature: bool (const decorated_key& dk, const mutation_partition& mp)
-    template <typename Func>
-    future<bool> for_all_partitions(schema_ptr, Func&& func) const;
     void check_valid_rp(const db::replay_position&) const;
 public:
     // Iterate over all partitions.  Protocol is the same as std::all_of(),
@@ -989,25 +1024,17 @@ flat_mutation_reader make_range_sstable_reader(schema_ptr s,
         mutation_reader::forwarding fwd_mr,
         sstables::read_monitor_generator& monitor_generator = sstables::default_read_monitor_generator());
 
-class user_types_metadata {
-    std::unordered_map<bytes, user_type> _user_types;
-public:
-    user_type get_type(const bytes& name) const {
-        return _user_types.at(name);
-    }
-    const std::unordered_map<bytes, user_type>& get_all_types() const {
-        return _user_types;
-    }
-    void add_type(user_type type) {
-        auto i = _user_types.find(type->_name);
-        assert(i == _user_types.end() || type->is_compatible_with(*i->second));
-        _user_types[type->_name] = std::move(type);
-    }
-    void remove_type(user_type type) {
-        _user_types.erase(type->_name);
-    }
-    friend std::ostream& operator<<(std::ostream& os, const user_types_metadata& m);
+class user_types_metadata;
+
+// Customize deleter so that lw_shared_ptr can work with an incomplete user_types_metadata class
+namespace seastar {
+
+template <>
+struct lw_shared_ptr_deleter<user_types_metadata> {
+    static void dispose(user_types_metadata* o);
 };
+
+}
 
 class keyspace_metadata final {
     sstring _name;
@@ -1021,17 +1048,19 @@ public:
                  sstring strategy_name,
                  std::map<sstring, sstring> strategy_options,
                  bool durable_writes,
-                 std::vector<schema_ptr> cf_defs = std::vector<schema_ptr>{},
-                 lw_shared_ptr<user_types_metadata> user_types = make_lw_shared<user_types_metadata>());
+                 std::vector<schema_ptr> cf_defs = std::vector<schema_ptr>{});
+    keyspace_metadata(sstring name,
+                 sstring strategy_name,
+                 std::map<sstring, sstring> strategy_options,
+                 bool durable_writes,
+                 std::vector<schema_ptr> cf_defs,
+                 lw_shared_ptr<user_types_metadata> user_types);
     static lw_shared_ptr<keyspace_metadata>
     new_keyspace(sstring name,
                  sstring strategy_name,
                  std::map<sstring, sstring> options,
                  bool durables_writes,
-                 std::vector<schema_ptr> cf_defs = std::vector<schema_ptr>{})
-    {
-        return ::make_lw_shared<keyspace_metadata>(name, strategy_name, options, durables_writes, cf_defs);
-    }
+                 std::vector<schema_ptr> cf_defs = std::vector<schema_ptr>{});
     void validate() const;
     const sstring& name() const {
         return _name;
@@ -1048,21 +1077,15 @@ public:
     bool durable_writes() const {
         return _durable_writes;
     }
-    const lw_shared_ptr<user_types_metadata>& user_types() const {
-        return _user_types;
-    }
+    const lw_shared_ptr<user_types_metadata>& user_types() const;
     void add_or_update_column_family(const schema_ptr& s) {
         _cf_meta_data[s->cf_name()] = s;
     }
     void remove_column_family(const schema_ptr& s) {
         _cf_meta_data.erase(s->cf_name());
     }
-    void add_user_type(const user_type ut) {
-        _user_types->add_type(ut);
-    }
-    void remove_user_type(const user_type ut) {
-        _user_types->remove_type(ut);
-    }
+    void add_user_type(const user_type ut);
+    void remove_user_type(const user_type ut);
     std::vector<schema_ptr> tables() const;
     std::vector<view_ptr> views() const;
     friend std::ostream& operator<<(std::ostream& os, const keyspace_metadata& m);
@@ -1078,7 +1101,8 @@ public:
         bool enable_disk_writes = true;
         bool enable_cache = true;
         bool enable_incremental_backups = false;
-        bool compaction_enforce_min_threshold = false;
+        utils::updateable_value<bool> compaction_enforce_min_threshold{false};
+        bool enable_dangerous_direct_import_of_cassandra_counters = false;
         ::dirty_memory_manager* dirty_memory_manager = &default_dirty_memory_manager;
         ::dirty_memory_manager* streaming_dirty_memory_manager = &default_dirty_memory_manager;
         reader_concurrency_semaphore* read_concurrency_semaphore;
@@ -1099,10 +1123,7 @@ private:
     lw_shared_ptr<keyspace_metadata> _metadata;
     config _config;
 public:
-    explicit keyspace(lw_shared_ptr<keyspace_metadata> metadata, config cfg)
-        : _metadata(std::move(metadata))
-        , _config(std::move(cfg))
-    {}
+    explicit keyspace(lw_shared_ptr<keyspace_metadata> metadata, config cfg);
 
     void update_from(lw_shared_ptr<keyspace_metadata>);
 
@@ -1110,9 +1131,7 @@ public:
      * semi-volatile. I.e. we could do alter keyspace at any time, and
      * boom, it is replaced.
      */
-    lw_shared_ptr<keyspace_metadata> metadata() const {
-        return _metadata;
-    }
+    lw_shared_ptr<keyspace_metadata> metadata() const;
     void create_replication_strategy(const std::map<sstring, sstring>& options);
     /**
      * This should not really be return by reference, since replication
@@ -1123,17 +1142,11 @@ public:
      */
     locator::abstract_replication_strategy& get_replication_strategy();
     const locator::abstract_replication_strategy& get_replication_strategy() const;
-    column_family::config make_column_family_config(const schema& s, const db::config& db_config, db::large_partition_handler* lp_handler) const;
+    column_family::config make_column_family_config(const schema& s, const database& db) const;
     future<> make_directory_for_column_family(const sstring& name, utils::UUID uuid);
-    void add_or_update_column_family(const schema_ptr& s) {
-        _metadata->add_or_update_column_family(s);
-    }
-    void add_user_type(const user_type ut) {
-        _metadata->add_user_type(ut);
-    }
-    void remove_user_type(const user_type ut) {
-        _metadata->remove_user_type(ut);
-    }
+    void add_or_update_column_family(const schema_ptr& s);
+    void add_user_type(const user_type ut);
+    void remove_user_type(const user_type ut);
 
     // FIXME to allow simple registration at boostrap
     void set_replication_strategy(std::unique_ptr<locator::abstract_replication_strategy> replication_strategy);
@@ -1182,6 +1195,12 @@ struct database_config {
 //   use shard_of() for data
 
 class database {
+public:
+    enum class table_kind {
+        system,
+        user,
+    };
+
 private:
     ::cf_stats _cf_stats;
     static const size_t max_count_concurrent_reads{100};
@@ -1216,7 +1235,7 @@ private:
     lw_shared_ptr<db_stats> _stats;
     std::unique_ptr<cell_locker_stats> _cl_stats;
 
-    std::unique_ptr<db::config> _cfg;
+    const db::config& _cfg;
 
     dirty_memory_manager _system_dirty_memory_manager;
     dirty_memory_manager _dirty_memory_manager;
@@ -1268,9 +1287,21 @@ private:
 
     query::querier_cache _querier_cache;
 
-    std::unique_ptr<db::large_partition_handler> _large_partition_handler;
+    std::unique_ptr<db::large_data_handler> _large_data_handler;
+    std::unique_ptr<db::large_data_handler> _nop_large_data_handler;
+
+    std::unique_ptr<sstables::sstables_manager> _user_sstables_manager;
+    std::unique_ptr<sstables::sstables_manager> _system_sstables_manager;
+
+    query::result_memory_limiter _result_memory_limiter;
+
+    friend db::data_listeners;
+    std::unique_ptr<db::data_listeners> _data_listeners;
+
+    bool _supports_infinite_bound_range_deletions = false;
 
     future<> init_commitlog();
+public:
     future<> apply_in_memory(const frozen_mutation& m, schema_ptr m_schema, db::rp_handle&&, db::timeout_clock::time_point timeout);
     future<> apply_in_memory(const mutation& m, column_family& cf, db::rp_handle&&, db::timeout_clock::time_point timeout);
 private:
@@ -1285,8 +1316,6 @@ private:
     future<> do_apply(schema_ptr, const frozen_mutation&, db::timeout_clock::time_point timeout);
     future<> apply_with_commitlog(schema_ptr, column_family&, utils::UUID, const frozen_mutation&, db::timeout_clock::time_point timeout);
     future<> apply_with_commitlog(column_family& cf, const mutation& m, db::timeout_clock::time_point timeout);
-
-    query::result_memory_limiter _result_memory_limiter;
 
     future<mutation> do_apply_counter_update(column_family& cf, const frozen_mutation& fm, schema_ptr m_schema, db::timeout_clock::time_point timeout,
                                              tracing::trace_state_ptr trace_state);
@@ -1303,7 +1332,6 @@ public:
     void set_enable_incremental_backups(bool val) { _enable_incremental_backups = val; }
 
     future<> parse_system_tables(distributed<service::storage_proxy>&);
-    database();
     database(const db::config&, database_config dbcfg);
     database(database&&) = delete;
     ~database();
@@ -1361,9 +1389,12 @@ public:
     bool has_schema(const sstring& ks_name, const sstring& cf_name) const;
     std::set<sstring> existing_index_names(const sstring& ks_name, const sstring& cf_to_exclude = sstring()) const;
     sstring get_available_index_name(const sstring& ks_name, const sstring& cf_name,
-                                     std::experimental::optional<sstring> index_name_root) const;
+                                     std::optional<sstring> index_name_root) const;
     schema_ptr find_indexed_table(const sstring& ks_name, const sstring& index_name) const;
     future<> stop();
+    future<> close_tables(table_kind kind_to_close);
+
+    future<> stop_large_data_handler();
     unsigned shard_of(const dht::token& t);
     unsigned shard_of(const mutation& m);
     unsigned shard_of(const frozen_mutation& m);
@@ -1409,11 +1440,26 @@ public:
     }
 
     const db::config& get_config() const {
-        return *_cfg;
+        return _cfg;
+    }
+    const db::extensions& extensions() const;
+
+    db::large_data_handler* get_large_data_handler() const {
+        return _large_data_handler.get();
     }
 
-    db::large_partition_handler* get_large_partition_handler() {
-        return _large_partition_handler.get();
+    db::large_data_handler* get_nop_large_data_handler() const {
+        return _nop_large_data_handler.get();
+    }
+
+    sstables::sstables_manager& get_user_sstables_manager() const {
+        assert(_user_sstables_manager);
+        return *_user_sstables_manager;
+    }
+
+    sstables::sstables_manager& get_system_sstables_manager() const {
+        assert(_system_sstables_manager);
+        return *_system_sstables_manager;
     }
 
     future<> flush_all_memtables();
@@ -1436,17 +1482,8 @@ public:
     }
 
     std::unordered_set<sstring> get_initial_tokens();
-    std::experimental::optional<gms::inet_address> get_replace_address();
+    std::optional<gms::inet_address> get_replace_address();
     bool is_replacing();
-    reader_concurrency_semaphore& user_read_concurrency_sem() {
-        return _read_concurrency_sem;
-    }
-    reader_concurrency_semaphore& streaming_read_concurrency_sem() {
-        return _streaming_concurrency_sem;
-    }
-    reader_concurrency_semaphore& system_keyspace_read_concurrency_sem() {
-        return _system_read_concurrency_sem;
-    }
     semaphore& sstable_load_concurrency_sem() {
         return _sstable_load_concurrency_sem;
     }
@@ -1473,26 +1510,33 @@ public:
     }
 
     friend class distributed_loader;
+
+    db::data_listeners& data_listeners() const {
+        return *_data_listeners;
+    }
+
+    void enable_infinite_bound_range_deletions() {
+        _supports_infinite_bound_range_deletions = true;
+    }
+
+    bool supports_infinite_bound_range_deletions() {
+        return _supports_infinite_bound_range_deletions;
+    }
 };
 
-future<> update_schema_version_and_announce(distributed<service::storage_proxy>& proxy);
+future<> stop_database(sharded<database>& db);
+
+// Creates a streaming reader that reads from all shards.
+//
+// Shard readers are created via `table::make_streaming_reader()`.
+// Range generator must generate disjoint, monotonically increasing ranges.
+flat_mutation_reader make_multishard_streaming_reader(distributed<database>& db, dht::i_partitioner& partitioner, schema_ptr schema,
+        std::function<std::optional<dht::partition_range>()> range_generator);
+
+future<utils::UUID> update_schema_version(distributed<service::storage_proxy>& proxy, db::schema_features);
+future<> announce_schema_version(utils::UUID schema_version);
+future<> update_schema_version_and_announce(distributed<service::storage_proxy>& proxy, db::schema_features);
 
 bool is_internal_keyspace(const sstring& name);
-
-class distributed_loader {
-public:
-    static void reshard(distributed<database>& db, sstring ks_name, sstring cf_name);
-    static future<> open_sstable(distributed<database>& db, sstables::entry_descriptor comps,
-        std::function<future<> (column_family&, sstables::foreign_sstable_open_info)> func,
-        const io_priority_class& pc = default_priority_class());
-    static future<> load_new_sstables(distributed<database>& db, sstring ks, sstring cf, std::vector<sstables::entry_descriptor> new_tables);
-    static future<std::vector<sstables::entry_descriptor>> flush_upload_dir(distributed<database>& db, sstring ks_name, sstring cf_name);
-    static future<sstables::entry_descriptor> probe_file(distributed<database>& db, sstring sstdir, sstring fname);
-    static future<> populate_column_family(distributed<database>& db, sstring sstdir, sstring ks, sstring cf);
-    static future<> populate_keyspace(distributed<database>& db, sstring datadir, sstring ks_name);
-    static future<> init_system_keyspace(distributed<database>& db);
-    static future<> ensure_system_table_directories(distributed<database>& db);
-    static future<> init_non_system_keyspaces(distributed<database>& db, distributed<service::storage_proxy>& proxy);
-};
 
 #endif /* DATABASE_HH_ */

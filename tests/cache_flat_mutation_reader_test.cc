@@ -23,8 +23,8 @@
 
 #include <boost/test/unit_test.hpp>
 
-#include "tests/test-utils.hh"
-#include "core/thread.hh"
+#include <seastar/testing/test_case.hh>
+#include <seastar/core/thread.hh>
 #include "schema_builder.hh"
 #include "keys.hh"
 #include "mutation_partition.hh"
@@ -36,6 +36,8 @@
 #include "memtable_snapshot_source.hh"
 #include "mutation_assertions.hh"
 #include "flat_mutation_reader_assertions.hh"
+
+#include <variant>
 
 /*
  * ===================
@@ -84,16 +86,16 @@ static query::partition_slice make_slice(std::vector<query::clustering_range> ra
 }
 
 struct expected_fragment {
-    boost::variant<int, range_tombstone> f;
+    std::variant<int, range_tombstone> f;
 
     expected_fragment(int row_key) : f(row_key) { }
     expected_fragment(range_tombstone rt) : f(rt) { }
 
     void check(flat_reader_assertions& r, const query::clustering_row_ranges& ranges) {
-        if (f.which() == 0) {
-            r.produces_row_with_key(make_ck(boost::get<int>(f)));
+        if (f.index() == 0) {
+            r.produces_row_with_key(make_ck(std::get<int>(f)));
         } else {
-            r.produces_range_tombstone(boost::get<range_tombstone>(f), ranges);
+            r.produces_range_tombstone(std::get<range_tombstone>(f), ranges);
         }
     }
 };
@@ -125,7 +127,7 @@ struct expected_row {
     void check(const rows_entry& r) const {
         position_in_partition::equal_compare ck_eq(*SCHEMA);
         if (!ck_eq(r.position(), pos)) {
-            BOOST_FAIL(sprint("Expected %s, but got %s", pos, r.position()));
+            BOOST_FAIL(format("Expected {}, but got {}", pos, r.position()));
         }
         BOOST_REQUIRE_EQUAL(r.continuous(), continuous);
         BOOST_REQUIRE_EQUAL(r.dummy(), dummy);
@@ -148,7 +150,7 @@ static void assert_cached_rows(partition_snapshot_ptr snp, std::deque<expected_r
         expected.pop_front();
     }
     if (!expected.empty()) {
-        BOOST_FAIL(sprint("Expected %s next, but no more rows", expected.front()));
+        BOOST_FAIL(format("Expected {} next, but no more rows", expected.front()));
     }
 }
 
@@ -173,16 +175,18 @@ struct expected_tombstone {
     }
 };
 
-static void assert_cached_tombstones(partition_snapshot_ptr snp, std::deque<range_tombstone> expected) {
-    const range_tombstone_list& rts = snp->version()->partition().row_tombstones();
-    for (auto&& rt : rts) {
-        BOOST_REQUIRE(!expected.empty());
-        if (!expected.front().equal(*SCHEMA, rt)) {
-            BOOST_FAIL(sprint("Expected %s, but found %s", expected.front(), rt));
-        }
-        expected.pop_front();
+static void assert_cached_tombstones(partition_snapshot_ptr snp, std::deque<range_tombstone> expected, const query::clustering_row_ranges& ck_ranges) {
+    range_tombstone_list rts = snp->version()->partition().row_tombstones();
+    rts.trim(*SCHEMA, ck_ranges);
+
+    range_tombstone_list expected_list(*SCHEMA);
+    for (auto&& rt : expected) {
+        expected_list.apply(*SCHEMA, rt);
     }
-    BOOST_REQUIRE(expected.empty());
+
+    expected_list.trim(*SCHEMA, ck_ranges);
+
+    BOOST_REQUIRE(rts.equal(*SCHEMA, expected_list));
 }
 
 class cache_tester {
@@ -233,7 +237,7 @@ void test_slice_single_version(mutation& underlying,
         auto snp = cache_tester::snapshot_for_key(cache, DK);
         assert_single_version(snp);
         assert_cached_rows(snp, expected_cache_rows);
-        assert_cached_tombstones(snp, expected_cache_tombstones);
+        assert_cached_tombstones(snp, expected_cache_tombstones, slice.row_ranges(*SCHEMA, DK.key()));
     } catch (...) {
         std::cerr << "cache: " << cache << "\n";
         throw;

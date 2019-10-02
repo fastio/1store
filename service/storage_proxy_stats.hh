@@ -93,12 +93,19 @@ struct write_stats {
     utils::estimated_histogram estimated_write;
 
     uint64_t writes = 0;
+    // A CQL write query arrived to a non-replica node and was
+    // forwarded by a coordinator to a replica
+    uint64_t writes_coordinator_outside_replica_set = 0;
+    // A CQL read query arrived to a non-replica node and was
+    // forwarded by a coordinator to a replica
+    uint64_t reads_coordinator_outside_replica_set = 0;
     uint64_t background_writes = 0; // client no longer waits for the write
     uint64_t background_write_bytes = 0;
     uint64_t queued_write_bytes = 0;
     uint64_t throttled_writes = 0; // total number of writes ever delayed due to throttling
     uint64_t throttled_base_writes = 0; // current number of base writes delayed due to view update backlog
     uint64_t background_writes_failed = 0;
+    std::chrono::microseconds last_mv_flow_control_delay; // delay added for MV flow control in the last request
 public:
     write_stats();
     write_stats(const sstring& category, bool auto_register_stats);

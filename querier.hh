@@ -70,9 +70,9 @@ public:
 ///
 /// Uses `compaction_state` for compacting the fragments and `consumer` for
 /// building the results.
-/// Returns a future containing the last consumed clustering key, or std::nullopt
-/// if the last row wasn't a clustering row, and whatever the consumer's
-/// `consume_end_of_stream()` method returns.
+/// Returns a future containing a tuple with the last consumed clustering key,
+/// or std::nullopt if the last row wasn't a clustering row, and whatever the
+/// consumer's `consume_end_of_stream()` method returns.
 template <emit_only_live_rows OnlyLive, typename Consumer>
 GCC6_CONCEPT(
     requires CompactedFragmentsConsumer<Consumer>
@@ -104,7 +104,8 @@ auto consume_page(flat_mutation_reader& reader,
                 clustering_position_tracker(std::move(consumer), last_ckey));
 
         return reader.consume(std::move(reader_consumer), timeout, is_reversed).then([last_ckey] (auto&&... results) mutable {
-            return make_ready_future<std::optional<clustering_key_prefix>, std::decay_t<decltype(results)>...>(std::move(*last_ckey), std::move(results)...);
+            static_assert(sizeof...(results) <= 1);
+            return make_ready_future<std::tuple<std::optional<clustering_key_prefix>, std::decay_t<decltype(results)>...>>(std::tuple(std::move(*last_ckey), std::move(results)...));
         });
     });
 }
@@ -177,9 +178,16 @@ public:
             gc_clock::time_point query_time,
             db::timeout_clock::time_point timeout) {
         return ::query::consume_page(_reader, _compaction_state, *_slice, std::move(consumer), row_limit, partition_limit, query_time,
-                timeout).then([this] (std::optional<clustering_key_prefix> last_ckey, auto&&... results) {
-            _last_ckey = std::move(last_ckey);
-            return make_ready_future<std::decay_t<decltype(results)>...>(std::move(results)...);
+                timeout).then([this] (auto&& results) {
+            _last_ckey = std::get<std::optional<clustering_key>>(std::move(results));
+            constexpr auto size = std::tuple_size<std::decay_t<decltype(results)>>::value;
+            static_assert(size <= 2);
+            if constexpr (size == 1) {
+                return make_ready_future<>();
+            } else {
+                auto result = std::get<1>(std::move(results));
+                return make_ready_future<std::decay_t<decltype(result)>>(std::move(result));
+            }
         });
     }
 
@@ -301,6 +309,8 @@ public:
     static const std::chrono::seconds default_entry_ttl;
 
     struct stats {
+        // The number of inserts into the cache.
+        uint64_t inserts = 0;
         // The number of cache lookups.
         uint64_t lookups = 0;
         // The subset of lookups that missed.
@@ -326,7 +336,7 @@ public:
         const utils::UUID _key;
         const lowres_clock::time_point _expires;
         std::variant<data_querier, mutation_querier, shard_mutation_querier> _value;
-        std::optional<reader_concurrency_semaphore::inactive_read_handle> _handle;
+        reader_concurrency_semaphore::inactive_read_handle _handle;
 
     public:
         template <typename Querier>
@@ -348,8 +358,8 @@ public:
             _handle = std::move(handle);
         }
 
-        reader_concurrency_semaphore::inactive_read_handle get_inactive_handle() const {
-            return *_handle;
+        reader_concurrency_semaphore::inactive_read_handle get_inactive_handle() && {
+            return std::move(_handle);
         }
 
         const utils::UUID& key() const {

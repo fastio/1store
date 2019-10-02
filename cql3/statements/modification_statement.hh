@@ -55,17 +55,15 @@
 #include "cql3/single_column_relation.hh"
 #include "cql3/statements/statement_type.hh"
 
-#include "db/consistency_level.hh"
-
-#include "core/shared_ptr.hh"
-#include "core/future-util.hh"
+#include <seastar/core/shared_ptr.hh>
+#include <seastar/core/future-util.hh>
 
 #include "unimplemented.hh"
 #include "validation.hh"
 #include "service/storage_proxy.hh"
 
 #include <memory>
-#include <experimental/optional>
+#include <optional>
 
 namespace cql3 {
 
@@ -104,7 +102,7 @@ private:
     bool _sets_static_columns = false;
     bool _sets_regular_columns = false;
     bool _sets_a_collection = false;
-    std::experimental::optional<bool> _is_raw_counter_shard_write;
+    std::optional<bool> _is_raw_counter_shard_write;
 
     const std::function<const column_definition&(::shared_ptr<column_condition>)> get_column_for_condition =
         [](::shared_ptr<column_condition> cond) -> const column_definition& {
@@ -207,7 +205,8 @@ protected:
                 bool local,
                 const query_options& options,
                 db::timeout_clock::time_point now,
-                tracing::trace_state_ptr trace_state);
+                tracing::trace_state_ptr trace_state,
+                service_permit permit);
 private:
     future<::shared_ptr<cql_transport::messages::result_message>>
     do_execute(service::storage_proxy& proxy, service::query_state& qs, const query_options& options);
@@ -350,7 +349,7 @@ public:
      * @return vector of the mutations
      * @throws invalid_request_exception on invalid requests
      */
-    future<std::vector<mutation>> get_mutations(service::storage_proxy& proxy, const query_options& options, db::timeout_clock::time_point timeout, bool local, int64_t now, tracing::trace_state_ptr trace_state);
+    future<std::vector<mutation>> get_mutations(service::storage_proxy& proxy, const query_options& options, db::timeout_clock::time_point timeout, bool local, int64_t now, tracing::trace_state_ptr trace_state, service_permit permit);
 
 public:
     future<std::unique_ptr<update_parameters>> make_update_parameters(
@@ -361,7 +360,8 @@ public:
                 db::timeout_clock::time_point timeout,
                 bool local,
                 int64_t now,
-                tracing::trace_state_ptr trace_state);
+                tracing::trace_state_ptr trace_state,
+                service_permit permit);
 
 protected:
     /**

@@ -1,4 +1,5 @@
-#!/usr/bin/python2
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 #
 # Copyright 2016 ScyllaDB
 #
@@ -26,7 +27,7 @@ import yaml
 
 def get(config, key):
     s = open(config).read()
-    cfg = yaml.load(s)
+    cfg = yaml.safe_load(s)
     try:
         val = cfg[key]
     except KeyError:

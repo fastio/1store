@@ -27,9 +27,29 @@
 #include <cstdint>
 #include <type_traits>
 #include <seastar/net/byteorder.hh>
+#include <seastar/core/byteorder.hh>
 
 #if defined(__x86_64__) || defined(__i386__)
 #include <smmintrin.h>
+#elif defined(__aarch64__)
+#include <arm_acle.h>
+/* Implement x86-64 intrinsics with according aarch64 ones */
+static inline uint32_t _mm_crc32_u8(uint32_t crc, uint8_t in)
+{
+    return __crc32cb(crc, in);
+}
+static inline uint32_t _mm_crc32_u16(uint32_t crc, uint16_t in)
+{
+    return __crc32ch(crc, in);
+}
+static inline uint32_t _mm_crc32_u32(uint32_t crc, uint32_t in)
+{
+    return __crc32cw(crc, in);
+}
+static inline uint32_t _mm_crc32_u64(uint32_t crc, uint64_t in)
+{
+    return __crc32cd(crc, in);
+}
 #else
 #include <zlib.h>
 #endif
@@ -45,7 +65,7 @@ public:
     // All process() functions assume input is in
     // host byte order (i.e. equivalent to storing
     // the value in a buffer and crcing the buffer).
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(__x86_64__) || defined(__i386__) || defined(__aarch64__)
     // On x86 use the crc32 instruction added in SSE 4.2.
     void process_le(int8_t in) {
         _r = _mm_crc32_u8(_r, in);
@@ -94,7 +114,37 @@ public:
             in += 4;
             size -= 4;
         }
-        // FIXME: do in three parallel loops
+
+        // do in three parallel loops
+        while (size >= 1024) {
+            uint32_t crc0 = _r, crc1 = 0, crc2 = 0;
+
+            // calculate three blocks in parallel
+            // - crc0: in64[ 0,  1, ...,  41]
+            // - crc1: in64[42, 43, ...,  83]
+            // - crc2: in64[84, 85, ..., 125]
+            for (int i = 0; i < 42; ++i, in += 8) {
+                crc0 = _mm_crc32_u64(crc0, seastar::read_le<uint64_t>((const char*)in));
+                crc1 = _mm_crc32_u64(crc1, seastar::read_le<uint64_t>((const char*)in + 42*8));
+                crc2 = _mm_crc32_u64(crc2, seastar::read_le<uint64_t>((const char*)in + 42*2*8));
+            }
+            in += 42*2*8;
+
+            // combine three blocks' crc and last two u64
+            // - CRC32(crc0 * CRC32(x^(42*64*2)))
+            crc0 = _mm_crc32_u64(0, clmul_u32(crc0, 0xe417f38a));
+            // - CRC32(crc1 * CRC32(x^(42*64)))
+            crc1 = _mm_crc32_u64(0, clmul_u32(crc1, 0x8f158014));
+            // - CRC32(crc2 * x^32 + u64[-2])
+            crc2 = _mm_crc32_u64(crc2, seastar::read_le<uint64_t>((const char*)in));
+            in += 8;
+            // - Last u64
+            _r = _mm_crc32_u64(crc0^crc1^crc2, seastar::read_le<uint64_t>((const char*)in));
+            in += 8;
+
+            size -= 1024;
+        }
+
         while (size >= 8) {
             process_le(*reinterpret_cast<const uint64_t*>(in));
             in += 8;

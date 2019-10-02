@@ -22,13 +22,15 @@
 #include "sets.hh"
 #include "constants.hh"
 #include "cql3_type.hh"
+#include "types/map.hh"
+#include "types/set.hh"
 
 namespace cql3 {
 
 shared_ptr<column_specification>
 sets::value_spec_of(shared_ptr<column_specification> column) {
     return make_shared<column_specification>(column->ks_name, column->cf_name,
-            ::make_shared<column_identifier>(sprint("value(%s)", *column->name), true),
+            ::make_shared<column_identifier>(format("value({})", *column->name), true),
             dynamic_pointer_cast<const set_type_impl>(column->type)->get_elements_type());
 }
 
@@ -53,7 +55,7 @@ sets::literal::prepare(database& db, const sstring& keyspace, shared_ptr<column_
         auto t = rt->prepare(db, keyspace, value_spec);
 
         if (t->contains_bind_marker()) {
-            throw exceptions::invalid_request_exception(sprint("Invalid set literal for %s: bind variables are not supported inside collection literals", *receiver->name));
+            throw exceptions::invalid_request_exception(format("Invalid set literal for {}: bind variables are not supported inside collection literals", *receiver->name));
         }
 
         if (dynamic_pointer_cast<non_terminal>(t)) {
@@ -81,13 +83,13 @@ sets::literal::validate_assignable_to(database& db, const sstring& keyspace, sha
             return;
         }
 
-        throw exceptions::invalid_request_exception(sprint("Invalid set literal for %s of type %s", *receiver->name, *receiver->type->as_cql3_type()));
+        throw exceptions::invalid_request_exception(format("Invalid set literal for {} of type {}", receiver->name, receiver->type->as_cql3_type()));
     }
 
     auto&& value_spec = value_spec_of(receiver);
     for (shared_ptr<term::raw> rt : _elements) {
         if (!is_assignable(rt->test_assignment(db, keyspace, value_spec))) {
-            throw exceptions::invalid_request_exception(sprint("Invalid set literal for %s: value %s is not of type %s", *receiver->name, *rt, *value_spec->type->as_cql3_type()));
+            throw exceptions::invalid_request_exception(format("Invalid set literal for {}: value {} is not of type {}", *receiver->name, *rt, value_spec->type->as_cql3_type()));
         }
     }
 }
@@ -201,7 +203,7 @@ sets::delayed_value::bind(const query_options& options) {
         }
         // We don't support value > 64K because the serialization format encode the length as an unsigned short.
         if (b->size_bytes() > std::numeric_limits<uint16_t>::max()) {
-            throw exceptions::invalid_request_exception(sprint("Set value is too long. Set values are limited to %d bytes but %d bytes value provided",
+            throw exceptions::invalid_request_exception(format("Set value is too long. Set values are limited to {:d} bytes but {:d} bytes value provided",
                     std::numeric_limits<uint16_t>::max(),
                     b->size_bytes()));
         }
@@ -212,6 +214,11 @@ sets::delayed_value::bind(const query_options& options) {
 }
 
 
+sets::marker::marker(int32_t bind_index, ::shared_ptr<column_specification> receiver)
+    : abstract_marker{bind_index, std::move(receiver)} {
+        assert(dynamic_cast<const set_type_impl*>(_receiver->type.get()));
+    }
+
 ::shared_ptr<terminal>
 sets::marker::bind(const query_options& options) {
     const auto& value = options.get_value_at(_bind_index);
@@ -221,6 +228,13 @@ sets::marker::bind(const query_options& options) {
         return constants::UNSET_VALUE;
     } else {
         auto as_set_type = static_pointer_cast<const set_type_impl>(_receiver->type);
+        try {
+            with_linearized(*value, [&] (bytes_view v) {
+                as_set_type->validate(v, options.get_cql_serialization_format());
+            });
+        } catch (marshal_exception& e) {
+            throw exceptions::invalid_request_exception(e.what());
+        }
         return make_shared(value::from_serialized(*value, as_set_type, options.get_cql_serialization_format()));
     }
 }

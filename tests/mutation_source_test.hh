@@ -25,11 +25,11 @@
 #include "tests/sstable_utils.hh"
 
 using populate_fn = std::function<mutation_source(schema_ptr s, const std::vector<mutation>&)>;
+using populate_fn_ex = std::function<mutation_source(schema_ptr s, const std::vector<mutation>&, gc_clock::time_point)>;
 
 // Must be run in a seastar thread
-// If fwd_sm == no, intra-partition (streamed_mutation) fast-forwarding tests
-// will be skipped.
-void run_mutation_source_tests(populate_fn populate, streamed_mutation::forwarding fwd_sm = streamed_mutation::forwarding::yes);
+void run_mutation_source_tests(populate_fn populate);
+void run_mutation_source_tests(populate_fn_ex populate);
 
 enum are_equal { no, yes };
 

@@ -19,7 +19,7 @@
  * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "tests/test-utils.hh"
+#include <seastar/testing/test_case.hh>
 
 #include <seastar/core/thread.hh>
 
@@ -71,7 +71,7 @@ static schema_ptr make_schema_disjoint_with_others()
             .build();
 }
 
-static data_value empty_value = data_value(to_bytes(""));
+static thread_local data_value empty_value = data_value(to_bytes(""));
 
 static db::timeout_clock::time_point no_timeout {
     db::timeout_clock::duration(std::numeric_limits<db::timeout_clock::duration::rep>::max())

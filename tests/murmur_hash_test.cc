@@ -25,7 +25,7 @@
 
 #include "utils/murmur_hash.hh"
 #include "bytes.hh"
-#include "core/print.hh"
+#include <seastar/core/print.hh>
 
 static const bytes full_sequence("012345678901234567890123456789012345678901234567890123456789");
 
@@ -99,7 +99,7 @@ std::array<uint64_t,2> prefix_hashes[] = {
 BOOST_AUTO_TEST_CASE(test_hash_output) {
     auto assert_hashes_equal = [] (bytes_view data, std::array<uint64_t,2> lhs, std::array<uint64_t,2> rhs) {
         if (lhs != rhs) {
-            BOOST_FAIL(sprint("Hashes differ for %s (got {0x%x, 0x%x} and {0x%x, 0x%x})", data,
+            BOOST_FAIL(format("Hashes differ for {} (got {{0x{:x}, 0x{:x}}} and {{0x{:x}, 0x{:x}}})", to_hex(data),
                 lhs[0], lhs[1], rhs[0], rhs[1]));
         }
     };

@@ -1,23 +1,44 @@
-#pragma once
-#include "redis/command_with_multi_schemas.hh"
-#include "redis/request.hh"
+/*
+ * Copyright (C) 2019 pengjian.uestc @ gmail.com
+ */
 
-class timeout_config;
+/*
+ * This file is part of Scylla.
+ *
+ * Scylla is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Scylla is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#pragma once
+
+#include "redis/request.hh"
+#include "redis/abstract_command.hh"
+
 namespace redis {
+
 namespace commands {
-class del : public command_with_multi_schemas {
-protected:
+
+class del : public abstract_command {
     bytes _key;
 public:
-
-    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, const service::client_state& cs, request&& req);
-    del(bytes&& name, std::vector<schema_ptr> schemas, bytes&& key) 
-        : command_with_multi_schemas(std::move(name), std::move(schemas))
+    static shared_ptr<abstract_command> prepare(service::storage_proxy& proxy, request&& req);
+    del(bytes&& name, bytes&& key) 
+        : abstract_command(std::move(name)) 
         , _key(std::move(key))
     {
     }
     ~del() {}
-    future<redis_message> execute(service::storage_proxy&, db::consistency_level, db::timeout_clock::time_point, const timeout_config& tc, service::client_state& cs) override;
+    future<redis_message> execute(service::storage_proxy&, redis_options&, service_permit) override;
 };
 }
 }

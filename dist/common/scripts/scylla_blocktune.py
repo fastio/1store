@@ -1,5 +1,5 @@
-#!/usr/bin/python3
-
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 #
 # Copyright (C) 2016 ScyllaDB
 #
@@ -85,7 +85,6 @@ def tune_dev(path, nomerges):
 
 
 # tunes a filesystem
-# FIXME: btrfs
 def tune_fs(path, nomerges):
     dev = os.stat(path).st_dev
     devfile = '/sys/dev/block/{}:{}'.format(dev // 256, dev % 256)
@@ -95,7 +94,7 @@ def tune_fs(path, nomerges):
 # tunes all filesystems referenced from a scylla.yaml
 def tune_yaml(path, nomerges):
     import yaml
-    y = yaml.load(open(path))
+    y = yaml.safe_load(open(path))
     for fs in y['data_file_directories']:
         tune_fs(fs, nomerges)
     tune_fs(y['commitlog_directory'], nomerges)

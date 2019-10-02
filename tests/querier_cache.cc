@@ -23,10 +23,11 @@
 #include "service/priority_manager.hh"
 #include "tests/simple_schema.hh"
 #include "tests/cql_test_env.hh"
+#include "db/config.hh"
 
 #include <seastar/core/sleep.hh>
 #include <seastar/core/thread.hh>
-#include <seastar/tests/test-utils.hh>
+#include <seastar/testing/thread_test_case.hh>
 
 using namespace std::chrono_literals;
 
@@ -82,7 +83,7 @@ private:
     const mutation_source _mutation_source;
 
     static sstring make_value(size_t i) {
-        return sprint("value%010d", i);
+        return format("value{:010d}", i);
     }
 
     static std::vector<mutation> make_mutations(simple_schema& s, const noncopyable_function<sstring(size_t)>& make_value) {
@@ -164,7 +165,7 @@ public:
         , _mutation_source([this] (schema_ptr, const dht::partition_range& range) {
             auto rd = flat_mutation_reader_from_mutations(_mutations, range);
             rd.set_max_buffer_size(max_reader_buffer_size);
-            return std::move(rd);
+            return rd;
         }) {
     }
 
@@ -563,6 +564,10 @@ SEASTAR_THREAD_TEST_CASE(test_time_based_cache_eviction) {
         .misses()
         .no_drops()
         .time_based_evictions();
+
+    // There should be no inactive reads, the querier_cache should unregister
+    // the expired queriers.
+    BOOST_REQUIRE_EQUAL(t.get_semaphore().get_inactive_read_stats().population, 0);
 }
 
 sstring make_string_blob(size_t size) {
@@ -597,6 +602,8 @@ SEASTAR_THREAD_TEST_CASE(test_memory_based_cache_eviction) {
         t.produce_first_page_and_save_data_querier(i);
     }
 
+    const auto pop_before = t.get_semaphore().get_inactive_read_stats().population;
+
     // Should overflow the limit and trigger the eviction of the oldest entry.
     t.produce_first_page_and_save_data_querier(queriers_needed_to_fill_cache);
 
@@ -604,10 +611,16 @@ SEASTAR_THREAD_TEST_CASE(test_memory_based_cache_eviction) {
         .misses()
         .no_drops()
         .memory_based_evictions();
+
+    // Since the last insert should have evicted an existing entry, we should
+    // have the same number of registered inactive reads.
+    BOOST_REQUIRE_EQUAL(t.get_semaphore().get_inactive_read_stats().population, pop_before);
 }
 
 SEASTAR_THREAD_TEST_CASE(test_resources_based_cache_eviction) {
-    db::config db_cfg;
+    auto db_cfg_ptr = make_shared<db::config>();
+    auto& db_cfg = *db_cfg_ptr;
+
     db_cfg.enable_cache(false);
     db_cfg.enable_commitlog(false);
 
@@ -649,7 +662,7 @@ SEASTAR_THREAD_TEST_CASE(test_resources_based_cache_eviction) {
                 s->full_slice(),
                 1,
                 gc_clock::now(),
-                stdx::nullopt,
+                std::nullopt,
                 1,
                 utils::make_random_uuid());
 
@@ -661,7 +674,7 @@ SEASTAR_THREAD_TEST_CASE(test_resources_based_cache_eviction) {
                 nullptr,
                 db::no_timeout).get();
 
-        auto& semaphore = db.user_read_concurrency_sem();
+        auto& semaphore = cf.read_concurrency_semaphore();
 
         BOOST_CHECK_EQUAL(db.get_querier_cache_stats().resource_based_evictions, 0);
 
@@ -683,7 +696,7 @@ SEASTAR_THREAD_TEST_CASE(test_resources_based_cache_eviction) {
                 s->full_slice(),
                 1,
                 gc_clock::now(),
-                stdx::nullopt,
+                std::nullopt,
                 1,
                 utils::make_random_uuid());
 
@@ -712,7 +725,7 @@ SEASTAR_THREAD_TEST_CASE(test_resources_based_cache_eviction) {
                 nullptr,
                 db::no_timeout).get();
         return make_ready_future<>();
-    }, std::move(db_cfg)).get();
+    }, std::move(db_cfg_ptr)).get();
 }
 
 SEASTAR_THREAD_TEST_CASE(test_evict_all_for_table) {

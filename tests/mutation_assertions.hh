@@ -36,23 +36,25 @@ public:
 
     // If ck_ranges is passed, verifies only that information relevant for ck_ranges matches.
     mutation_partition_assertion& is_equal_to(const mutation_partition& other,
-            const stdx::optional<query::clustering_row_ranges>& ck_ranges = {}) {
+            const std::optional<query::clustering_row_ranges>& ck_ranges = {}) {
         return is_equal_to(*_schema, other, ck_ranges);
     }
 
     // If ck_ranges is passed, verifies only that information relevant for ck_ranges matches.
     mutation_partition_assertion& is_equal_to(const schema& s, const mutation_partition& other,
-            const stdx::optional<query::clustering_row_ranges>& ck_ranges = {}) {
+            const std::optional<query::clustering_row_ranges>& ck_ranges = {}) {
         if (ck_ranges) {
             mutation_partition_assertion(_schema, _m.sliced(*_schema, *ck_ranges))
                 .is_equal_to(s, other.sliced(s, *ck_ranges));
             return *this;
         }
         if (!_m.equal(*_schema, other, s)) {
-            BOOST_FAIL(sprint("Mutations differ, expected %s\n ...but got: %s", other, _m));
+            BOOST_FAIL(format("Mutations differ, expected {}\n ...but got: {}",
+                              mutation_partition::printer(s, other), mutation_partition::printer(*_schema, _m)));
         }
         if (!other.equal(s, _m, *_schema)) {
-            BOOST_FAIL(sprint("Mutation inequality is not symmetric for %s\n ...and: %s", other, _m));
+            BOOST_FAIL(format("Mutation inequality is not symmetric for {}\n ...and: {}",
+                              mutation_partition::printer(s, other), mutation_partition::printer(*_schema, _m)));
         }
         return *this;
     }
@@ -63,21 +65,22 @@ public:
 
     mutation_partition_assertion& is_not_equal_to(const schema& s, const mutation_partition& other) {
         if (_m.equal(*_schema, other, s)) {
-            BOOST_FAIL(sprint("Mutations equal but expected to differ: %s\n ...and: %s", other, _m));
+            BOOST_FAIL(format("Mutations equal but expected to differ: {}\n ...and: {}",
+                              mutation_partition::printer(s, other), mutation_partition::printer(*_schema, _m)));
         }
         return *this;
     }
 
     mutation_partition_assertion& has_same_continuity(const mutation_partition& other) {
         if (!_m.equal_continuity(*_schema, other)) {
-            BOOST_FAIL(sprint("Continuity doesn't match: %s\n ...and: %s", other, _m));
+            BOOST_FAIL(format("Continuity doesn't match: {}\n ...and: {}", mutation_partition::printer(*_schema, other), mutation_partition::printer(*_schema, _m)));
         }
         return *this;
     }
 
     mutation_partition_assertion& is_continuous(const position_range& r, is_continuous cont = is_continuous::yes) {
         if (!_m.check_continuity(*_schema, r, cont)) {
-            BOOST_FAIL(sprint("Expected range %s to be %s in %s", r, cont ? "continuous" : "discontinuous", _m));
+            BOOST_FAIL(format("Expected range {} to be {} in {}", r, cont ? "continuous" : "discontinuous", mutation_partition::printer(*_schema, _m)));
         }
         return *this;
     }
@@ -96,30 +99,30 @@ public:
     { }
 
     // If ck_ranges is passed, verifies only that information relevant for ck_ranges matches.
-    mutation_assertion& is_equal_to(const mutation& other, const stdx::optional<query::clustering_row_ranges>& ck_ranges = {}) {
+    mutation_assertion& is_equal_to(const mutation& other, const std::optional<query::clustering_row_ranges>& ck_ranges = {}) {
         if (ck_ranges) {
             mutation_assertion(_m.sliced(*ck_ranges)).is_equal_to(other.sliced(*ck_ranges));
             return *this;
         }
         if (_m != other) {
-            BOOST_FAIL(sprint("Mutations differ, expected %s\n ...but got: %s", other, _m));
+            BOOST_FAIL(format("Mutations differ, expected {}\n ...but got: {}", other, _m));
         }
         if (other != _m) {
-            BOOST_FAIL(sprint("Mutation inequality is not symmetric for %s\n ...and: %s", other, _m));
+            BOOST_FAIL(format("Mutation inequality is not symmetric for {}\n ...and: {}", other, _m));
         }
         return *this;
     }
 
     mutation_assertion& is_not_equal_to(const mutation& other) {
         if (_m == other) {
-            BOOST_FAIL(sprint("Mutations equal but expected to differ: %s\n ...and: %s", other, _m));
+            BOOST_FAIL(format("Mutations equal but expected to differ: {}\n ...and: {}", other, _m));
         }
         return *this;
     }
 
     mutation_assertion& has_schema(schema_ptr s) {
         if (_m.schema() != s) {
-            BOOST_FAIL(sprint("Expected mutation of schema %s, but got %s", *s, *_m.schema()));
+            BOOST_FAIL(format("Expected mutation of schema {}, but got {}", *s, *_m.schema()));
         }
         return *this;
     }

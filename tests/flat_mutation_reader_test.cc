@@ -21,7 +21,8 @@
 
 
 #include <seastar/core/thread.hh>
-#include <seastar/tests/test-utils.hh>
+#include <seastar/testing/test_case.hh>
+#include <seastar/testing/thread_test_case.hh>
 
 #include "mutation.hh"
 #include "mutation_fragment.hh"
@@ -31,9 +32,7 @@
 #include "schema_builder.hh"
 #include "memtable.hh"
 #include "row_cache.hh"
-#include "sstables/sstables.hh"
 #include "tmpdir.hh"
-#include "sstable_test.hh"
 #include "repair/repair.hh"
 
 #include "tests/test_services.hh"
@@ -199,7 +198,7 @@ SEASTAR_TEST_CASE(test_fragmenting_and_freezing) {
 
             fms.clear();
 
-            stdx::optional<bool> fragmented;
+            std::optional<bool> fragmented;
             fragment_and_freeze(flat_mutation_reader_from_mutations({ mutation(m) }), [&] (auto fm, bool frag) {
                 BOOST_REQUIRE(!fragmented || *fragmented == frag);
                 *fragmented = frag;
@@ -288,12 +287,12 @@ SEASTAR_TEST_CASE(test_partition_checksum) {
             auto h2 = get_hash(m2);
             if (eq) {
                 if (h1 != h2) {
-                    BOOST_FAIL(sprint("Hash should be equal for %s and %s", m1, m2));
+                    BOOST_FAIL(format("Hash should be equal for {} and {}", m1, m2));
                 }
             } else {
                 // We're using a strong hasher, collision should be unlikely
                 if (h1 == h2) {
-                    BOOST_FAIL(sprint("Hash should be different for %s and %s", m1, m2));
+                    BOOST_FAIL(format("Hash should be different for {} and {}", m1, m2));
                 }
             }
         });
@@ -509,7 +508,7 @@ struct flat_stream_consumer {
     skip_after_first_fragment _skip_partition;
     skip_after_first_partition _skip_stream;
     std::vector<mutation> _mutations;
-    stdx::optional<position_in_partition> _previous_position;
+    std::optional<position_in_partition> _previous_position;
     bool _inside_partition = false;
 private:
     void verify_order(position_in_partition_view pos) {
@@ -571,7 +570,7 @@ public:
     stop_iteration consume_end_of_partition() {
         BOOST_REQUIRE(_inside_partition);
         BOOST_REQUIRE_GE(_mutations.size(), 1);
-        _previous_position = stdx::nullopt;
+        _previous_position = std::nullopt;
         _inside_partition = false;
         return stop_iteration(bool(_skip_stream));
     }
@@ -594,12 +593,12 @@ void test_flat_stream(schema_ptr s, std::vector<mutation> muts, reversed_partiti
         }
     };
 
-    BOOST_TEST_MESSAGE(sprint("Consume all%s", reversed_msg));
+    BOOST_TEST_MESSAGE(format("Consume all{}", reversed_msg));
     auto fmr = flat_mutation_reader_from_mutations(muts);
     auto muts2 = consume_fn(fmr, flat_stream_consumer(s, reversed));
     BOOST_REQUIRE_EQUAL(muts, muts2);
 
-    BOOST_TEST_MESSAGE(sprint("Consume first fragment from partition%s", reversed_msg));
+    BOOST_TEST_MESSAGE(format("Consume first fragment from partition{}", reversed_msg));
     fmr = flat_mutation_reader_from_mutations(muts);
     muts2 = consume_fn(fmr, flat_stream_consumer(s, reversed, skip_after_first_fragment::yes));
     BOOST_REQUIRE_EQUAL(muts.size(), muts2.size());
@@ -612,7 +611,7 @@ void test_flat_stream(schema_ptr s, std::vector<mutation> muts, reversed_partiti
         BOOST_REQUIRE_EQUAL(m, muts[j]);
     }
 
-    BOOST_TEST_MESSAGE(sprint("Consume first partition%s", reversed_msg));
+    BOOST_TEST_MESSAGE(format("Consume first partition{}", reversed_msg));
     fmr = flat_mutation_reader_from_mutations(muts);
     muts2 = consume_fn(fmr, flat_stream_consumer(s, reversed, skip_after_first_fragment::no,
                                              skip_after_first_partition::yes));
@@ -620,14 +619,14 @@ void test_flat_stream(schema_ptr s, std::vector<mutation> muts, reversed_partiti
     BOOST_REQUIRE_EQUAL(muts2[0], muts[0]);
 
     if (thread) {
-        auto filter = [&] (const dht::decorated_key& dk) {
+        auto filter = flat_mutation_reader::filter([&] (const dht::decorated_key& dk) {
             for (auto j = size_t(0); j < muts.size(); j += 2) {
                 if (dk.equal(*s, muts[j].decorated_key())) {
                     return false;
                 }
             }
             return true;
-        };
+        });
         BOOST_TEST_MESSAGE("Consume all, filtered");
         fmr = flat_mutation_reader_from_mutations(muts);
         muts2 = fmr.consume_in_thread(flat_stream_consumer(s, reversed), std::move(filter), db::no_timeout);
@@ -724,4 +723,61 @@ SEASTAR_TEST_CASE(test_abandoned_flat_mutation_reader_from_mutation) {
             // We rely on AddressSanitizer telling us if nothing was leaked.
         });
     });
+}
+
+static std::vector<mutation> squash_mutations(std::vector<mutation> mutations) {
+    if (mutations.empty()) {
+        return {};
+    }
+    std::map<dht::decorated_key, mutation, dht::ring_position_less_comparator> merged_muts{
+            dht::ring_position_less_comparator{*mutations.front().schema()}};
+    for (const auto& mut : mutations) {
+        auto [it, inserted] = merged_muts.try_emplace(mut.decorated_key(), mut);
+        if (!inserted) {
+            it->second.apply(mut);
+        }
+    }
+    return boost::copy_range<std::vector<mutation>>(merged_muts | boost::adaptors::map_values);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_mutation_reader_from_mutations_as_mutation_source) {
+    auto populate = [] (schema_ptr, const std::vector<mutation> &muts) {
+        return mutation_source([=] (
+                schema_ptr schema,
+                const dht::partition_range& range,
+                const query::partition_slice& slice,
+                const io_priority_class&,
+                tracing::trace_state_ptr,
+                streamed_mutation::forwarding fwd_sm,
+                mutation_reader::forwarding) mutable {
+            return flat_mutation_reader_from_mutations(squash_mutations(muts), range, slice, fwd_sm);
+        });
+    };
+    run_mutation_source_tests(populate);
+}
+
+SEASTAR_THREAD_TEST_CASE(test_mutation_reader_from_fragments_as_mutation_source) {
+    auto populate = [] (schema_ptr, const std::vector<mutation> &muts) {
+        return mutation_source([=] (
+                schema_ptr schema,
+                const dht::partition_range& range,
+                const query::partition_slice& slice,
+                const io_priority_class&,
+                tracing::trace_state_ptr,
+                streamed_mutation::forwarding fwd_sm,
+                mutation_reader::forwarding) mutable {
+            std::deque<mutation_fragment> fragments;
+            flat_mutation_reader_from_mutations(squash_mutations(muts)).consume_pausable([&fragments] (mutation_fragment mf) {
+                fragments.emplace_back(std::move(mf));
+                return stop_iteration::no;
+            }, db::no_timeout).get();
+
+            auto rd = make_flat_mutation_reader_from_fragments(schema, std::move(fragments), range, slice);
+            if (fwd_sm) {
+                return make_forwardable(std::move(rd));
+            }
+            return rd;
+        });
+    };
+    run_mutation_source_tests(populate);
 }

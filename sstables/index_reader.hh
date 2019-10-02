@@ -84,7 +84,7 @@ private:
     } _state = state::START;
 
     temporary_buffer<char> _key;
-    uint32_t _promoted_index_size;
+    uint32_t _promoted_index_end;
     uint64_t _position;
     uint64_t _partition_header_length = 0;
     std::optional<deletion_time> _deletion_time;
@@ -108,6 +108,7 @@ public:
     }
 
     processing_result process_state(temporary_buffer<char>& data) {
+        auto current_pos = [&] { return this->position() - data.size(); };
         auto read_vint_or_uint64 = [this] (temporary_buffer<char>& data) {
             return is_mc_format() ? this->read_unsigned_vint(data) : this->read_64(data);
         };
@@ -124,6 +125,7 @@ public:
             _state = state::KEY_SIZE;
             break;
         case state::KEY_SIZE:
+            _entry_offset = current_pos();
             if (this->read_16(data) != continuous_data_consumer::read_status::ready) {
                 _state = state::KEY_BYTES;
                 break;
@@ -144,9 +146,10 @@ public:
                 _state = state::PARTITION_HEADER_LENGTH_1;
                 break;
             }
-        case state::PARTITION_HEADER_LENGTH_1:
-            _promoted_index_size = get_uint32();
-            if (_promoted_index_size == 0) {
+        case state::PARTITION_HEADER_LENGTH_1: {
+            auto promoted_index_size_with_header = get_uint32();
+            _promoted_index_end = current_pos() + promoted_index_size_with_header;
+            if (promoted_index_size_with_header == 0) {
                 _state = state::CONSUME_ENTRY;
                 goto state_CONSUME_ENTRY;
             }
@@ -159,6 +162,7 @@ public:
                 _state = state::PARTITION_HEADER_LENGTH_2;
                 break;
             }
+        }
         case state::PARTITION_HEADER_LENGTH_2:
             _partition_header_length = this->_u64;
         state_LOCAL_DELETION_TIME:
@@ -182,32 +186,21 @@ public:
             }
         state_CONSUME_ENTRY:
         case state::CONSUME_ENTRY: {
-            auto entry_header_length = is_mc_format()
-                    ? sizeof(uint16_t) + unsigned_vint::serialized_size(_position) + unsigned_vint::serialized_size(_promoted_index_size)
-                    : sizeof(uint16_t) + sizeof(uint64_t) + sizeof(uint32_t);
-            auto len = entry_header_length + _key.size() + _promoted_index_size;
-            size_t delta = 0;
+            auto promoted_index_size = _promoted_index_end - current_pos();
             if (_deletion_time) {
                 _num_pi_blocks = get_uint32();
-                delta = is_mc_format()
-                        ? (unsigned_vint::serialized_size(_partition_header_length) + sizeof(uint32_t)
-                           + sizeof(uint64_t) + unsigned_vint::serialized_size(_num_pi_blocks))
-                        : sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint32_t);
-
-                _promoted_index_size -= delta;
             }
             auto data_size = data.size();
             std::optional<input_stream<char>> promoted_index_stream;
-            if ((_trust_pi == trust_promoted_index::yes) && (_promoted_index_size > 0)) {
-                if (_promoted_index_size <= data_size) {
+            if ((_trust_pi == trust_promoted_index::yes) && (promoted_index_size > 0)) {
+                if (promoted_index_size <= data_size) {
                     auto buf = data.share();
-                    buf.trim(_promoted_index_size);
+                    buf.trim(promoted_index_size);
                     promoted_index_stream = make_buffer_input_stream(std::move(buf));
                 } else {
                     promoted_index_stream = make_prepended_input_stream(
                             std::move(data),
-                            make_file_input_stream(_index_file, _entry_offset + _key.size() + entry_header_length + delta + data_size,
-                                   _promoted_index_size - data_size, _options).detach());
+                            make_file_input_stream(_index_file, this->position(), promoted_index_size - data_size, _options).detach());
                 }
             } else {
                 _num_pi_blocks = 0;
@@ -216,28 +209,25 @@ public:
             if (promoted_index_stream) {
                 if (is_mc_format()) {
                     index = std::make_unique<promoted_index>(_s, *_deletion_time, std::move(*promoted_index_stream),
-                                  _promoted_index_size,
+                                  promoted_index_size,
                                   _num_pi_blocks, *_ck_values_fixed_lengths);
                 } else {
                      index = std::make_unique<promoted_index>(_s, *_deletion_time, std::move(*promoted_index_stream),
-                                   _promoted_index_size, _num_pi_blocks);
+                                   promoted_index_size, _num_pi_blocks);
                 }
             }
             _consumer.consume_entry(index_entry{std::move(_key), _position, std::move(index)}, _entry_offset);
-            _entry_offset += len;
             _deletion_time = std::nullopt;
             _num_pi_blocks = 0;
             _state = state::START;
-            if (_promoted_index_size <= data_size) {
-                data.trim_front(_promoted_index_size);
+            if (promoted_index_size <= data_size) {
+                data.trim_front(promoted_index_size);
             } else {
                 data.trim(0);
-                return skip_bytes{_promoted_index_size - data_size};
+                return skip_bytes{promoted_index_size - data_size};
             }
         }
             break;
-        default:
-            throw malformed_sstable_exception("unknown state");
         }
         return proceed::yes;
     }
@@ -390,9 +380,17 @@ private:
             }
 
             return do_with(std::make_unique<reader>(_sstable, _pc, position, end, quantity), [this, summary_idx] (auto& entries_reader) {
-                return entries_reader->_context.consume_input().then([this, summary_idx, &entries_reader] {
+                return entries_reader->_context.consume_input().then_wrapped([this, summary_idx, &entries_reader] (future<> f) {
+                    std::exception_ptr ex;
+                    if (f.failed()) {
+                        ex = f.get_exception();
+                        sstlog.error("failed reading index for {}: {}", _sstable->get_filename(), ex);
+                    }
                     auto indexes = std::move(entries_reader->_consumer.indexes);
-                    return entries_reader->_context.close().then([indexes = std::move(indexes)] () mutable {
+                    return entries_reader->_context.close().then([indexes = std::move(indexes), ex = std::move(ex)] () mutable {
+                        if (ex) {
+                            std::rethrow_exception(std::move(ex));
+                        }
                         return std::move(indexes);
                     });
 
@@ -405,6 +403,9 @@ private:
             bound.current_summary_idx = summary_idx;
             bound.current_index_idx = 0;
             bound.current_pi_idx = 0;
+            if (bound.current_list->empty()) {
+                throw malformed_sstable_exception("missing index entry", _sstable->filename(component_type::Index));
+            }
             bound.data_file_position = (*bound.current_list)[0].position();
             bound.element = indexable_element::partition;
             bound.end_open_marker.reset();

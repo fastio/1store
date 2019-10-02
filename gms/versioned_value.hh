@@ -38,7 +38,7 @@
 
 #pragma once
 
-#include "core/sstring.hh"
+#include <seastar/core/sstring.hh>
 #include "utils/serialization.hh"
 #include "utils/UUID.hh"
 #include "version_generator.hh"
@@ -221,7 +221,7 @@ public:
         }
 
         versioned_value rpcaddress(gms::inet_address endpoint) {
-            return versioned_value(sprint("%s", endpoint));
+            return versioned_value(format("{}", endpoint));
         }
 
         versioned_value release_version() {

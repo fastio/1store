@@ -21,6 +21,7 @@
 
 #pragma once
 
+#include <optional>
 #include <unordered_map>
 #include <boost/range/iterator_range.hpp>
 #include <boost/range/join.hpp>
@@ -28,7 +29,8 @@
 #include <boost/lexical_cast.hpp>
 
 #include "cql3/column_specification.hh"
-#include "core/shared_ptr.hh"
+#include <seastar/core/shared_ptr.hh>
+#include <seastar/util/backtrace.hh>
 #include "types.hh"
 #include "compound.hh"
 #include "gc_clock.hh"
@@ -37,7 +39,7 @@
 #include "compress.hh"
 #include "compaction_strategy.hh"
 #include "caching_options.hh"
-#include "stdx.hh"
+#include "column_computation.hh"
 
 using column_count_type = uint32_t;
 
@@ -91,7 +93,7 @@ inline sstring cf_type_to_sstring(cf_type t) {
     } else if (t == cf_type::super) {
         return "Super";
     }
-    throw std::invalid_argument(sprint("unknown type: %d\n", uint8_t(t)));
+    throw std::invalid_argument(format("unknown type: {:d}\n", uint8_t(t)));
 }
 
 inline cf_type sstring_to_cf_type(sstring name) {
@@ -100,7 +102,7 @@ inline cf_type sstring_to_cf_type(sstring name) {
     } else if (name == "Super") {
         return cf_type::super;
     }
-    throw std::invalid_argument(sprint("unknown type: %s\n", name));
+    throw std::invalid_argument(format("unknown type: {}\n", name));
 }
 
 struct speculative_retry {
@@ -119,11 +121,11 @@ public:
         } else if (_t == type::ALWAYS) {
             return "ALWAYS";
         } else if (_t == type::CUSTOM) {
-            return sprint("%.2fms", _v);
+            return format("{:.2f}ms", _v);
         } else if (_t == type::PERCENTILE) {
-            return sprint("%.1fPERCENTILE", 100 * _v);
+            return format("{:.1f}PERCENTILE", 100 * _v);
         } else {
-            throw std::invalid_argument(sprint("unknown type: %d\n", uint8_t(_t)));
+            throw std::invalid_argument(format("unknown type: {:d}\n", uint8_t(_t)));
         }
     }
     static speculative_retry from_sstring(sstring str) {
@@ -136,7 +138,7 @@ public:
             try {
                 return boost::lexical_cast<double>(str.substr(0, str.size() - t.size()));
             } catch (boost::bad_lexical_cast& e) {
-                throw std::invalid_argument(sprint("cannot convert %s to speculative_retry\n", str));
+                throw std::invalid_argument(format("cannot convert {} to speculative_retry\n", str));
             }
         };
 
@@ -153,7 +155,7 @@ public:
             t = type::PERCENTILE;
             v = convert(percentile) / 100;
         } else {
-            throw std::invalid_argument(sprint("cannot convert %s to speculative_retry\n", str));
+            throw std::invalid_argument(format("cannot convert {} to speculative_retry\n", str));
         }
         return speculative_retry(t, v);
     }
@@ -180,19 +182,25 @@ enum class index_metadata_kind {
 };
 
 class index_metadata final {
+public:
+    struct is_local_index_tag {};
+    using is_local_index = bool_class<is_local_index_tag>;
+private:
     utils::UUID _id;
     sstring _name;
     index_metadata_kind _kind;
     index_options_map _options;
+    bool _local;
 public:
-    index_metadata(const sstring& name, const index_options_map& options, index_metadata_kind kind);
+    index_metadata(const sstring& name, const index_options_map& options, index_metadata_kind kind, is_local_index local);
     bool operator==(const index_metadata& other) const;
     bool equals_noname(const index_metadata& other) const;
     const utils::UUID& id() const;
     const sstring& name() const;
     const index_metadata_kind kind() const;
     const index_options_map& options() const;
-    static sstring get_default_index_name(const sstring& cf_name, std::experimental::optional<sstring> root);
+    bool local() const;
+    static sstring get_default_index_name(const sstring& cf_name, std::optional<sstring> root);
 };
 
 class column_definition final {
@@ -210,6 +218,7 @@ private:
     bool _is_atomic;
     bool _is_counter;
     column_view_virtual _is_view_virtual;
+    column_computation_ptr _computation;
 
     struct thrift_bits {
         thrift_bits()
@@ -225,6 +234,7 @@ public:
     column_definition(bytes name, data_type type, column_kind kind,
         column_id component_index = 0,
         column_view_virtual view_virtual = column_view_virtual::no,
+        column_computation_ptr = nullptr,
         api::timestamp_type dropped_at = api::missing_timestamp);
 
     data_type type;
@@ -236,6 +246,35 @@ public:
 
     column_kind kind;
     ::shared_ptr<cql3::column_specification> column_specification;
+
+    // NOTICE(sarna): This copy constructor is hand-written instead of default,
+    // because it involves deep copying of the computation object.
+    // Computation has a strict ownership policy provided by
+    // unique_ptr, and as such cannot rely on default copying.
+    column_definition(const column_definition& other)
+            : _name(other._name)
+            , _dropped_at(other._dropped_at)
+            , _is_atomic(other._is_atomic)
+            , _is_counter(other._is_counter)
+            , _is_view_virtual(other._is_view_virtual)
+            , _computation(other.get_computation_ptr())
+            , _thrift_bits(other._thrift_bits)
+            , type(other.type)
+            , id(other.id)
+            , kind(other.kind)
+            , column_specification(other.column_specification)
+        {}
+
+    column_definition& operator=(const column_definition& other) {
+        if (this == &other) {
+            return *this;
+        }
+        column_definition tmp(other);
+        *this = std::move(tmp);
+        return *this;
+    }
+
+    column_definition& operator=(column_definition&& other) = default;
 
     bool is_static() const { return kind == column_kind::static_column; }
     bool is_regular() const { return kind == column_kind::regular_column; }
@@ -251,6 +290,17 @@ public:
     // These columns should be hidden from the user's SELECT queries.
     bool is_view_virtual() const { return _is_view_virtual == column_view_virtual::yes; }
     column_view_virtual view_virtual() const { return _is_view_virtual; }
+    // Computed column values are generated from other columns (and possibly other sources) during updates.
+    // Their values are still stored on disk, same as a regular columns.
+    bool is_computed() const { return bool(_computation); }
+    const column_computation& get_computation() const { return *_computation; }
+    column_computation_ptr get_computation_ptr() const {
+        return _computation ? _computation->clone() : nullptr;
+    }
+    void set_computed(column_computation_ptr computation) { _computation = std::move(computation); }
+    // Columns hidden from CQL cannot be in any way retrieved by the user,
+    // either explicitly or via the '*' operator, or functions, aggregates, etc.
+    bool is_hidden_from_cql() const { return is_view_virtual(); }
     const sstring& name_as_text() const;
     const bytes& name() const;
     sstring name_as_cql_string() const;
@@ -294,6 +344,7 @@ public:
 };
 
 bool operator==(const column_definition&, const column_definition&);
+inline bool operator!=(const column_definition& a, const column_definition& b) { return !(a == b); }
 
 static constexpr int DEFAULT_MIN_COMPACTION_THRESHOLD = 4;
 static constexpr int DEFAULT_MAX_COMPACTION_THRESHOLD = 32;
@@ -345,14 +396,14 @@ public:
     }
     const column_mapping_entry& static_column_at(column_id id) const {
         if (id >= _n_static) {
-            throw std::out_of_range(sprint("static column id %d >= %d", id, _n_static));
+            throw std::out_of_range(format("static column id {:d} >= {:d}", id, _n_static));
         }
         return _columns[id];
     }
     const column_mapping_entry& regular_column_at(column_id id) const {
         auto n_regular = _columns.size() - _n_static;
         if (id >= n_regular) {
-            throw std::out_of_range(sprint("regular column id %d >= %d", id, n_regular));
+            throw std::out_of_range(format("regular column id {:d} >= {:d}", id, n_regular));
         }
         return _columns[id + _n_static];
     }
@@ -558,10 +609,10 @@ public:
 private:
     ::shared_ptr<cql3::column_specification> make_column_specification(const column_definition& def);
     void rebuild();
-    schema(const raw_schema&, stdx::optional<raw_view_info>);
+    schema(const raw_schema&, std::optional<raw_view_info>);
 public:
     // deprecated, use schema_builder.
-    schema(std::experimental::optional<utils::UUID> id,
+    schema(std::optional<utils::UUID> id,
         sstring ks_name,
         sstring cf_name,
         std::vector<column> partition_key,
@@ -785,7 +836,7 @@ public:
     // Search for an index with a given name.
     bool has_index(const sstring& index_name) const;
     // Search for an existing index with same kind and options.
-    stdx::optional<index_metadata> find_index_noname(const index_metadata& target) const;
+    std::optional<index_metadata> find_index_noname(const index_metadata& target) const;
     friend std::ostream& operator<<(std::ostream& os, const schema& s);
     friend bool operator==(const schema&, const schema&);
     const column_mapping& get_column_mapping() const;
@@ -838,3 +889,19 @@ public:
 std::ostream& operator<<(std::ostream& os, const view_ptr& view);
 
 utils::UUID generate_legacy_id(const sstring& ks_name, const sstring& cf_name);
+
+
+// Thrown when attempted to access a schema-dependent object using
+// an incompatible version of the schema object.
+class schema_mismatch_error : public std::runtime_error {
+public:
+    schema_mismatch_error(table_schema_version expected, const schema& access);
+};
+
+// Throws schema_mismatch_error when a schema-dependent object of "expected" version
+// cannot be accessed using "access" schema.
+inline void check_schema_version(table_schema_version expected, const schema& access) {
+    if (expected != access.version()) {
+        throw_with_backtrace<schema_mismatch_error>(expected, access);
+    }
+}

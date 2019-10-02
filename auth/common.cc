@@ -48,9 +48,9 @@ future<> do_after_system_ready(seastar::abort_source& as, seastar::noncopyable_f
     struct empty_state { };
     return delay_until_system_ready(as).then([&as, func = std::move(func)] () mutable {
         return exponential_backoff_retry::do_until_value(1s, 1min, as, [func = std::move(func)] {
-            return func().then_wrapped([] (auto&& f) -> stdx::optional<empty_state> {
+            return func().then_wrapped([] (auto&& f) -> std::optional<empty_state> {
                 if (f.failed()) {
-                    auth_log.info("Auth task failed with error, rescheduling: {}", f.get_exception());
+                    auth_log.debug("Auth task failed with error, rescheduling: {}", f.get_exception());
                     return { };
                 }
                 return { empty_state() };
@@ -60,16 +60,14 @@ future<> do_after_system_ready(seastar::abort_source& as, seastar::noncopyable_f
 }
 
 future<> create_metadata_table_if_missing(
-        stdx::string_view table_name,
+        std::string_view table_name,
         cql3::query_processor& qp,
-        stdx::string_view cql,
+        std::string_view cql,
         ::service::migration_manager& mm) {
-    auto& db = qp.db().local();
-
-    if (db.has_schema(meta::AUTH_KS, sstring(table_name))) {
-        return make_ready_future<>();
-    }
-
+    static auto ignore_existing = [] (seastar::noncopyable_function<future<>()> func) {
+        return futurize_apply(std::move(func)).handle_exception_type([] (exceptions::already_exists_exception& ignored) { });
+    };
+    auto& db = qp.db();
     auto parsed_statement = static_pointer_cast<cql3::statements::raw::cf_statement>(
             cql3::query_processor::parse_statement(cql));
 
@@ -78,13 +76,16 @@ future<> create_metadata_table_if_missing(
     auto statement = static_pointer_cast<cql3::statements::create_table_statement>(
             parsed_statement->prepare(db, qp.get_cql_stats())->statement);
 
-    const auto schema = statement->get_cf_meta_data(qp.db().local());
+    const auto schema = statement->get_cf_meta_data(qp.db());
     const auto uuid = generate_legacy_id(schema->ks_name(), schema->cf_name());
 
     schema_builder b(schema);
     b.set_uuid(uuid);
+    schema_ptr table = b.build();
+    return ignore_existing([&mm, table = std::move(table)] () {
+        return mm.announce_new_column_family(table, false);
+    });
 
-    return mm.announce_new_column_family(b.build(), false);
 }
 
 future<> wait_for_schema_agreement(::service::migration_manager& mm, const database& db, seastar::abort_source& as) {

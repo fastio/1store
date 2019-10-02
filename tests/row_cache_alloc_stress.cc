@@ -19,10 +19,10 @@
  * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <core/distributed.hh>
-#include <core/app-template.hh>
-#include <core/sstring.hh>
-#include <core/thread.hh>
+#include <seastar/core/distributed.hh>
+#include <seastar/core/app-template.hh>
+#include <seastar/core/sstring.hh>
+#include <seastar/core/thread.hh>
 
 #include "utils/managed_bytes.hh"
 #include "utils/logalloc.hh"
@@ -34,13 +34,13 @@
 static
 partition_key new_key(schema_ptr s) {
     static thread_local int next = 0;
-    return partition_key::from_single_value(*s, to_bytes(sprint("key%d", next++)));
+    return partition_key::from_single_value(*s, to_bytes(format("key{:d}", next++)));
 }
 
 static
 clustering_key new_ckey(schema_ptr s) {
     static thread_local int next = 0;
-    return clustering_key::from_single_value(*s, to_bytes(sprint("ckey%d", next++)));
+    return clustering_key::from_single_value(*s, to_bytes(format("ckey{:d}", next++)));
 }
 
 int main(int argc, char** argv) {

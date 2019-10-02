@@ -41,11 +41,12 @@
 
 #pragma once
 
-#include "database.hh"
+#include "database_fwd.hh"
 #include "query-request.hh"
 #include "query-result.hh"
 #include "query-result-set.hh"
-#include "core/distributed.hh"
+#include <seastar/core/distributed.hh>
+#include <seastar/core/execution_stage.hh>
 #include "db/consistency_level_type.hh"
 #include "db/read_repair_decision.hh"
 #include "db/write_type.hh"
@@ -57,8 +58,16 @@
 #include "tracing/trace_state.hh"
 #include <seastar/core/metrics.hh>
 #include "frozen_mutation.hh"
-#include "db/config.hh"
 #include "storage_proxy_stats.hh"
+#include "cache_temperature.hh"
+#include "mutation_query.hh"
+#include "service_permit.hh"
+
+namespace locator {
+
+class token_metadata;
+
+}
 
 namespace compat {
 
@@ -71,6 +80,7 @@ namespace service {
 class abstract_write_response_handler;
 class abstract_read_executor;
 class mutation_holder;
+class view_update_write_response_handler;
 
 using replicas_per_token_range = std::unordered_map<dht::token_range, std::vector<utils::UUID>>;
 
@@ -79,12 +89,42 @@ struct view_update_backlog_timestamped {
     api::timestamp_type ts;
 };
 
-class storage_proxy : public seastar::async_sharded_service<storage_proxy> /*implements StorageProxyMBean*/ {
+struct allow_hints_tag {};
+using allow_hints = bool_class<allow_hints_tag>;
+
+
+class query_ranges_to_vnodes_generator {
+    schema_ptr _s;
+    dht::partition_range_vector _ranges;
+    dht::partition_range_vector::iterator _i; // iterator to current range in _ranges
+    bool _local;
+    locator::token_metadata& _tm;
+    void process_one_range(size_t n, dht::partition_range_vector& ranges);
+public:
+    query_ranges_to_vnodes_generator(schema_ptr s, dht::partition_range_vector ranges, bool local = false);
+    query_ranges_to_vnodes_generator(locator::token_metadata& tm, schema_ptr s, dht::partition_range_vector ranges, bool local = false);
+    query_ranges_to_vnodes_generator(const query_ranges_to_vnodes_generator&) = delete;
+    query_ranges_to_vnodes_generator(query_ranges_to_vnodes_generator&&) = default;
+    // generate next 'n' vnodes, may return less than requested number of ranges
+    // which means either that there are no more ranges
+    // (in which case empty() == true), or too many ranges
+    // are requested
+    dht::partition_range_vector operator()(size_t n);
+    bool empty() const;
+};
+
+class storage_proxy : public seastar::async_sharded_service<storage_proxy>, public service::endpoint_lifecycle_subscriber /*implements StorageProxyMBean*/ {
 public:
     using clock_type = lowres_clock;
     struct config {
-        stdx::optional<std::vector<sstring>> hinted_handoff_enabled = {};
+        std::optional<std::vector<sstring>> hinted_handoff_enabled = {};
         size_t available_memory;
+        smp_service_group read_smp_service_group = default_smp_service_group();
+        smp_service_group write_smp_service_group = default_smp_service_group();
+        // Write acknowledgments might not be received on the correct shard, and
+        // they need a separate smp_service_group to prevent an ABBA deadlock
+        // with writes.
+        smp_service_group write_ack_smp_service_group = default_smp_service_group();
     };
 private:
 
@@ -111,15 +151,18 @@ public:
         clock_type::time_point _timeout;
 
     public:
+        service_permit permit;
         tracing::trace_state_ptr trace_state = nullptr;
         replicas_per_token_range preferred_replicas;
-        stdx::optional<db::read_repair_decision> read_repair_decision;
+        std::optional<db::read_repair_decision> read_repair_decision;
 
         coordinator_query_options(clock_type::time_point timeout,
+                service_permit permit_,
                 tracing::trace_state_ptr trace_state = nullptr,
                 replicas_per_token_range preferred_replicas = { },
-                stdx::optional<db::read_repair_decision> read_repair_decision = { })
+                std::optional<db::read_repair_decision> read_repair_decision = { })
             : _timeout(timeout)
+            , permit(std::move(permit_))
             , trace_state(std::move(trace_state))
             , preferred_replicas(std::move(preferred_replicas))
             , read_repair_decision(read_repair_decision) {
@@ -145,6 +188,9 @@ public:
     };
 private:
     distributed<database>& _db;
+    smp_service_group _read_smp_service_group;
+    smp_service_group _write_smp_service_group;
+    smp_service_group _write_ack_smp_service_group;
     response_id_type _next_response_id;
     std::unordered_map<response_id_type, ::shared_ptr<abstract_write_response_handler>> _response_handlers;
     // This buffer hold ids of throttled writes in case resource consumption goes
@@ -156,7 +202,7 @@ private:
     // just skip an entry if request no longer exists.
     circular_buffer<response_id_type> _throttled_writes;
     db::hints::resource_manager _hints_resource_manager;
-    stdx::optional<db::hints::manager> _hints_manager;
+    std::optional<db::hints::manager> _hints_manager;
     db::hints::manager _hints_for_views_manager;
     stats _stats;
     static constexpr float CONCURRENT_SUBREQUESTS_MARGIN = 0.10;
@@ -172,9 +218,14 @@ private:
             db::consistency_level,
             clock_type::time_point,
             tracing::trace_state_ptr,
+            service_permit,
             bool> _mutate_stage;
     db::view::node_update_backlog& _max_view_update_backlog;
     std::unordered_map<gms::inet_address, view_update_backlog_timestamped> _view_update_backlogs;
+
+    //NOTICE(sarna): This opaque pointer is here just to avoid moving write handler class definitions from .cc to .hh. It's slow path.
+    class view_update_handlers_list;
+    std::unique_ptr<view_update_handlers_list> _view_update_handlers_list;
 
 private:
     void uninit_messaging_service();
@@ -184,14 +235,14 @@ private:
             coordinator_query_options optional_params);
     response_id_type register_response_handler(shared_ptr<abstract_write_response_handler>&& h);
     void remove_response_handler(response_id_type id);
-    void got_response(response_id_type id, gms::inet_address from, stdx::optional<db::view::update_backlog> backlog);
-    void got_failure_response(response_id_type id, gms::inet_address from, size_t count, stdx::optional<db::view::update_backlog> backlog);
+    void got_response(response_id_type id, gms::inet_address from, std::optional<db::view::update_backlog> backlog);
+    void got_failure_response(response_id_type id, gms::inet_address from, size_t count, std::optional<db::view::update_backlog> backlog);
     future<> response_wait(response_id_type id, clock_type::time_point timeout);
     ::shared_ptr<abstract_write_response_handler>& get_write_response_handler(storage_proxy::response_id_type id);
     response_id_type create_write_response_handler(keyspace& ks, db::consistency_level cl, db::write_type type, std::unique_ptr<mutation_holder> m, std::unordered_set<gms::inet_address> targets,
-            const std::vector<gms::inet_address>& pending_endpoints, std::vector<gms::inet_address>, tracing::trace_state_ptr tr_state, storage_proxy::write_stats& stats);
-    response_id_type create_write_response_handler(const mutation&, db::consistency_level cl, db::write_type type, tracing::trace_state_ptr tr_state);
-    response_id_type create_write_response_handler(const std::unordered_map<gms::inet_address, std::experimental::optional<mutation>>&, db::consistency_level cl, db::write_type type, tracing::trace_state_ptr tr_state);
+            const std::vector<gms::inet_address>& pending_endpoints, std::vector<gms::inet_address>, tracing::trace_state_ptr tr_state, storage_proxy::write_stats& stats, service_permit permit);
+    response_id_type create_write_response_handler(const mutation&, db::consistency_level cl, db::write_type type, tracing::trace_state_ptr tr_state, service_permit permit);
+    response_id_type create_write_response_handler(const std::unordered_map<gms::inet_address, std::optional<mutation>>&, db::consistency_level cl, db::write_type type, tracing::trace_state_ptr tr_state, service_permit permit);
     void send_to_live_endpoints(response_id_type response_id, clock_type::time_point timeout);
     template<typename Range>
     size_t hint_to_dead_endpoints(std::unique_ptr<mutation_holder>& mh, const Range& targets, db::write_type type, tracing::trace_state_ptr tr_state) noexcept;
@@ -209,7 +260,9 @@ private:
             db::consistency_level cl,
             db::read_repair_decision repair_decision,
             tracing::trace_state_ptr trace_state,
-            const std::vector<gms::inet_address>& preferred_endpoints);
+            const std::vector<gms::inet_address>& preferred_endpoints,
+            bool& is_bounced_read,
+            service_permit permit);
     future<foreign_ptr<lw_shared_ptr<query::result>>, cache_temperature> query_result_local(schema_ptr, lw_shared_ptr<query::read_command> cmd, const dht::partition_range& pr,
                                                                            query::result_options opts,
                                                                            tracing::trace_state_ptr trace_state,
@@ -230,13 +283,13 @@ private:
             std::vector<foreign_ptr<lw_shared_ptr<query::result>>>&& results,
             lw_shared_ptr<query::read_command> cmd,
             db::consistency_level cl,
-            dht::partition_range_vector::iterator&& i,
-            dht::partition_range_vector&& ranges,
+            query_ranges_to_vnodes_generator&& ranges_to_vnodes,
             int concurrency_factor,
             tracing::trace_state_ptr trace_state,
             uint32_t remaining_row_count,
             uint32_t remaining_partition_count,
-            replicas_per_token_range preferred_replicas);
+            replicas_per_token_range preferred_replicas,
+            service_permit permit);
 
     future<coordinator_query_result> do_query(schema_ptr,
         lw_shared_ptr<query::read_command> cmd,
@@ -244,40 +297,41 @@ private:
         db::consistency_level cl,
         coordinator_query_options optional_params);
     template<typename Range, typename CreateWriteHandler>
-    future<std::vector<unique_response_handler>> mutate_prepare(Range&& mutations, db::consistency_level cl, db::write_type type, CreateWriteHandler handler);
+    future<std::vector<unique_response_handler>> mutate_prepare(Range&& mutations, db::consistency_level cl, db::write_type type, service_permit permit, CreateWriteHandler handler);
     template<typename Range>
-    future<std::vector<unique_response_handler>> mutate_prepare(Range&& mutations, db::consistency_level cl, db::write_type type, tracing::trace_state_ptr tr_state);
-    future<> mutate_begin(std::vector<unique_response_handler> ids, db::consistency_level cl, stdx::optional<clock_type::time_point> timeout_opt = { });
+    future<std::vector<unique_response_handler>> mutate_prepare(Range&& mutations, db::consistency_level cl, db::write_type type, tracing::trace_state_ptr tr_state, service_permit permit);
+    future<> mutate_begin(std::vector<unique_response_handler> ids, db::consistency_level cl, std::optional<clock_type::time_point> timeout_opt = { });
     future<> mutate_end(future<> mutate_result, utils::latency_counter, write_stats& stats, tracing::trace_state_ptr trace_state);
-    future<> schedule_repair(std::unordered_map<dht::token, std::unordered_map<gms::inet_address, std::experimental::optional<mutation>>> diffs, db::consistency_level cl, tracing::trace_state_ptr trace_state);
+    future<> schedule_repair(std::unordered_map<dht::token, std::unordered_map<gms::inet_address, std::optional<mutation>>> diffs, db::consistency_level cl, tracing::trace_state_ptr trace_state, service_permit permit);
     bool need_throttle_writes() const;
     void unthrottle();
     void handle_read_error(std::exception_ptr eptr, bool range);
     template<typename Range>
-    future<> mutate_internal(Range mutations, db::consistency_level cl, bool counter_write, tracing::trace_state_ptr tr_state, stdx::optional<clock_type::time_point> timeout_opt = { });
+    future<> mutate_internal(Range mutations, db::consistency_level cl, bool counter_write, tracing::trace_state_ptr tr_state, service_permit permit, std::optional<clock_type::time_point> timeout_opt = { });
     future<foreign_ptr<lw_shared_ptr<reconcilable_result>>, cache_temperature> query_nonsingular_mutations_locally(
             schema_ptr s, lw_shared_ptr<query::read_command> cmd, const dht::partition_range_vector&& pr, tracing::trace_state_ptr trace_state,
             uint64_t max_size, clock_type::time_point timeout);
 
     future<> mutate_counters_on_leader(std::vector<frozen_mutation_and_schema> mutations, db::consistency_level cl, clock_type::time_point timeout,
-                                       tracing::trace_state_ptr trace_state);
+                                       tracing::trace_state_ptr trace_state, service_permit permit);
     future<> mutate_counter_on_leader_and_replicate(const schema_ptr& s, frozen_mutation m, db::consistency_level cl, clock_type::time_point timeout,
-                                                    tracing::trace_state_ptr trace_state);
+                                                    tracing::trace_state_ptr trace_state, service_permit permit);
 
     gms::inet_address find_leader_for_counter_update(const mutation& m, db::consistency_level cl);
 
-    future<> do_mutate(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state, bool);
+    future<> do_mutate(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state, service_permit permit, bool);
 
     future<> send_to_endpoint(
             std::unique_ptr<mutation_holder> m,
             gms::inet_address target,
             std::vector<gms::inet_address> pending_endpoints,
             db::write_type type,
-            write_stats& stats);
+            write_stats& stats,
+            allow_hints allow_hints = allow_hints::yes);
 
     db::view::update_backlog get_view_update_backlog() const;
 
-    void maybe_update_view_backlog_of(gms::inet_address, stdx::optional<db::view::update_backlog>);
+    void maybe_update_view_backlog_of(gms::inet_address, std::optional<db::view::update_backlog>);
 
     db::view::update_backlog get_backlog_of(gms::inet_address) const;
 public:
@@ -288,6 +342,10 @@ public:
     }
     distributed<database>& get_db() {
         return _db;
+    }
+
+    view_update_handlers_list& get_view_update_handlers_list() {
+        return *_view_update_handlers_list;
     }
 
     response_id_type get_next_response_id() {
@@ -311,8 +369,6 @@ public:
 
     future<> mutate_streaming_mutation(const schema_ptr&, utils::UUID plan_id, const frozen_mutation& m, bool fragmented);
 
-    dht::partition_range_vector get_restricted_ranges(const schema& s, dht::partition_range range);
-
     /**
     * Use this method to have these Mutations applied
     * across all replicas. This method will take care
@@ -323,16 +379,16 @@ public:
     * @param consistency_level the consistency level for the operation
     * @param tr_state trace state handle
     */
-    future<> mutate(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state, bool raw_counters = false);
+    future<> mutate(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state, service_permit permit, bool raw_counters = false);
 
     future<> replicate_counter_from_leader(mutation m, db::consistency_level cl, tracing::trace_state_ptr tr_state,
-                                           clock_type::time_point timeout);
+                                           clock_type::time_point timeout, service_permit permit);
 
     template<typename Range>
-    future<> mutate_counters(Range&& mutations, db::consistency_level cl, tracing::trace_state_ptr tr_state, clock_type::time_point timeout);
+    future<> mutate_counters(Range&& mutations, db::consistency_level cl, tracing::trace_state_ptr tr_state, service_permit permit, clock_type::time_point timeout);
 
     future<> mutate_with_triggers(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout,
-                                  bool should_mutate_atomically, tracing::trace_state_ptr tr_state, bool raw_counters = false);
+                                  bool should_mutate_atomically, tracing::trace_state_ptr tr_state, service_permit permit, bool raw_counters = false);
 
     /**
     * See mutate. Adds additional steps before and after writing a batch.
@@ -344,14 +400,14 @@ public:
     * @param consistency_level the consistency level for the operation
     * @param tr_state trace state handle
     */
-    future<> mutate_atomically(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state);
+    future<> mutate_atomically(std::vector<mutation> mutations, db::consistency_level cl, clock_type::time_point timeout, tracing::trace_state_ptr tr_state, service_permit permit);
 
     // Send a mutation to one specific remote target.
     // Inspired by Cassandra's StorageProxy.sendToHintedEndpoints but without
     // hinted handoff support, and just one target. See also
     // send_to_live_endpoints() - another take on the same original function.
-    future<> send_to_endpoint(frozen_mutation_and_schema fm_a_s, gms::inet_address target, std::vector<gms::inet_address> pending_endpoints, db::write_type type, write_stats& stats);
-    future<> send_to_endpoint(frozen_mutation_and_schema fm_a_s, gms::inet_address target, std::vector<gms::inet_address> pending_endpoints, db::write_type type);
+    future<> send_to_endpoint(frozen_mutation_and_schema fm_a_s, gms::inet_address target, std::vector<gms::inet_address> pending_endpoints, db::write_type type, write_stats& stats, allow_hints allow_hints = allow_hints::yes);
+    future<> send_to_endpoint(frozen_mutation_and_schema fm_a_s, gms::inet_address target, std::vector<gms::inet_address> pending_endpoints, db::write_type type, allow_hints allow_hints = allow_hints::yes);
 
     /**
      * Performs the truncate operatoin, which effectively deletes all data from
@@ -402,18 +458,24 @@ public:
 
 
     future<> stop();
-    future<> stop_hints_manager();
     future<> start_hints_manager(shared_ptr<gms::gossiper> gossiper_ptr, shared_ptr<service::storage_service> ss_ptr);
     void allow_replaying_hints() noexcept;
+    future<> drain_on_shutdown();
 
     const stats& get_stats() const {
         return _stats;
     }
 
+    virtual void on_join_cluster(const gms::inet_address& endpoint) override;
+    virtual void on_leave_cluster(const gms::inet_address& endpoint) override;
+    virtual void on_up(const gms::inet_address& endpoint) override;
+    virtual void on_down(const gms::inet_address& endpoint) override;
+
     friend class abstract_read_executor;
     friend class abstract_write_response_handler;
     friend class speculating_read_executor;
     friend class view_update_backlog_broker;
+    friend class view_update_write_response_handler;
 };
 
 extern distributed<storage_proxy> _the_storage_proxy;

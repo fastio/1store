@@ -22,7 +22,7 @@
 
 #include <iostream>
 #include <seastar/core/thread.hh>
-#include <seastar/tests/test-utils.hh>
+#include <seastar/testing/test_case.hh>
 #include <seastar/util/defer.hh>
 
 #include "tests/cql_test_env.hh"
@@ -32,6 +32,11 @@
 #include "service/migration_manager.hh"
 #include "schema_builder.hh"
 #include "schema_registry.hh"
+#include "types/list.hh"
+#include "types/user.hh"
+#include "db/config.hh"
+#include "tmpdir.hh"
+#include "exception_utils.hh"
 
 SEASTAR_TEST_CASE(test_new_schema_with_no_structural_change_is_propagated) {
     return do_with_cql_env([](cql_test_env& e) {
@@ -144,7 +149,7 @@ SEASTAR_TEST_CASE(test_concurrent_column_addition) {
                     .with_column("v3", bytes_type)
                     .build();
 
-            auto s2 = schema_builder("ks", "table", stdx::make_optional(s1->id()))
+            auto s2 = schema_builder("ks", "table", std::make_optional(s1->id()))
                     .with_column("pk", bytes_type, column_kind::partition_key)
                     .with_column("v1", bytes_type)
                     .with_column("v2", bytes_type)
@@ -157,7 +162,7 @@ SEASTAR_TEST_CASE(test_concurrent_column_addition) {
             {
                 auto&& keyspace = e.db().local().find_keyspace(s0->ks_name()).metadata();
                 auto muts = db::schema_tables::make_update_table_mutations(keyspace, s0, s2,
-                    api::new_timestamp(), false).get0();
+                    api::new_timestamp(), false);
                 mm.announce(std::move(muts), true).get();
             }
 
@@ -170,6 +175,28 @@ SEASTAR_TEST_CASE(test_concurrent_column_addition) {
             BOOST_REQUIRE(new_schema->version() != old_version);
             BOOST_REQUIRE(new_schema->version() != s2->version());
         });
+    });
+}
+
+SEASTAR_TEST_CASE(test_sort_type_in_update) {
+    return do_with_cql_env_thread([](cql_test_env& e) {
+        service::migration_manager& mm = service::get_local_migration_manager();
+        auto&& keyspace = e.db().local().find_keyspace("ks").metadata();
+
+        auto type1 = user_type_impl::get_instance("ks", to_bytes("type1"), {}, {});
+        auto muts1 = db::schema_tables::make_create_type_mutations(keyspace, type1, api::new_timestamp());
+
+        auto type3 = user_type_impl::get_instance("ks", to_bytes("type3"), {}, {});
+        auto muts3 = db::schema_tables::make_create_type_mutations(keyspace, type3, api::new_timestamp());
+
+        // type2 must be created after type1 and type3. This tests that announce sorts them.
+        auto type2 = user_type_impl::get_instance("ks", to_bytes("type2"), {"field1", "field3"}, {type1, type3});
+        auto muts2 = db::schema_tables::make_create_type_mutations(keyspace, type2, api::new_timestamp());
+
+        auto muts = muts2;
+        muts.insert(muts.end(), muts1.begin(), muts1.end());
+        muts.insert(muts.end(), muts3.begin(), muts3.end());
+        mm.announce(std::move(muts), false).get();
     });
 }
 
@@ -189,6 +216,76 @@ SEASTAR_TEST_CASE(test_column_is_dropped) {
     });
 }
 
+SEASTAR_TEST_CASE(test_static_column_is_dropped) {
+    return do_with_cql_env_thread([](cql_test_env& e) {
+        e.execute_cql("create keyspace tests with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };").get();
+        e.execute_cql("create table tests.table1 (pk int, c1 int, c2 int static, primary key (pk, c1));").get();
+
+        e.execute_cql("alter table tests.table1 drop c2;").get();
+        e.execute_cql("alter table tests.table1 add s1 int static;").get();
+        schema_ptr s = e.db().local().find_schema("tests", "table1");
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("c1")));
+        BOOST_REQUIRE(!s->columns_by_name().count(to_bytes("c2")));
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("s1")));
+
+        e.execute_cql("alter table tests.table1 drop s1;").get();
+        s = e.db().local().find_schema("tests", "table1");
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("c1")));
+        BOOST_REQUIRE(!s->columns_by_name().count(to_bytes("c2")));
+        BOOST_REQUIRE(!s->columns_by_name().count(to_bytes("s1")));
+    });
+}
+
+SEASTAR_TEST_CASE(test_multiple_columns_add_and_drop) {
+    return do_with_cql_env_thread([](cql_test_env& e) {
+        e.execute_cql("create keyspace tests with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };").get();
+        e.execute_cql("create table tests.table1 (pk int primary key, c1 int, c2 int, c3 int);").get();
+
+        e.execute_cql("alter table tests.table1 drop (c2);").get();
+        e.execute_cql("alter table tests.table1 add (s1 int);").get();
+        schema_ptr s = e.db().local().find_schema("tests", "table1");
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("c1")));
+        BOOST_REQUIRE(!s->columns_by_name().count(to_bytes("c2")));
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("c3")));
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("s1")));
+
+        e.execute_cql("alter table tests.table1 drop (c1, c3);").get();
+        e.execute_cql("alter table tests.table1 add (s2 int, s3 int);").get();
+        s = e.db().local().find_schema("tests", "table1");
+        BOOST_REQUIRE(!s->columns_by_name().count(to_bytes("c1")));
+        BOOST_REQUIRE(!s->columns_by_name().count(to_bytes("c2")));
+        BOOST_REQUIRE(!s->columns_by_name().count(to_bytes("c3")));
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("s1")));
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("s2")));
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("s3")));
+    });
+}
+
+SEASTAR_TEST_CASE(test_multiple_static_columns_add_and_drop) {
+    return do_with_cql_env_thread([](cql_test_env& e) {
+        e.execute_cql("create keyspace tests with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };").get();
+        e.execute_cql("create table tests.table1 (pk int, c1 int, c2 int static, c3 int, primary key(pk, c1));").get();
+
+        e.execute_cql("alter table tests.table1 drop (c2);").get();
+        e.execute_cql("alter table tests.table1 add (s1 int static);").get();
+        schema_ptr s = e.db().local().find_schema("tests", "table1");
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("c1")));
+        BOOST_REQUIRE(!s->columns_by_name().count(to_bytes("c2")));
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("c3")));
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("s1")));
+
+        e.execute_cql("alter table tests.table1 drop (c3, s1);").get();
+        e.execute_cql("alter table tests.table1 add (s2 int, s3 int static);").get();
+        s = e.db().local().find_schema("tests", "table1");
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("c1")));
+        BOOST_REQUIRE(!s->columns_by_name().count(to_bytes("c2")));
+        BOOST_REQUIRE(!s->columns_by_name().count(to_bytes("c3")));
+        BOOST_REQUIRE(!s->columns_by_name().count(to_bytes("s1")));
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("s2")));
+        BOOST_REQUIRE(s->columns_by_name().count(to_bytes("s3")));
+    });
+}
+
 SEASTAR_TEST_CASE(test_combined_column_add_and_drop) {
     return do_with_cql_env([](cql_test_env& e) {
         return seastar::async([&] {
@@ -205,7 +302,7 @@ SEASTAR_TEST_CASE(test_combined_column_add_and_drop) {
 
             auto&& keyspace = e.db().local().find_keyspace(s1->ks_name()).metadata();
 
-            auto s2 = schema_builder("ks", "table1", stdx::make_optional(s1->id()))
+            auto s2 = schema_builder("ks", "table1", std::make_optional(s1->id()))
                     .with_column("pk", bytes_type, column_kind::partition_key)
                     .without_column("v1", bytes_type, api::new_timestamp())
                     .build();
@@ -213,24 +310,24 @@ SEASTAR_TEST_CASE(test_combined_column_add_and_drop) {
             // Drop v1
             {
                 auto muts = db::schema_tables::make_update_table_mutations(keyspace, s1, s2,
-                    api::new_timestamp(), false).get0();
+                    api::new_timestamp(), false);
                 mm.announce(std::move(muts), true).get();
             }
 
             // Add a new v1 and drop it
             {
-                auto s3 = schema_builder("ks", "table1", stdx::make_optional(s1->id()))
+                auto s3 = schema_builder("ks", "table1", std::make_optional(s1->id()))
                         .with_column("pk", bytes_type, column_kind::partition_key)
                         .with_column("v1", list_type_impl::get_instance(int32_type, true))
                         .build();
 
-                auto s4 = schema_builder("ks", "table1", stdx::make_optional(s1->id()))
+                auto s4 = schema_builder("ks", "table1", std::make_optional(s1->id()))
                         .with_column("pk", bytes_type, column_kind::partition_key)
                         .without_column("v1", list_type_impl::get_instance(int32_type, true), api::new_timestamp())
                         .build();
 
                 auto muts = db::schema_tables::make_update_table_mutations(keyspace, s3, s4,
-                    api::new_timestamp(), false).get0();
+                    api::new_timestamp(), false);
                 mm.announce(std::move(muts), true).get();
             }
 
@@ -258,7 +355,7 @@ SEASTAR_TEST_CASE(test_merging_does_not_alter_tables_which_didnt_change) {
                 return e.db().local().find_column_family("ks", "table1");
             };
 
-            auto muts1 = db::schema_tables::make_create_table_mutations(keyspace, s0, api::new_timestamp()).get0();
+            auto muts1 = db::schema_tables::make_create_table_mutations(keyspace, s0, api::new_timestamp());
             mm.announce(muts1).get();
 
             auto s1 = find_table().schema();
@@ -392,6 +489,27 @@ SEASTAR_TEST_CASE(test_notifications) {
     });
 }
 
+SEASTAR_TEST_CASE(test_drop_user_type_in_use) {
+    return do_with_cql_env_thread([](cql_test_env& e) {
+        e.execute_cql("create type simple_type (user_number int);").get();
+        e.execute_cql("create table simple_table (key int primary key, val frozen<simple_type>);").get();
+        e.execute_cql("insert into simple_table (key, val) values (42, {user_number: 1});").get();
+        BOOST_REQUIRE_EXCEPTION(e.execute_cql("drop type simple_type;").get(), exceptions::invalid_request_exception,
+                exception_predicate::message_equals("Cannot drop user type ks.simple_type as it is still used by table ks.simple_table"));
+    });
+}
+
+SEASTAR_TEST_CASE(test_drop_nested_user_type_in_use) {
+    return do_with_cql_env_thread([](cql_test_env& e) {
+        e.execute_cql("create type simple_type (user_number int);").get();
+        e.execute_cql("create table nested_table (key int primary key, val tuple<int, frozen<simple_type>>);").get();
+        e.execute_cql("insert into nested_table (key, val) values (42, (41, {user_number: 1}));").get();
+        BOOST_REQUIRE_EXCEPTION(e.execute_cql("drop type simple_type;").get(), exceptions::invalid_request_exception,
+                exception_predicate::message_equals(
+                        "Cannot drop user type ks.simple_type as it is still used by table ks.nested_table"));
+    });
+}
+
 SEASTAR_TEST_CASE(test_prepared_statement_is_invalidated_by_schema_change) {
     return do_with_cql_env([](cql_test_env& e) {
         return seastar::async([&] {
@@ -410,4 +528,122 @@ SEASTAR_TEST_CASE(test_prepared_statement_is_invalidated_by_schema_change) {
             }
         });
     });
+}
+
+// We don't want schema digest to change between Scylla versions because that results in a schema disagreement
+// during rolling upgrade.
+future<> test_schema_digest_does_not_change_with_disabled_features(sstring data_dir, std::set<sstring> disabled_features, std::vector<utils::UUID> expected_digests) {
+    using namespace db;
+    using namespace db::schema_tables;
+
+    auto tmp = tmpdir();
+    // NOTICE: Regenerating data for this test may be necessary when a system table is added.
+    // This test uses pre-generated sstables and relies on the fact that they are up to date
+    // with the current system schema. If it is not, the schema will be updated, which will cause
+    // new timestamps to appear and schema digests will not match anymore.
+    const bool regenerate = false;
+
+    auto db_cfg_ptr = make_shared<db::config>();
+    auto& db_cfg = *db_cfg_ptr;
+    if (regenerate) {
+        db_cfg.data_file_directories({data_dir}, db::config::config_source::CommandLine);
+    } else {
+        fs::copy(std::string(data_dir), std::string(tmp.path().string()), fs::copy_options::recursive);
+        db_cfg.data_file_directories({tmp.path().string()}, db::config::config_source::CommandLine);
+    }
+    cql_test_config cfg_in(db_cfg_ptr);
+    cfg_in.disabled_features = std::move(disabled_features);
+
+    return do_with_cql_env_thread([regenerate, expected_digests = std::move(expected_digests)](cql_test_env& e) {
+        if (regenerate) {
+            // Exercise many different kinds of schema changes.
+            e.execute_cql(
+                "create keyspace tests with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };").get();
+            e.execute_cql("create table tests.table1 (pk int primary key, c1 int, c2 int);").get();
+            e.execute_cql("create type tests.basic_info (c1 timestamp, v2 text);").get();
+            e.execute_cql("create index on tests.table1 (c1);").get();
+            e.execute_cql("create table ks.tbl (a int, b int, c float, PRIMARY KEY (a))").get();
+            e.execute_cql(
+                "create materialized view ks.tbl_view AS SELECT c FROM ks.tbl WHERE c IS NOT NULL PRIMARY KEY (c, a)").get();
+            e.execute_cql(
+                "create materialized view ks.tbl_view_2 AS SELECT a FROM ks.tbl WHERE a IS NOT NULL PRIMARY KEY (a)").get();
+            e.execute_cql(
+                "create keyspace tests2 with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };").get();
+            e.execute_cql("drop keyspace tests2;").get();
+        }
+
+        auto expect_digest = [&] (schema_features sf, utils::UUID expected) {
+            auto actual = calculate_schema_digest(service::get_storage_proxy(), sf).get0();
+            if (regenerate) {
+                std::cout << "Digest is " << actual << "\n";
+            } else {
+                BOOST_REQUIRE_EQUAL(actual, expected);
+            }
+        };
+
+        auto expect_version = [&] (sstring ks_name, sstring cf_name, utils::UUID expected) {
+            auto actual = e.local_db().find_column_family(ks_name, cf_name).schema()->version();
+            if (regenerate) {
+                std::cout << "Version of " << ks_name << "." << cf_name << " is " << actual << "\n";
+            } else {
+                BOOST_REQUIRE_EQUAL(actual, expected);
+            }
+        };
+
+        schema_features sf = schema_features::of<schema_feature::DIGEST_INSENSITIVE_TO_EXPIRY>();
+
+        expect_digest(sf, expected_digests[0]);
+
+        sf.set<schema_feature::VIEW_VIRTUAL_COLUMNS>();
+        expect_digest(sf, expected_digests[1]);
+
+        sf.set<schema_feature::VIEW_VIRTUAL_COLUMNS>();
+        expect_digest(sf, expected_digests[2]);
+
+        expect_digest(schema_features::full(), expected_digests[3]);
+
+        // Causes tombstones to become expired
+        // This is in order to test that schema disagreement doesn't form due to expired tombstones being collected
+        // Refs https://github.com/scylladb/scylla/issues/4485
+        forward_jump_clocks(std::chrono::seconds(60*60*24*31));
+
+        expect_digest(schema_features::full(), expected_digests[4]);
+
+        // FIXME: schema_mutations::digest() is still sensitive to expiry, so we can check versions only after forward_jump_clocks()
+        // otherwise the results would not be stable.
+        expect_version("tests", "table1", expected_digests[5]);
+        expect_version("ks", "tbl", expected_digests[6]);
+        expect_version("ks", "tbl_view", expected_digests[7]);
+        expect_version("ks", "tbl_view_2", expected_digests[8]);
+    }, cfg_in).then([tmp = std::move(tmp)] {});
+}
+
+SEASTAR_TEST_CASE(test_schema_digest_does_not_change) {
+    std::vector<utils::UUID> expected_digests{
+        utils::UUID("492719e5-0169-30b1-a15e-3447674c0c0c"),
+        utils::UUID("be3c0af4-417f-31d5-8e0e-4ac257ec00ad"),
+        utils::UUID("be3c0af4-417f-31d5-8e0e-4ac257ec00ad"),
+        utils::UUID("be3c0af4-417f-31d5-8e0e-4ac257ec00ad"),
+        utils::UUID("be3c0af4-417f-31d5-8e0e-4ac257ec00ad"),
+        utils::UUID("4198e26c-f214-3888-9c49-c396eb01b8d7"),
+        utils::UUID("5c9cadec-e5df-357e-81d0-0261530af64b"),
+        utils::UUID("1d91ad22-ea7c-3e7f-9557-87f0f3bb94d7"),
+        utils::UUID("2dcd4a37-cbb5-399b-b3c9-8eb1398b096b")
+    };
+    return test_schema_digest_does_not_change_with_disabled_features("./tests/sstables/schema_digest_test", std::set<sstring>{"COMPUTED_COLUMNS"}, std::move(expected_digests));
+}
+
+SEASTAR_TEST_CASE(test_schema_digest_does_not_change_after_computed_columns) {
+    std::vector<utils::UUID> expected_digests{
+        utils::UUID("ddd2b841-1bbb-374a-972c-037d6bc14d28"),
+        utils::UUID("ea8433b3-d150-3c93-8249-a584537c1b4e"),
+        utils::UUID("ea8433b3-d150-3c93-8249-a584537c1b4e"),
+        utils::UUID("9837e11f-13b8-32ba-9171-5563248dc198"),
+        utils::UUID("9837e11f-13b8-32ba-9171-5563248dc198"),
+        utils::UUID("774d63ef-2f75-39f8-a2be-418d28d35a97"),
+        utils::UUID("5217fc3a-308f-32aa-8b9c-41a6f2bcc448"),
+        utils::UUID("d58e5214-516e-3d0b-95b5-01ab71584a8d"),
+        utils::UUID("e1b50bed-2ab8-3759-92c7-1f4288046ae6")
+    };
+    return test_schema_digest_does_not_change_with_disabled_features("./tests/sstables/schema_digest_test_computed_columns", std::set<sstring>{}, std::move(expected_digests));
 }

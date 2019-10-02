@@ -44,9 +44,9 @@
 #include "streaming/stream_state.hh"
 #include "streaming/stream_reason.hh"
 #include "gms/inet_address.hh"
-#include "gms/i_failure_detector.hh"
 #include "range.hh"
 #include <seastar/core/distributed.hh>
+#include <seastar/core/abort_source.hh>
 #include <unordered_map>
 #include <memory>
 
@@ -62,7 +62,6 @@ public:
     using token_metadata = locator::token_metadata;
     using stream_plan = streaming::stream_plan;
     using stream_state = streaming::stream_state;
-    using i_failure_detector = gms::i_failure_detector;
     static bool use_strict_consistency();
 public:
     /**
@@ -80,10 +79,10 @@ public:
      */
     class failure_detector_source_filter : public i_source_filter {
     private:
-        gms::i_failure_detector& _fd;
+        std::set<gms::inet_address> _down_nodes;
     public:
-        failure_detector_source_filter(i_failure_detector& fd) : _fd(fd) { }
-        virtual bool should_include(inet_address endpoint) override { return _fd.is_alive(endpoint); }
+        failure_detector_source_filter(std::set<gms::inet_address> down_nodes) : _down_nodes(std::move(down_nodes)) { }
+        virtual bool should_include(inet_address endpoint) override { return !_down_nodes.count(endpoint); }
     };
 
     /**
@@ -102,18 +101,20 @@ public:
         }
     };
 
-    range_streamer(distributed<database>& db, token_metadata& tm, std::unordered_set<token> tokens, inet_address address, sstring description, streaming::stream_reason reason)
+    range_streamer(distributed<database>& db, token_metadata& tm, abort_source& abort_source, std::unordered_set<token> tokens, inet_address address, sstring description, streaming::stream_reason reason)
         : _db(db)
         , _metadata(tm)
+        , _abort_source(abort_source)
         , _tokens(std::move(tokens))
         , _address(address)
         , _description(std::move(description))
         , _reason(reason)
         , _stream_plan(_description) {
+        _abort_source.check();
     }
 
-    range_streamer(distributed<database>& db, token_metadata& tm, inet_address address, sstring description, streaming::stream_reason reason)
-        : range_streamer(db, tm, std::unordered_set<token>(), address, description, reason) {
+    range_streamer(distributed<database>& db, token_metadata& tm, abort_source& abort_source, inet_address address, sstring description, streaming::stream_reason reason)
+        : range_streamer(db, tm, abort_source, std::unordered_set<token>(), address, description, reason) {
     }
 
     void add_source_filter(std::unique_ptr<i_source_filter> filter) {
@@ -165,6 +166,7 @@ public:
 private:
     distributed<database>& _db;
     token_metadata& _metadata;
+    abort_source& _abort_source;
     std::unordered_set<token> _tokens;
     inet_address _address;
     sstring _description;

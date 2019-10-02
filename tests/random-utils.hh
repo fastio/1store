@@ -24,44 +24,119 @@
 #include <random>
 
 #include <boost/range/algorithm/generate.hpp>
+#include <iostream>
+
+#include <seastar/testing/test_runner.hh>
 
 namespace tests::random {
 
-namespace internal {
-
-inline std::random_device::result_type get_seed()
-{
-    std::random_device rd;
-    auto seed = rd();
-    std::cout << "tests::random seed = " << seed << "\n";
-    return seed;
+inline std::default_random_engine& gen() {
+    return seastar::testing::local_random_engine;
 }
 
+/// Produces random integers from a set of steps.
+///
+/// Each step has a weight and a uniform distribution that determines the range
+/// of values for that step. The probability of the generated number to be from
+/// any given step is Ws/Wt, where Ws is the weight of the step and Wt is the
+/// sum of the weight of all steps.
+template <typename Integer>
+class stepped_int_distribution {
+public:
+    struct step {
+        double weight;
+        std::pair<Integer, Integer> range;
+    };
+
+private:
+    std::discrete_distribution<Integer> _step_index_dist;
+    std::vector<std::uniform_int_distribution<Integer>> _step_ranges;
+
+public:
+    explicit stepped_int_distribution(std::initializer_list<step> steps) {
+        std::vector<double> step_weights;
+        for (auto& s : steps) {
+            step_weights.push_back(s.weight);
+            _step_ranges.emplace_back(s.range.first, s.range.second);
+        }
+        _step_index_dist = std::discrete_distribution<Integer>{step_weights.begin(), step_weights.end()};
+    }
+    template <typename RandomEngine>
+    Integer operator()(RandomEngine& engine) {
+        return _step_ranges[_step_index_dist(engine)](engine);
+    }
+};
+
+template<typename T, typename RandomEngine>
+T get_int(T min, T max, RandomEngine& engine) {
+    std::uniform_int_distribution<T> dist(min, max);
+    return dist(engine);
 }
 
-inline std::default_random_engine gen(internal::get_seed());
+template<typename T, typename RandomEngine>
+T get_int(T max, RandomEngine& engine) {
+    return get_int(T{0}, max, engine);
+}
+
+template<typename T, typename RandomEngine>
+T get_int(RandomEngine& engine) {
+    return get_int(T{0}, std::numeric_limits<T>::max(), engine);
+}
 
 template<typename T>
 T get_int() {
-    std::uniform_int_distribution<T> dist;
-    return dist(gen);
+    return get_int(T{0}, std::numeric_limits<T>::max(), gen());
 }
 
 template<typename T>
 T get_int(T max) {
-    std::uniform_int_distribution<T> dist(0, max);
-    return dist(gen);
+    return get_int(T{0}, max, gen());
 }
 
 template<typename T>
 T get_int(T min, T max) {
-    std::uniform_int_distribution<T> dist(min, max);
-    return dist(gen);
+    return get_int(min, max, gen());
+}
+
+template <typename Real, typename RandomEngine>
+Real get_real(Real min, Real max, RandomEngine& engine) {
+    auto dist = std::uniform_real_distribution<Real>(min, max);
+    return dist(engine);
+}
+
+template <typename Real, typename RandomEngine>
+Real get_real(Real max, RandomEngine& engine) {
+    return get_real<Real>(Real{0}, max, engine);
+}
+
+template <typename Real, typename RandomEngine>
+Real get_real(RandomEngine& engine) {
+    return get_real<Real>(Real{0}, std::numeric_limits<Real>::max(), engine);
+}
+
+template <typename Real>
+Real get_real(Real min, Real max) {
+    return get_real<Real>(min, max, gen());
+}
+
+template <typename Real>
+Real get_real(Real max) {
+    return get_real<Real>(Real{0}, max, gen());
+}
+
+template <typename Real>
+Real get_real() {
+    return get_real<Real>(Real{0}, std::numeric_limits<Real>::max(), gen());
+}
+
+template <typename RandomEngine>
+inline bool get_bool(RandomEngine& engine) {
+    static std::bernoulli_distribution dist;
+    return dist(engine);
 }
 
 inline bool get_bool() {
-    static std::bernoulli_distribution dist;
-    return dist(gen);
+    return get_bool(gen());
 }
 
 inline bytes get_bytes(size_t n) {

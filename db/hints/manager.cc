@@ -27,7 +27,7 @@
 #include <boost/range/adaptors.hpp>
 #include "service/storage_service.hh"
 #include "utils/div_ceil.hh"
-#include "db/config.hh"
+#include "db/extensions.hh"
 #include "service/storage_proxy.hh"
 #include "gms/versioned_value.hh"
 #include "seastarx.hh"
@@ -36,6 +36,8 @@
 #include "lister.hh"
 #include "db/timeout_clock.hh"
 #include "service/priority_manager.hh"
+#include "database.hh"
+#include "service_permit.hh"
 
 using namespace std::literals::chrono_literals;
 
@@ -49,7 +51,7 @@ const std::chrono::seconds manager::hint_file_write_timeout = std::chrono::secon
 const std::chrono::seconds manager::hints_flush_period = std::chrono::seconds(10);
 
 manager::manager(sstring hints_directory, std::vector<sstring> hinted_dcs, int64_t max_hint_window_ms, resource_manager& res_manager, distributed<database>& db)
-    : _hints_dir(boost::filesystem::path(hints_directory) / format("{:d}", engine().cpu_id()).c_str())
+    : _hints_dir(fs::path(hints_directory) / format("{:d}", engine().cpu_id()))
     , _hinted_dcs(hinted_dcs.begin(), hinted_dcs.end())
     , _local_snitch_ptr(locator::i_endpoint_snitch::get_local_snitch_ptr())
     , _max_hint_window_us(max_hint_window_ms * 1000)
@@ -82,6 +84,9 @@ void manager::register_metrics(const sstring& group_name) {
 
         sm::make_derive("discarded", _stats.discarded,
                         sm::description("Number of hints that were discarded during sending (too old, schema changed, etc.).")),
+
+        sm::make_derive("corrupted_files", _stats.corrupted_files,
+                        sm::description("Number of hints files that were discarded during sending because the file was corrupted.")),
     });
 }
 
@@ -89,7 +94,7 @@ future<> manager::start(shared_ptr<service::storage_proxy> proxy_ptr, shared_ptr
     _proxy_anchor = std::move(proxy_ptr);
     _gossiper_anchor = std::move(gossiper_ptr);
     _strorage_service_anchor = std::move(ss_ptr);
-    return lister::scan_dir(_hints_dir, { directory_entry_type::directory }, [this] (lister::path datadir, directory_entry de) {
+    return lister::scan_dir(_hints_dir, { directory_entry_type::directory }, [this] (fs::path datadir, directory_entry de) {
         ep_key_type ep = ep_key_type(de.name);
         if (!check_dc_for(ep)) {
             return make_ready_future<>();
@@ -153,11 +158,11 @@ void manager::forbid_hints_for_eps_with_pending_hints() {
 
 bool manager::end_point_hints_manager::store_hint(schema_ptr s, lw_shared_ptr<const frozen_mutation> fm, tracing::trace_state_ptr tr_state) noexcept {
     try {
-        with_gate(_store_gate, [this, s = std::move(s), fm = std::move(fm), tr_state] () mutable {
+        // Future is waited on indirectly in `stop()` (via `_store_gate`).
+        (void)with_gate(_store_gate, [this, s = std::move(s), fm = std::move(fm), tr_state] () mutable {
             ++_hints_in_progress;
             size_t mut_size = fm->representation().size();
             shard_stats().size_of_hints_in_progress += mut_size;
-            shard_resource_manager().inc_size_of_hints_in_progress(mut_size);
 
             return with_shared(file_update_mutex(), [this, fm, s, tr_state] () mutable -> future<> {
                 return get_or_load().then([this, fm = std::move(fm), s = std::move(s), tr_state] (hints_store_ptr log_ptr) mutable {
@@ -178,7 +183,6 @@ bool manager::end_point_hints_manager::store_hint(schema_ptr s, lw_shared_ptr<co
             }).finally([this, mut_size, fm, s] {
                 --_hints_in_progress;
                 shard_stats().size_of_hints_in_progress -= mut_size;
-                shard_resource_manager().dec_size_of_hints_in_progress(mut_size);
             });;
         });
     } catch (...) {
@@ -303,18 +307,21 @@ bool manager::store_hint(ep_key_type ep, schema_ptr s, lw_shared_ptr<const froze
 }
 
 future<db::commitlog> manager::end_point_hints_manager::add_store() noexcept {
-    using namespace boost::filesystem;
     manager_logger.trace("Going to add a store to {}", _hints_dir.c_str());
 
     return futurize_apply([this] {
-        return io_check(recursive_touch_directory, _hints_dir.c_str()).then([this] () {
+        return io_check([name = _hints_dir.c_str()] { return recursive_touch_directory(name); }).then([this] () {
             commitlog::config cfg;
 
             cfg.commit_log_location = _hints_dir.c_str();
             cfg.commitlog_segment_size_in_mb = resource_manager::hint_segment_size_in_mb;
             cfg.commitlog_total_space_in_mb = resource_manager::max_hints_per_ep_size_mb;
             cfg.fname_prefix = manager::FILENAME_PREFIX;
-            cfg.extensions = &_shard_manager.local_db().get_config().extensions();
+            cfg.extensions = &_shard_manager.local_db().extensions();
+
+            // HH doesn't utilize the flow that benefits from reusing segments.
+            // Therefore let's simply disable it to avoid any possible confusion.
+            cfg.reuse_segments = false;
 
             return commitlog::create_commitlog(std::move(cfg)).then([this] (commitlog l) {
                 // add_store() is triggered every time hint files are forcefully flushed to I/O (every hints_flush_period).
@@ -391,14 +398,14 @@ future<> manager::end_point_hints_manager::sender::do_send_one_mutation(frozen_m
         // to be generated as a result of hints sending.
         if (boost::range::find(natural_endpoints, end_point_key()) != natural_endpoints.end()) {
             manager_logger.trace("Sending directly to {}", end_point_key());
-            return _proxy.send_to_endpoint(std::move(m), end_point_key(), { }, write_type::SIMPLE);
+            return _proxy.send_to_endpoint(std::move(m), end_point_key(), { }, write_type::SIMPLE, service::allow_hints::no);
         } else {
             manager_logger.trace("Endpoints set has changed and {} is no longer a replica. Mutating from scratch...", end_point_key());
             // FIXME: using 1h as infinite timeout. If a node is down, we should get an
             // unavailable exception.
             auto timeout = db::timeout_clock::now() + 1h;
             //FIXME: Add required frozen_mutation overloads
-            return _proxy.mutate({m.fm.unfreeze(m.s)}, consistency_level::ALL, timeout, nullptr);
+            return _proxy.mutate({m.fm.unfreeze(m.s)}, consistency_level::ALL, timeout, nullptr, empty_service_permit());
         }
     });
 }
@@ -409,14 +416,30 @@ bool manager::end_point_hints_manager::sender::can_send() noexcept {
     }
 
     try {
-        if (!_gossiper.is_alive(end_point_key())) {
-            if (!_state.contains(state::ep_state_is_not_normal)) {
-                _state.set_if<state::ep_state_is_not_normal>(_shard_manager.local_gossiper().get_gossip_status(end_point_key()) != sstring(gms::versioned_value::STATUS_NORMAL));
+        auto ep_state_ptr = _gossiper. get_endpoint_state_for_endpoint_ptr(end_point_key());
+        if (!ep_state_ptr || !ep_state_ptr->is_alive()) {
+            if (!_state.contains(state::ep_state_left_the_ring)) {
+                auto ep_gossip_state_val = _gossiper.get_gossip_status(end_point_key());
+                // If node has been removed from the ring it's going to be removed from the gossiper::endpoint_state
+                // map as well.
+                //
+                // However if it is still in the map then there are 3 possible STATE values for the node when it's in a DN/UN
+                // state:
+                //    - NORMAL
+                //    - SHUTDOWN
+                //    - "" - when node is in a DN state but was DOWN since the local node started up. In this case
+                //      gossiper::endpoint_state[node][STATUS] value is going to be not set at all.
+                _state.set_if<state::ep_state_left_the_ring>(
+                    !ep_state_ptr ||
+                    (ep_gossip_state_val != gms::versioned_value::STATUS_NORMAL &&
+                    ep_gossip_state_val != gms::versioned_value::SHUTDOWN &&
+                    ep_gossip_state_val != "")
+                );
             }
-            // send the hints out if the destination Node is not in a NORMAL state - we will send to all new replicas in this case
-            return _state.contains(state::ep_state_is_not_normal);
+            // send the hints out if the destination Node is part of the ring - we will send to all new replicas in this case
+            return _state.contains(state::ep_state_left_the_ring);
         } else {
-            _state.remove(state::ep_state_is_not_normal);
+            _state.remove(state::ep_state_left_the_ring);
             return true;
         }
     } catch (...) {
@@ -424,7 +447,7 @@ bool manager::end_point_hints_manager::sender::can_send() noexcept {
     }
 }
 
-frozen_mutation_and_schema manager::end_point_hints_manager::sender::get_mutation(lw_shared_ptr<send_one_file_ctx> ctx_ptr, temporary_buffer<char>& buf) {
+frozen_mutation_and_schema manager::end_point_hints_manager::sender::get_mutation(lw_shared_ptr<send_one_file_ctx> ctx_ptr, fragmented_temporary_buffer& buf) {
     hint_entry_reader hr(buf);
     auto& fm = hr.mutation();
     auto& cm = get_column_mapping(std::move(ctx_ptr), fm, hr);
@@ -456,7 +479,7 @@ const column_mapping& manager::end_point_hints_manager::sender::get_column_mappi
 bool manager::too_many_in_flight_hints_for(ep_key_type ep) const noexcept {
     // There is no need to check the DC here because if there is an in-flight hint for this end point then this means that
     // its DC has already been checked and found to be ok.
-    return _resource_manager.too_many_hints_in_progress() && !utils::fb_utilities::is_me(ep) && hints_in_progress_for(ep) > 0 && local_gossiper().get_endpoint_downtime(ep) <= _max_hint_window_us;
+    return _stats.size_of_hints_in_progress > max_size_of_hints_in_progress && !utils::fb_utilities::is_me(ep) && hints_in_progress_for(ep) > 0 && local_gossiper().get_endpoint_downtime(ep) <= _max_hint_window_us;
 }
 
 bool manager::can_hint_for(ep_key_type ep) const noexcept {
@@ -473,8 +496,8 @@ bool manager::can_hint_for(ep_key_type ep) const noexcept {
     // hints is more than the maximum allowed value.
     //
     // In the worst case there's going to be (_max_size_of_hints_in_progress + N - 1) in-flight hints, where N is the total number Nodes in the cluster.
-    if (_resource_manager.too_many_hints_in_progress() && hints_in_progress_for(ep) > 0) {
-        manager_logger.trace("size_of_hints_in_progress {} hints_in_progress_for({}) {}", _resource_manager.size_of_hints_in_progress(), ep, hints_in_progress_for(ep));
+    if (_stats.size_of_hints_in_progress > max_size_of_hints_in_progress && hints_in_progress_for(ep) > 0) {
+        manager_logger.trace("size_of_hints_in_progress {} hints_in_progress_for({}) {}", _stats.size_of_hints_in_progress, ep, hints_in_progress_for(ep));
         return false;
     }
 
@@ -512,7 +535,8 @@ void manager::drain_for(gms::inet_address endpoint) {
 
     manager_logger.trace("on_leave_cluster: {} is removed/decommissioned", endpoint);
 
-    with_gate(_draining_eps_gate, [this, endpoint] {
+    // Future is waited on indirectly in `stop()` (via `_draining_eps_gate`).
+    (void)with_gate(_draining_eps_gate, [this, endpoint] {
         return futurize_apply([this, endpoint] () {
             if (utils::fb_utilities::is_me(endpoint)) {
                 return parallel_for_each(_ep_managers, [] (auto& pair) {
@@ -648,9 +672,10 @@ future<> manager::end_point_hints_manager::sender::send_one_mutation(frozen_muta
     return do_send_one_mutation(std::move(m), natural_endpoints);
 }
 
-future<> manager::end_point_hints_manager::sender::send_one_hint(lw_shared_ptr<send_one_file_ctx> ctx_ptr, temporary_buffer<char> buf, db::replay_position rp, gc_clock::duration secs_since_file_mod, const sstring& fname) {
-    return _resource_manager.get_send_units_for(buf.size()).then([this, secs_since_file_mod, &fname, buf = std::move(buf), rp, ctx_ptr] (auto units) mutable {
-        with_gate(ctx_ptr->file_send_gate, [this, secs_since_file_mod, &fname, buf = std::move(buf), rp, ctx_ptr] () mutable {
+future<> manager::end_point_hints_manager::sender::send_one_hint(lw_shared_ptr<send_one_file_ctx> ctx_ptr, fragmented_temporary_buffer buf, db::replay_position rp, gc_clock::duration secs_since_file_mod, const sstring& fname) {
+    return _resource_manager.get_send_units_for(buf.size_bytes()).then([this, secs_since_file_mod, &fname, buf = std::move(buf), rp, ctx_ptr] (auto units) mutable {
+        // Future is waited on indirectly in `send_one_file()` (via `ctx_ptr->file_send_gate`).
+        (void)with_gate(ctx_ptr->file_send_gate, [this, secs_since_file_mod, &fname, buf = std::move(buf), rp, ctx_ptr] () mutable {
             try {
                 try {
                     ctx_ptr->rps_set.emplace(rp);
@@ -706,7 +731,7 @@ bool manager::end_point_hints_manager::sender::send_one_file(const sstring& fnam
     lw_shared_ptr<send_one_file_ctx> ctx_ptr = make_lw_shared<send_one_file_ctx>(_last_schema_ver_to_column_mapping);
 
     try {
-        auto s = commitlog::read_log_file(fname, service::get_local_streaming_read_priority(), [this, secs_since_file_mod, &fname, ctx_ptr] (temporary_buffer<char> buf, db::replay_position rp) mutable {
+        auto s = commitlog::read_log_file(fname, manager::FILENAME_PREFIX, service::get_local_streaming_read_priority(), [this, secs_since_file_mod, &fname, ctx_ptr] (fragmented_temporary_buffer buf, db::replay_position rp) mutable {
             // Check that we can still send the next hint. Don't try to send it if the destination host
             // is DOWN or if we have already failed to send some of the previous hints.
             if (!draining() && ctx_ptr->state.contains(send_state::segment_replay_failed)) {
@@ -722,9 +747,13 @@ bool manager::end_point_hints_manager::sender::send_one_file(const sstring& fnam
             return flush_maybe().finally([this, ctx_ptr, buf = std::move(buf), rp, secs_since_file_mod, &fname] () mutable {
                 return send_one_hint(std::move(ctx_ptr), std::move(buf), rp, secs_since_file_mod, fname);
             });
-        }, _last_not_complete_rp.pos, &_db.get_config().extensions()).get0();
+        }, _last_not_complete_rp.pos, &_db.extensions()).get0();
 
         s->done().get();
+    } catch (db::commitlog::segment_error& ex) {
+        manager_logger.error("{}: {}. Dropping...", fname, ex.what());
+        ctx_ptr->state.remove(send_state::segment_replay_failed);
+        ++this->shard_stats().corrupted_files;
     } catch (...) {
         manager_logger.trace("sending of {} failed: {}", fname, std::current_exception());
         ctx_ptr->state.set(send_state::segment_replay_failed);
@@ -798,9 +827,8 @@ void manager::end_point_hints_manager::sender::send_hints_maybe() noexcept {
     manager_logger.trace("send_hints(): we handled {} segments", replayed_segments_count);
 }
 
-template<typename Func>
-static future<> scan_for_hints_dirs(const sstring& hints_directory, Func&& f) {
-    return lister::scan_dir(hints_directory, { directory_entry_type::directory }, [f = std::forward<Func>(f)] (lister::path dir, directory_entry de) {
+static future<> scan_for_hints_dirs(const sstring& hints_directory, std::function<future<> (fs::path dir, directory_entry de, unsigned shard_id)> f) {
+    return lister::scan_dir(hints_directory, { directory_entry_type::directory }, [f = std::move(f)] (fs::path dir, directory_entry de) mutable {
         try {
             return f(std::move(dir), std::move(de), std::stoi(de.name.c_str()));
         } catch (std::invalid_argument& ex) {
@@ -815,13 +843,13 @@ manager::hints_segments_map manager::get_current_hints_segments(const sstring& h
     hints_segments_map current_hints_segments;
 
     // shards level
-    scan_for_hints_dirs(hints_directory, [&current_hints_segments] (lister::path dir, directory_entry de, unsigned shard_id) {
+    scan_for_hints_dirs(hints_directory, [&current_hints_segments] (fs::path dir, directory_entry de, unsigned shard_id) {
         manager_logger.trace("shard_id = {}", shard_id);
         // IPs level
-        return lister::scan_dir(dir / de.name.c_str(), { directory_entry_type::directory }, [&current_hints_segments, shard_id] (lister::path dir, directory_entry de) {
+        return lister::scan_dir(dir / de.name.c_str(), { directory_entry_type::directory }, [&current_hints_segments, shard_id] (fs::path dir, directory_entry de) {
             manager_logger.trace("\tIP: {}", de.name);
             // hints files
-            return lister::scan_dir(dir / de.name.c_str(), { directory_entry_type::regular }, [&current_hints_segments, shard_id, ep_addr = de.name] (lister::path dir, directory_entry de) {
+            return lister::scan_dir(dir / de.name.c_str(), { directory_entry_type::regular }, [&current_hints_segments, shard_id, ep_addr = de.name] (fs::path dir, directory_entry de) {
                 manager_logger.trace("\t\tfile: {}", de.name);
                 current_hints_segments[ep_addr][shard_id].emplace_back(dir / de.name.c_str());
                 return make_ready_future<>();
@@ -837,14 +865,14 @@ void manager::rebalance_segments(const sstring& hints_directory, hints_segments_
     // Count how many hints segments to each destination we have.
     std::unordered_map<sstring, size_t> per_ep_hints;
     for (auto& ep_info : segments_map) {
-        per_ep_hints[ep_info.first] = boost::accumulate(ep_info.second | boost::adaptors::map_values | boost::adaptors::transformed(std::mem_fn(&std::list<lister::path>::size)), 0);
+        per_ep_hints[ep_info.first] = boost::accumulate(ep_info.second | boost::adaptors::map_values | boost::adaptors::transformed(std::mem_fn(&std::list<fs::path>::size)), 0);
         manager_logger.trace("{}: total files: {}", ep_info.first, per_ep_hints[ep_info.first]);
     }
 
     // Create a map of lists of segments that we will move (for each destination end point): if a shard has segments
     // then we will NOT move q = int(N/S) segments out of them, where N is a total number of segments to the current
     // destination and S is a current number of shards.
-    std::unordered_map<sstring, std::list<lister::path>> segments_to_move;
+    std::unordered_map<sstring, std::list<fs::path>> segments_to_move;
     for (auto& [ep, ep_segments] : segments_map) {
         size_t q = per_ep_hints[ep] / smp::count;
         auto& current_segments_to_move = segments_to_move[ep];
@@ -897,7 +925,7 @@ void manager::rebalance_segments_for(
         size_t segments_per_shard,
         const sstring& hints_directory,
         hints_ep_segments_map& ep_segments,
-        std::list<lister::path>& segments_to_move)
+        std::list<fs::path>& segments_to_move)
 {
     manager_logger.trace("{}: segments_per_shard: {}, total number of segments to move: {}", ep, segments_per_shard, segments_to_move.size());
 
@@ -907,15 +935,15 @@ void manager::rebalance_segments_for(
     }
 
     for (unsigned i = 0; i < smp::count && !segments_to_move.empty(); ++i) {
-        lister::path shard_path_dir(lister::path(hints_directory.c_str()) / seastar::format("{:d}", i).c_str() / ep.c_str());
-        std::list<lister::path>& current_shard_segments = ep_segments[i];
+        fs::path shard_path_dir(fs::path(hints_directory.c_str()) / seastar::format("{:d}", i).c_str() / ep.c_str());
+        std::list<fs::path>& current_shard_segments = ep_segments[i];
 
         // Make sure that the shard_path_dir exists and if not - create it
-        io_check(recursive_touch_directory, shard_path_dir.c_str()).get();
+        io_check([name = shard_path_dir.c_str()] { return recursive_touch_directory(name); }).get();
 
         while (current_shard_segments.size() < segments_per_shard && !segments_to_move.empty()) {
             auto seg_path_it = segments_to_move.begin();
-            lister::path new_path(shard_path_dir / seg_path_it->filename());
+            fs::path new_path(shard_path_dir / seg_path_it->filename());
 
             // Don't move the file to the same location - it's pointless.
             if (*seg_path_it != new_path) {
@@ -932,10 +960,10 @@ void manager::rebalance_segments_for(
 // runs in seastar::async context
 void manager::remove_irrelevant_shards_directories(const sstring& hints_directory) {
     // shards level
-    scan_for_hints_dirs(hints_directory, [] (lister::path dir, directory_entry de, unsigned shard_id) {
+    scan_for_hints_dirs(hints_directory, [] (fs::path dir, directory_entry de, unsigned shard_id) {
         if (shard_id >= smp::count) {
             // IPs level
-            return lister::scan_dir(dir / de.name.c_str(), { directory_entry_type::directory, directory_entry_type::regular }, lister::show_hidden::yes, [] (lister::path dir, directory_entry de) {
+            return lister::scan_dir(dir / de.name.c_str(), { directory_entry_type::directory, directory_entry_type::regular }, lister::show_hidden::yes, [] (fs::path dir, directory_entry de) {
                 return io_check(remove_file, (dir / de.name.c_str()).native());
             }).then([shard_base_dir = dir, shard_entry = de] {
                 return io_check(remove_file, (shard_base_dir / shard_entry.name.c_str()).native());
@@ -959,8 +987,6 @@ future<> manager::rebalance(sstring hints_directory) {
 }
 
 void manager::update_backlog(size_t backlog, size_t max_backlog) {
-    _backlog_size = backlog;
-    _max_backlog_size = max_backlog;
     if (backlog < max_backlog) {
         allow_hints();
     } else {

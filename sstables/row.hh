@@ -26,7 +26,7 @@
 
 #include "bytes.hh"
 #include "key.hh"
-#include "core/temporary_buffer.hh"
+#include <seastar/core/temporary_buffer.hh>
 #include "consumer.hh"
 #include "sstables/types.hh"
 #include "reader_concurrency_semaphore.hh"
@@ -99,7 +99,7 @@ public:
     // expire. Typical cells, not set to expire, will get expiration = 0.
     virtual proceed consume_cell(bytes_view col_name, bytes_view value,
             int64_t timestamp,
-            int32_t ttl, int32_t expiration) = 0;
+            int64_t ttl, int64_t expiration) = 0;
 
     // Consume one counter cell. Column name and value are serialized, and need
     // to be deserialized according to the schema.
@@ -334,6 +334,7 @@ private:
             deletion_time del;
             del.local_deletion_time = _u32;
             del.marked_for_delete_at = _u64;
+            _sst->get_stats().on_row_read();
             auto ret = _consumer.consume_row_start(key_view(to_bytes_view(_key)), del);
             // after calling the consume function, we can release the
             // buffers we held for it.
@@ -431,39 +432,10 @@ private:
                 break;
             }
         case state::CELL_VALUE_BYTES:
-            if (read_bytes(data, _u32, _val) == read_status::ready) {
-                // If the whole string is in our buffer, great, we don't
-                // need to copy, and can skip the CELL_VALUE_BYTES_2 state.
-                //
-                // finally pass it to the consumer:
-                row_consumer::proceed ret;
-                if (_deleted) {
-                    if (_val.size() != 4) {
-                        throw malformed_sstable_exception("deleted cell expects local_deletion_time value");
-                    }
-                    deletion_time del;
-                    del.local_deletion_time = consume_be<uint32_t>(_val);
-                    del.marked_for_delete_at = _u64;
-                    ret = _consumer.consume_deleted_cell(to_bytes_view(_key), del);
-                } else if (_counter) {
-                    ret = _consumer.consume_counter_cell(to_bytes_view(_key),
-                            to_bytes_view(_val), _u64);
-                } else {
-                    ret = _consumer.consume_cell(to_bytes_view(_key),
-                            to_bytes_view(_val), _u64, _ttl, _expiration);
-                }
-                // after calling the consume function, we can release the
-                // buffers we held for it.
-                _key.release();
-                _val.release();
-                _state = state::ATOM_START;
-                if (ret == row_consumer::proceed::no) {
-                    return row_consumer::proceed::no;
-                }
-            } else {
+            if (read_bytes(data, _u32, _val) != read_status::ready) {
                 _state = state::CELL_VALUE_BYTES_2;
+                break;
             }
-            break;
         case state::CELL_VALUE_BYTES_2:
         {
             row_consumer::proceed ret;
@@ -526,8 +498,6 @@ private:
         case state::STOP_THEN_ATOM_START:
             _state = state::ATOM_START;
             return row_consumer::proceed::no;
-        default:
-            throw malformed_sstable_exception("unknown state");
         }
 
         return row_consumer::proceed::yes;
@@ -535,13 +505,13 @@ private:
 public:
 
     data_consume_rows_context(const schema&,
-                              const shared_sstable& sst,
+                              const shared_sstable sst,
                               row_consumer& consumer,
                               input_stream<char>&& input, uint64_t start, uint64_t maxlen)
                 : continuous_data_consumer(std::move(input), start, maxlen)
                 , _consumer(consumer)
-                , _sst(sst) {
-    }
+                , _sst(std::move(sst))
+    {}
 
     void verify_end_state() {
         // If reading a partial row (i.e., when we have a clustering row
@@ -827,7 +797,7 @@ private:
         }
         case state::FLAGS:
         flags_label:
-            _liveness.reset();
+            _liveness = {};
             _row_tombstone = {};
             _row_shadowable_tombstone = {};
             if (read_8(data) != read_status::ready) {
@@ -972,7 +942,7 @@ private:
             }
           }
         case state::ROW_BODY_TIMESTAMP:
-            _liveness.set_timestamp(_u64);
+            _liveness.set_timestamp(parse_timestamp(_header, _u64));
             if (!_flags.has_ttl()) {
                 _state = state::ROW_BODY_DELETION;
                 goto row_body_deletion_label;
@@ -982,13 +952,13 @@ private:
                 break;
             }
         case state::ROW_BODY_TIMESTAMP_TTL:
-            _liveness.set_ttl(_u64);
+            _liveness.set_ttl(parse_ttl(_header, _u64));
             if (read_unsigned_vint(data) != read_status::ready) {
                 _state = state::ROW_BODY_TIMESTAMP_DELTIME;
                 break;
             }
         case state::ROW_BODY_TIMESTAMP_DELTIME:
-            _liveness.set_local_deletion_time(_u64);
+            _liveness.set_local_deletion_time(parse_expiry(_header, _u64));
         case state::ROW_BODY_DELETION:
         row_body_deletion_label:
             if (!_flags.has_deletion()) {
@@ -1308,7 +1278,11 @@ private:
             }
         case state::RANGE_TOMBSTONE_BODY_LOCAL_DELTIME:
             _left_range_tombstone.deletion_time = parse_expiry(_header, _u64);
-            if (!is_boundary(_range_tombstone_kind)) {
+            if (!is_boundary_between_adjacent_intervals(_range_tombstone_kind)) {
+                if (!is_bound_kind(_range_tombstone_kind)) {
+                    throw sstables::malformed_sstable_exception(
+                        format("Corrupted range tombstone: invalid boundary type {}", _range_tombstone_kind));
+                }
                 if (_consumer.consume_range_tombstone(_row_key,
                                                       to_bound_kind(_range_tombstone_kind),
                                                       _left_range_tombstone) == consumer_m::proceed::no) {
@@ -1341,8 +1315,6 @@ private:
             }
             _row_key.clear();
             goto flags_label;
-        default:
-            throw malformed_sstable_exception("unknown state");
         }
 
         return row_consumer::proceed::yes;
@@ -1361,7 +1333,6 @@ public:
         , _header(sst->get_serialization_header())
         , _column_translation(sst->get_column_translation(s, _header))
         , _has_shadowable_tombstones(sst->has_shadowable_tombstones())
-        , _liveness(_header)
     {
         setup_columns(_regular_row, _column_translation.regular_columns());
         setup_columns(_static_row, _column_translation.static_columns());
@@ -1375,7 +1346,12 @@ public:
             _consumer.on_end_of_stream();
             return;
         }
-        if (_state != state::PARTITION_START || _prestate != prestate::NONE) {
+
+        // We may end up in state::DELETION_TIME after consuming last partition's end marker
+        // and proceeding to attempt to parse the next partition, since state::DELETION_TIME
+        // is the first state corresponding to the contents of a new partition.
+        if (_state != state::DELETION_TIME
+                && (_state != state::PARTITION_START || _prestate != prestate::NONE)) {
             throw malformed_sstable_exception("end of input, but not end of partition");
         }
     }

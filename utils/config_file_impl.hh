@@ -30,6 +30,8 @@
 
 #include "config_file.hh"
 
+#include <seastar/json/json_elements.hh>
+
 namespace YAML {
 
 /*
@@ -158,45 +160,54 @@ class typed_value_ex : public bpo::typed_value<T, charT> {
 public:
     typedef bpo::typed_value<T, charT> _Super;
 
-    typed_value_ex(T* store_to)
-        : _Super(store_to)
+    typed_value_ex()
+        : _Super(nullptr)
     {}
     bool apply_default(boost::any& value_store) const override {
         return false;
     }
 };
 
-template<class T>
-inline typed_value_ex<T>* value_ex(T* v) {
-    typed_value_ex<T>* r = new typed_value_ex<T>(v);
-    return r;
+
+template <typename T>
+void maybe_multitoken(typed_value_ex<T>* r) {
 }
 
-template<class T>
-inline typed_value_ex<std::vector<T>>* value_ex(std::vector<T>* v) {
-    auto r = new typed_value_ex<std::vector<T>>(v);
+template <typename T>
+void maybe_multitoken(std::vector<typed_value_ex<T>>* r) {
     r->multitoken();
+}
+
+template<class T>
+inline typed_value_ex<T>* value_ex() {
+    typed_value_ex<T>* r = new typed_value_ex<T>();
+    maybe_multitoken(r);
     return r;
 }
 
 }
 
-sstring hyphenate(const stdx::string_view&);
+sstring hyphenate(const std::string_view&);
 
 }
 
-template<typename T, utils::config_file::value_status S>
-void utils::config_file::named_value<T, S>::add_command_line_option(
+template<typename T>
+void utils::config_file::named_value<T>::add_command_line_option(
                 boost::program_options::options_description_easy_init& init,
-                const stdx::string_view& name, const stdx::string_view& desc) {
+                const std::string_view& name, const std::string_view& desc) {
     // NOTE. We are not adding default values. We could, but must in that case manually (in some way) geenrate the textual
     // version, since the available ostream operators for things like pairs and collections don't match what we can deal with parser-wise.
     // See removed ostream operators above.
-    init(hyphenate(name).data(), value_ex(&_value)->notifier([this](auto&&) { _source = config_source::CommandLine; }), desc.data());
+    init(hyphenate(name).data(), value_ex<T>()->notifier([this](T new_val) { set(std::move(new_val), config_source::CommandLine); }), desc.data());
 }
 
-template<typename T, utils::config_file::value_status S>
-void utils::config_file::named_value<T, S>::set_value(const YAML::Node& node) {
+template<typename T>
+void utils::config_file::named_value<T>::set_value(const YAML::Node& node) {
+    if (_source == config_source::SettingsFile && _liveness != liveness::LiveUpdate) {
+        // FIXME: warn if different?
+        return;
+    }
     (*this)(node.as<T>());
     _source = config_source::SettingsFile;
 }
+

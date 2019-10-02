@@ -19,17 +19,22 @@
  * along with Scylla.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <seastar/tests/test-utils.hh>
+#include <seastar/testing/test_case.hh>
 #include <seastar/net/inet_address.hh>
 #include <utils/UUID_gen.hh>
 #include <boost/asio/ip/address_v4.hpp>
-#include <net/ip.hh>
+#include <seastar/net/ip.hh>
 #include <boost/multiprecision/cpp_int.hpp>
 #include "types.hh"
+#include "types/tuple.hh"
 #include "compound.hh"
 #include "db/marshal/type_parser.hh"
 #include "cql3/cql3_type.hh"
 #include "utils/big_decimal.hh"
+#include "types/map.hh"
+#include "types/list.hh"
+#include "types/set.hh"
+#include "exception_utils.hh"
 
 using namespace std::literals::chrono_literals;
 
@@ -37,7 +42,7 @@ void test_parsing_fails(const shared_ptr<const abstract_type>& type, sstring str
 {
     try {
         type->from_string(str);
-        BOOST_FAIL(sprint("Parsing of '%s' should have failed", str));
+        BOOST_FAIL(format("Parsing of '{}' should have failed", str));
     } catch (const marshal_exception& e) {
         // expected
     }
@@ -133,6 +138,10 @@ BOOST_AUTO_TEST_CASE(test_int32_type_string_conversions) {
     test_parsing_fails(int32_type, "2147483648123");
 
     BOOST_REQUIRE_EQUAL(int32_type->to_string(bytes()), "");
+}
+
+BOOST_AUTO_TEST_CASE(test_long_type_string_conversions) {
+    BOOST_REQUIRE_EQUAL(long_type->to_string(long_type->decompose(int64_t(42))), "42");
 }
 
 BOOST_AUTO_TEST_CASE(test_timeuuid_type_string_conversions) {
@@ -248,6 +257,8 @@ void test_timestamp_like_string_conversions(data_type timestamp_type) {
     BOOST_REQUIRE(timestamp_type->equal(timestamp_type->from_string("2015-07-02 23:00-0100"), timestamp_type->decompose(tp)));
     BOOST_REQUIRE(timestamp_type->equal(timestamp_type->from_string("2015-07-03T00:00+0000"), timestamp_type->decompose(tp)));
     BOOST_REQUIRE(timestamp_type->equal(timestamp_type->from_string("2015-07-03T01:00:00+0000"), timestamp_type->decompose(tp + 1h)));
+    BOOST_REQUIRE(timestamp_type->equal(timestamp_type->from_string("2015-07-03t00:00:00z"), timestamp_type->decompose(tp)));
+    BOOST_REQUIRE(timestamp_type->equal(timestamp_type->from_string("2015-07-03T00:00:00Z"), timestamp_type->decompose(tp)));
     BOOST_REQUIRE(timestamp_type->equal(timestamp_type->from_string("2015-07-03T00:00:00.123+0000"), timestamp_type->decompose(tp + 123ms)));
     BOOST_REQUIRE(timestamp_type->equal(timestamp_type->from_string("2015-07-03T12:30:00+1230"), timestamp_type->decompose(tp)));
     BOOST_REQUIRE(timestamp_type->equal(timestamp_type->from_string("2015-07-02T23:00-0100"), timestamp_type->decompose(tp)));
@@ -306,6 +317,7 @@ BOOST_AUTO_TEST_CASE(test_boolean_type_string_conversions) {
 
     BOOST_REQUIRE_EQUAL(boolean_type->to_string(boolean_type->decompose(false)), "false");
     BOOST_REQUIRE_EQUAL(boolean_type->to_string(boolean_type->decompose(true)), "true");
+    BOOST_REQUIRE_EQUAL(boolean_type->to_string(bytes()), "");
 }
 
 template<typename T>
@@ -332,6 +344,17 @@ void test_floating_type_compare(data_type t)
 BOOST_AUTO_TEST_CASE(test_floating_types_compare) {
     test_floating_type_compare<float>(float_type);
     test_floating_type_compare<double>(double_type);
+}
+
+template<typename T>
+void test_float_type_to_string(data_type t) {
+    auto v = t->decompose(T(42.1));
+    BOOST_REQUIRE_EQUAL(t->to_string(v), "42.1");
+}
+
+BOOST_AUTO_TEST_CASE(test_float_types_to_string) {
+    test_float_type_to_string<float>(float_type);
+    test_float_type_to_string<double>(double_type);
 }
 
 BOOST_AUTO_TEST_CASE(test_duration_type_compare) {
@@ -459,17 +482,17 @@ BOOST_AUTO_TEST_CASE(test_compound_type_compare) {
 }
 
 template <typename T>
-std::experimental::optional<T>
+std::optional<T>
 extract(data_value a) {
     if (a.is_null()) {
-        return std::experimental::nullopt;
+        return std::nullopt;
     } else {
-        return std::experimental::make_optional(value_cast<T>(a));
+        return std::make_optional(value_cast<T>(a));
     }
 }
 
 template <typename T>
-using opt = std::experimental::optional<T>;
+using opt = std::optional<T>;
 
 BOOST_AUTO_TEST_CASE(test_tuple) {
     auto t = tuple_type_impl::get_instance({int32_type, long_type, utf8_type});
@@ -478,7 +501,7 @@ BOOST_AUTO_TEST_CASE(test_tuple) {
     auto native_to_c = [] (native_type v) {
         return std::make_tuple(extract<int32_t>(v[0]), extract<int64_t>(v[1]), extract<sstring>(v[2]));
     };
-    auto c_to_native = [] (std::tuple<opt<int32_t>, opt<int64_t>, opt<sstring>> v) {
+    auto c_to_native = [] (c_type v) {
         return native_type({std::get<0>(v), std::get<1>(v), std::get<2>(v)});
     };
     auto native_to_bytes = [t] (native_type v) {
@@ -498,18 +521,25 @@ BOOST_AUTO_TEST_CASE(test_tuple) {
     };
     auto v1 = c_type(int32_t(1), int64_t(2), sstring("abc"));
     BOOST_REQUIRE(v1 == round_trip(v1));
-    auto v2 = c_type(int32_t(1), int64_t(2), std::experimental::nullopt);
+    auto v2 = c_type(int32_t(1), int64_t(2), std::nullopt);
     BOOST_REQUIRE(v2 == round_trip(v2));
     auto b1 = c_to_bytes(v1);
     auto b2 = c_to_bytes(v2);
     BOOST_REQUIRE(t->compare(b1, b2) > 0);
     BOOST_REQUIRE(t->compare(b2, b2) == 0);
+
+    auto test_string_conversion = [=] (c_type v, sstring s) {
+        BOOST_REQUIRE_EQUAL(t->to_string(c_to_bytes(v)), s);
+        BOOST_REQUIRE(t->equal(t->from_string(s), c_to_bytes(v)));
+    };
+
+    test_string_conversion({10, {}, "a@@:b:c"}, "10:@:a\\@\\@\\:b\\:c");
 }
 
 void test_validation_fails(const shared_ptr<const abstract_type>& type, bytes_view v)
 {
     try {
-        type->validate(v);
+        type->validate(v, cql_serialization_format::latest());
         BOOST_FAIL("Validation should have failed");
     } catch (const marshal_exception& e) {
         // expected
@@ -517,28 +547,28 @@ void test_validation_fails(const shared_ptr<const abstract_type>& type, bytes_vi
 }
 
 BOOST_AUTO_TEST_CASE(test_ascii_type_validation) {
-    ascii_type->validate(bytes());
-    ascii_type->validate(bytes("foo"));
+    ascii_type->validate(bytes(), cql_serialization_format::latest());
+    ascii_type->validate(bytes("foo"), cql_serialization_format::latest());
     test_validation_fails(ascii_type, bytes("fóo"));
 }
 
 BOOST_AUTO_TEST_CASE(test_utf8_type_validation) {
-    utf8_type->validate(bytes());
-    utf8_type->validate(bytes("foo"));
-    utf8_type->validate(bytes("fóo"));
+    utf8_type->validate(bytes(), cql_serialization_format::latest());
+    utf8_type->validate(bytes("foo"), cql_serialization_format::latest());
+    utf8_type->validate(bytes("fóo"), cql_serialization_format::latest());
     test_validation_fails(utf8_type, bytes("test") + from_hex("fe"));
 }
 
 BOOST_AUTO_TEST_CASE(test_int32_type_validation) {
-    int32_type->validate(bytes());
-    int32_type->validate(from_hex("deadbeef"));
+    int32_type->validate(bytes(), cql_serialization_format::latest());
+    int32_type->validate(from_hex("deadbeef"), cql_serialization_format::latest());
     test_validation_fails(int32_type, from_hex("00"));
     test_validation_fails(int32_type, from_hex("0000000000"));
 }
 
 BOOST_AUTO_TEST_CASE(test_long_type_validation) {
-    long_type->validate(bytes());
-    long_type->validate(from_hex("deadbeefdeadbeef"));
+    long_type->validate(bytes(), cql_serialization_format::latest());
+    long_type->validate(from_hex("deadbeefdeadbeef"), cql_serialization_format::latest());
     test_validation_fails(long_type, from_hex("00"));
     test_validation_fails(long_type, from_hex("00000000"));
     test_validation_fails(long_type, from_hex("000000000000000000"));
@@ -546,7 +576,7 @@ BOOST_AUTO_TEST_CASE(test_long_type_validation) {
 
 BOOST_AUTO_TEST_CASE(test_timeuuid_type_validation) {
     auto now = utils::UUID_gen::get_time_UUID();
-    timeuuid_type->validate(now.serialize());
+    timeuuid_type->validate(now.serialize(), cql_serialization_format::latest());
     auto random = utils::make_random_uuid();
     test_validation_fails(timeuuid_type, random.serialize());
     test_validation_fails(timeuuid_type, from_hex("00"));
@@ -554,34 +584,30 @@ BOOST_AUTO_TEST_CASE(test_timeuuid_type_validation) {
 
 BOOST_AUTO_TEST_CASE(test_uuid_type_validation) {
     auto now = utils::UUID_gen::get_time_UUID();
-    uuid_type->validate(now.serialize());
+    uuid_type->validate(now.serialize(), cql_serialization_format::latest());
     auto random = utils::make_random_uuid();
-    uuid_type->validate(random.serialize());
+    uuid_type->validate(random.serialize(), cql_serialization_format::latest());
     test_validation_fails(uuid_type, from_hex("00"));
 }
 
 BOOST_AUTO_TEST_CASE(test_duration_type_validation) {
-    duration_type->validate(duration_type->from_string("1m23us"));
+    duration_type->validate(duration_type->from_string("1m23us"), cql_serialization_format::latest());
+    using exception_predicate::message_equals;
+    BOOST_REQUIRE_EXCEPTION(
+            duration_type->validate(from_hex("ff"), cql_serialization_format::latest()),
+            marshal_exception,
+            message_equals("marshaling error: Expected at least 3 bytes for a duration, got 1"));
 
-    BOOST_REQUIRE_EXCEPTION(duration_type->validate(from_hex("ff")), marshal_exception, [](auto&& exn) {
-        BOOST_REQUIRE_EQUAL("marshaling error: Expected at least 3 bytes for a duration, got 1", exn.what());
-        return true;
-    });
+    BOOST_REQUIRE_EXCEPTION(
+            duration_type->validate(from_hex("fffffffffffffffffe0202"), cql_serialization_format::latest()),
+            marshal_exception,
+            message_equals("marshaling error: The duration months (9223372036854775807) must be a 32 bit integer"));
 
-    BOOST_REQUIRE_EXCEPTION(duration_type->validate(from_hex("fffffffffffffffffe0202")),
-                            marshal_exception,
-                            [](auto&& exn) {
-                                BOOST_REQUIRE_EQUAL("marshaling error: The duration months (9223372036854775807) must be a 32 bit integer", exn.what());
-                                return true;
-                            });
-
-    BOOST_REQUIRE_EXCEPTION(duration_type->validate(from_hex("010201")), marshal_exception, [](auto&& exn) {
-        BOOST_REQUIRE_EQUAL(
-                "marshaling error: The duration months, days, and nanoseconds must be all of the same sign (-1, 1, -1)",
-                exn.what());
-
-        return true;
-    });
+    BOOST_REQUIRE_EXCEPTION(
+            duration_type->validate(from_hex("010201"), cql_serialization_format::latest()),
+            marshal_exception,
+            message_equals("marshaling error: The duration months, days, and "
+                           "nanoseconds must be all of the same sign (-1, 1, -1)"));
 }
 
 BOOST_AUTO_TEST_CASE(test_duration_deserialization) {
@@ -603,31 +629,31 @@ BOOST_AUTO_TEST_CASE(test_parse_long_hex) {
 BOOST_AUTO_TEST_CASE(test_parse_valid_list) {
     auto parser = db::marshal::type_parser("636f6c756d6e:org.apache.cassandra.db.marshal.ListType(org.apache.cassandra.db.marshal.Int32Type)");
     auto type = parser.parse();
-    BOOST_REQUIRE(type->as_cql3_type()->to_string() == "list<int>");
+    BOOST_REQUIRE(type->as_cql3_type().to_string() == "list<int>");
 }
 
 BOOST_AUTO_TEST_CASE(test_parse_valid_set) {
     auto parser = db::marshal::type_parser("org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.Int32Type)");
     auto type = parser.parse();
-    BOOST_REQUIRE(type->as_cql3_type()->to_string() == "set<int>");
+    BOOST_REQUIRE(type->as_cql3_type().to_string() == "set<int>");
 }
 
 BOOST_AUTO_TEST_CASE(test_parse_valid_map) {
     auto parser = db::marshal::type_parser("org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.Int32Type,org.apache.cassandra.db.marshal.Int32Type)");
     auto type = parser.parse();
-    BOOST_REQUIRE(type->as_cql3_type()->to_string() == "map<int, int>");
+    BOOST_REQUIRE(type->as_cql3_type().to_string() == "map<int, int>");
 }
 
 BOOST_AUTO_TEST_CASE(test_parse_valid_duration) {
     auto parser = db::marshal::type_parser("org.apache.cassandra.db.marshal.DurationType");
     auto type = parser.parse();
-    BOOST_REQUIRE(type->as_cql3_type()->to_string() == "duration");
+    BOOST_REQUIRE(type->as_cql3_type().to_string() == "duration");
 }
 
 BOOST_AUTO_TEST_CASE(test_parse_valid_tuple) {
     auto parser = db::marshal::type_parser("org.apache.cassandra.db.marshal.TupleType(org.apache.cassandra.db.marshal.Int32Type,org.apache.cassandra.db.marshal.Int32Type)");
     auto type = parser.parse();
-    BOOST_REQUIRE(type->as_cql3_type()->to_string() == "frozen<tuple<int, int>>");
+    BOOST_REQUIRE(type->as_cql3_type().to_string() == "frozen<tuple<int, int>>");
 }
 
 BOOST_AUTO_TEST_CASE(test_parse_invalid_tuple) {
@@ -638,14 +664,14 @@ BOOST_AUTO_TEST_CASE(test_parse_invalid_tuple) {
 BOOST_AUTO_TEST_CASE(test_parse_valid_frozen_set) {
     auto parser = db::marshal::type_parser("org.apache.cassandra.db.marshal.FrozenType(org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.Int32Type))");
     auto type = parser.parse();
-    BOOST_REQUIRE(type->as_cql3_type()->to_string() == "frozen<set<int>>");
+    BOOST_REQUIRE(type->as_cql3_type().to_string() == "frozen<set<int>>");
 }
 
 BOOST_AUTO_TEST_CASE(test_parse_valid_set_frozen_set) {
     sstring frozen = "org.apache.cassandra.db.marshal.FrozenType(org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.Int32Type))";
     auto parser = db::marshal::type_parser("org.apache.cassandra.db.marshal.SetType(" + frozen + ")");
     auto type = parser.parse();
-    BOOST_REQUIRE(type->as_cql3_type()->to_string() == "set<frozen<set<int>>>");
+    BOOST_REQUIRE(type->as_cql3_type().to_string() == "set<frozen<set<int>>>");
 }
 
 BOOST_AUTO_TEST_CASE(test_parse_valid_set_frozen_set_set) {
@@ -653,7 +679,7 @@ BOOST_AUTO_TEST_CASE(test_parse_valid_set_frozen_set_set) {
     sstring frozen = "org.apache.cassandra.db.marshal.FrozenType(" + set_set + ")";
     auto parser = db::marshal::type_parser("org.apache.cassandra.db.marshal.SetType(" + frozen + ")");
     auto type = parser.parse();
-    BOOST_REQUIRE(type->as_cql3_type()->to_string() == "set<frozen<set<set<int>>>>");
+    BOOST_REQUIRE(type->as_cql3_type().to_string() == "set<frozen<set<set<int>>>>");
 }
 
 
@@ -667,7 +693,7 @@ BOOST_AUTO_TEST_CASE(test_parse_recursive_type) {
     sstring value("org.apache.cassandra.db.marshal.TupleType(org.apache.cassandra.db.marshal.Int32Type,org.apache.cassandra.db.marshal.Int32Type)");
     auto parser = db::marshal::type_parser("org.apache.cassandra.db.marshal.MapType(" + key + "," + value + ")");
     auto type = parser.parse();
-    BOOST_REQUIRE_EQUAL(type->as_cql3_type()->to_string(), "map<int, frozen<tuple<int, int>>>");
+    BOOST_REQUIRE_EQUAL(type->as_cql3_type().to_string(), "map<int, frozen<tuple<int, int>>>");
 }
 
 BOOST_AUTO_TEST_CASE(test_create_reversed_type) {
@@ -680,6 +706,12 @@ BOOST_AUTO_TEST_CASE(test_create_reversed_type) {
     auto straight_comp = bytes_type->compare(bytes_view(val_lt), bytes_view(val_gt));
     auto reverse_comp = ri->compare(bytes_view(val_lt), bytes_view(val_gt));
     BOOST_REQUIRE(straight_comp == -reverse_comp);
+}
+
+BOOST_AUTO_TEST_CASE(test_reversed_type_to_string) {
+    auto ri = reversed_type_impl::get_instance(int32_type);
+    auto v = ri->decompose(42);
+    BOOST_REQUIRE_EQUAL(ri->to_string(v), "42");
 }
 
 BOOST_AUTO_TEST_CASE(test_create_reverse_collection_type) {
@@ -712,7 +744,7 @@ BOOST_AUTO_TEST_CASE(test_parse_reversed_type) {
     sstring value("org.apache.cassandra.db.marshal.ReversedType(org.apache.cassandra.db.marshal.Int32Type)");
     auto parser = db::marshal::type_parser(value);
     auto ri = parser.parse();
-    BOOST_REQUIRE(ri->as_cql3_type()->to_string() == "int");
+    BOOST_REQUIRE(ri->as_cql3_type().to_string() == "int");
     BOOST_REQUIRE(ri->is_reversed());
     BOOST_REQUIRE(ri->is_value_compatible_with(*int32_type));
     BOOST_REQUIRE(!ri->is_compatible_with(*int32_type));
@@ -737,11 +769,14 @@ BOOST_AUTO_TEST_CASE(test_reversed_type_value_compatibility) {
 BOOST_AUTO_TEST_CASE(test_parsing_of_user_type) {
     sstring text = "org.apache.cassandra.db.marshal.UserType(keyspace1,61646472657373,737472656574:org.apache.cassandra.db.marshal.UTF8Type,63697479:org.apache.cassandra.db.marshal.UTF8Type,7a6970:org.apache.cassandra.db.marshal.Int32Type)";
     auto type = db::marshal::type_parser::parse(text);
+    if (!type->is_multi_cell()) {
+        text = "org.apache.cassandra.db.marshal.FrozenType(" + text + ")";
+    }
     BOOST_REQUIRE(type->name() == text);
 }
 
 static auto msg = [] (const char* m, data_type x, data_type y) -> std::string {
-    return sprint("%s(%s, %s)", m, x->name(), y->name());
+    return format("{}({}, {})", m, x->name(), y->name());
 };
 
 // Sort order does not change
@@ -769,6 +804,34 @@ struct test_case {
     data_type to;
     data_type from;
 };
+
+BOOST_AUTO_TEST_CASE(test_map_to_string) {
+    auto n = data_value(int32_t(42));
+    auto m = map_type_impl::get_instance(int32_type, int32_type, true);
+    using native_type = std::vector<std::pair<data_value, data_value>>;
+    native_type native{std::pair(n, n), std::pair(n, n)};
+    auto ptr = std::make_unique<native_type>(std::move(native));
+    auto v = data_value::make(m, std::move(ptr));
+    BOOST_REQUIRE_EQUAL(m->to_string(v.serialize()), "{42 : 42}, {42 : 42}");
+}
+
+BOOST_AUTO_TEST_CASE(test_set_to_string) {
+    auto m = set_type_impl::get_instance(int32_type, true);
+    using native_type = std::vector<data_value>;
+    native_type native{data_value(int32_t(41)), data_value(int32_t(42))};
+    auto ptr = std::make_unique<native_type>(std::move(native));
+    auto v = data_value::make(m, std::move(ptr));
+    BOOST_REQUIRE_EQUAL(m->to_string(v.serialize()), "41; 42");
+}
+
+BOOST_AUTO_TEST_CASE(test_list_to_string) {
+    auto m = list_type_impl::get_instance(int32_type, true);
+    using native_type = std::vector<data_value>;
+    native_type native{data_value(int32_t(41)), data_value(int32_t(42))};
+    auto ptr = std::make_unique<native_type>(std::move(native));
+    auto v = data_value::make(m, std::move(ptr));
+    BOOST_REQUIRE_EQUAL(m->to_string(v.serialize()), "41, 42");
+}
 
 BOOST_AUTO_TEST_CASE(test_collection_type_compatibility) {
     auto m__bi = map_type_impl::get_instance(bytes_type, int32_type, true);

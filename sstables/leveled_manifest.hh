@@ -102,7 +102,7 @@ public:
         for (auto& sstable : sstables) {
             uint32_t level = sstable->get_sstable_level();
             if (level >= manifest._generations.size()) {
-                throw std::runtime_error(sprint("Invalid level %u out of %ld", level, (manifest._generations.size() - 1)));
+                throw std::runtime_error(format("Invalid level {:d} out of {:d}", level, (manifest._generations.size() - 1)));
             }
             logger.debug("Adding {} to L{}", sstable->get_filename(), level);
             manifest._generations[level].push_back(sstable);
@@ -116,8 +116,8 @@ public:
     std::vector<sstables::shared_sstable> overlapping_sstables(int level) const {
         const schema& s = *_schema;
         std::unordered_set<sstables::shared_sstable> result;
-        stdx::optional<sstables::shared_sstable> previous;
-        stdx::optional<dht::decorated_key> last; // keeps track of highest last key in result.
+        std::optional<sstables::shared_sstable> previous;
+        std::optional<dht::decorated_key> last; // keeps track of highest last key in result.
 
         for (auto& current : _generations[level]) {
             auto current_first = current->get_first_decorated_key();
@@ -149,7 +149,7 @@ public:
         }
         double bytes = pow(leveled_fan_out, level) * max_sstable_size_in_bytes;
         if (bytes > std::numeric_limits<int64_t>::max()) {
-            throw std::runtime_error(sprint("At most %ld bytes may be in a compaction level; your maxSSTableSize must be absurdly high to compute %f", 
+            throw std::runtime_error(format("At most {:d} bytes may be in a compaction level; your maxSSTableSize must be absurdly high to compute {:f}", 
                 std::numeric_limits<int64_t>::max(), bytes));
         }
         uint64_t bytes_u64 = bytes;
@@ -161,7 +161,7 @@ public:
     }
 
 
-    sstables::compaction_descriptor get_descriptor_for_level(int level, const std::vector<stdx::optional<dht::decorated_key>>& last_compacted_keys,
+    sstables::compaction_descriptor get_descriptor_for_level(int level, const std::vector<std::optional<dht::decorated_key>>& last_compacted_keys,
                                                              std::vector<int>& compaction_counter) {
         auto info = get_candidates_for(level, last_compacted_keys);
         if (!info.candidates.empty()) {
@@ -181,7 +181,7 @@ public:
      * @return highest-priority sstables to compact, and level to compact them to
      * If no compactions are necessary, will return null
      */
-    sstables::compaction_descriptor get_compaction_candidates(const std::vector<stdx::optional<dht::decorated_key>>& last_compacted_keys,
+    sstables::compaction_descriptor get_compaction_candidates(const std::vector<std::optional<dht::decorated_key>>& last_compacted_keys,
         std::vector<int>& compaction_counter) {
 #if 0
         // during bootstrap we only do size tiering in L0 to make sure
@@ -295,18 +295,7 @@ private:
      * @return
      */
     std::vector<sstables::shared_sstable>
-    get_overlapping_starved_sstables(int target_level, std::vector<sstables::shared_sstable>&& candidates, std::vector<int>& compaction_counter) {
-        for (int i = _generations.size() - 1; i > 0; i--) {
-            compaction_counter[i]++;
-        }
-        compaction_counter[target_level] = 0;
-
-        if (logger.level() == logging::log_level::debug) {
-            for (auto j = 0U; j < compaction_counter.size(); j++) {
-                logger.debug("CompactionCounter: {}: {}", j, compaction_counter[j]);
-            }
-        }
-
+    get_overlapping_starved_sstables(int target_level, std::vector<sstables::shared_sstable>&& candidates, const std::vector<int>& compaction_counter) {
         for (int i = _generations.size() - 1; i > target_level; i--) {
             if (!get_level_size(i) || compaction_counter[i] <= NO_COMPACTION_LIMIT) {
                 continue;
@@ -315,8 +304,8 @@ private:
             // say we are compacting 3 sstables: 0->30 in L1 and 0->12, 12->33 in L2
             // this means that we will not create overlap in L2 if we add an sstable
             // contained within 0 -> 33 to the compaction
-            stdx::optional<dht::decorated_key> max;
-            stdx::optional<dht::decorated_key> min;
+            std::optional<dht::decorated_key> max;
+            std::optional<dht::decorated_key> min;
             for (auto& candidate : candidates) {
                 auto& candidate_first = candidate->get_first_decorated_key();
                 if (!min || candidate_first.tri_compare(*_schema, *min) < 0) {
@@ -450,12 +439,12 @@ private:
     // FIXME: come up with a general fix instead of this heuristic which potentially has weak points. For example,
     //  it may be vulnerable to clients that perform operations by scanning the token range.
     static int sstable_index_based_on_last_compacted_key(const std::vector<sstables::shared_sstable>& sstables, int level,
-            const schema& s, const std::vector<stdx::optional<dht::decorated_key>>& last_compacted_keys) {
+            const schema& s, const std::vector<std::optional<dht::decorated_key>>& last_compacted_keys) {
         int start = 0; // handles case where the prior compaction touched the very last range
         int idx = 0;
         for (auto& sstable : sstables) {
             if (uint32_t(level) >= last_compacted_keys.size()) {
-                throw std::runtime_error(sprint("Invalid level %u out of %ld", level, (last_compacted_keys.size() - 1)));
+                throw std::runtime_error(format("Invalid level {:d} out of {:d}", level, (last_compacted_keys.size() - 1)));
             }
             auto& sstable_first = sstable->get_first_decorated_key();
             if (!last_compacted_keys[level] || sstable_first.tri_compare(s, *last_compacted_keys[level]) > 0) {
@@ -467,7 +456,7 @@ private:
         return start;
     }
 
-    candidates_info candidates_for_higher_levels_compaction(int level, const std::vector<stdx::optional<dht::decorated_key>>& last_compacted_keys) {
+    candidates_info candidates_for_higher_levels_compaction(int level, const std::vector<std::optional<dht::decorated_key>>& last_compacted_keys) {
         const schema& s = *_schema;
         // for non-L0 compactions, pick up where we left off last time
         auto& sstables = get_level(level);
@@ -500,7 +489,7 @@ private:
      * If no compactions are possible (because of concurrent compactions or because some sstables are blacklisted
      * for prior failure), will return an empty list.  Never returns null.
      */
-    candidates_info get_candidates_for(int level, const std::vector<stdx::optional<dht::decorated_key>>& last_compacted_keys) {
+    candidates_info get_candidates_for(int level, const std::vector<std::optional<dht::decorated_key>>& last_compacted_keys) {
         assert(!get_level(level).empty());
 
         logger.debug("Choosing candidates for L{}", level);

@@ -29,27 +29,28 @@
 #include <unordered_set>
 #include <set>
 
-#include "tests/test-utils.hh"
-#include "core/future-util.hh"
-#include "core/do_with.hh"
-#include "core/scollectd_api.hh"
-#include "core/file.hh"
-#include "core/reactor.hh"
+#include <seastar/testing/test_case.hh>
+#include <seastar/core/future-util.hh>
+#include <seastar/core/do_with.hh>
+#include <seastar/core/scollectd_api.hh>
+#include <seastar/core/file.hh>
+#include <seastar/core/reactor.hh>
+#include <seastar/util/noncopyable_function.hh>
 #include "utils/UUID_gen.hh"
 #include "tmpdir.hh"
 #include "db/commitlog/commitlog.hh"
 #include "db/commitlog/rp_set.hh"
 #include "log.hh"
 #include "service/priority_manager.hh"
+#include "exception_utils.hh"
 
 using namespace db;
 
-template<typename Func>
-static future<> cl_test(commitlog::config cfg, Func && f) {
+static future<> cl_test(commitlog::config cfg, noncopyable_function<future<> (commitlog&)> f) {
     tmpdir tmp;
-    cfg.commit_log_location = tmp.path;
-    return commitlog::create_commitlog(cfg).then([f = std::forward<Func>(f)](commitlog log) mutable {
-        return do_with(std::move(log), [f = std::forward<Func>(f)](commitlog& log) {
+    cfg.commit_log_location = tmp.path().string();
+    return commitlog::create_commitlog(cfg).then([f = std::move(f)](commitlog log) mutable {
+        return do_with(std::move(log), [f = std::move(f)](commitlog& log) {
             return futurize_apply(f, log).finally([&log] {
                 return log.shutdown().then([&log] {
                     return log.clear();
@@ -60,11 +61,10 @@ static future<> cl_test(commitlog::config cfg, Func && f) {
     });
 }
 
-template<typename Func>
-static future<> cl_test(Func && f) {
+static future<> cl_test(noncopyable_function<future<> (commitlog&)> f) {
     commitlog::config cfg;
     cfg.metrics_category_name = "commitlog";
-    return cl_test(cfg, std::forward<Func>(f));
+    return cl_test(cfg, std::move(f));
 }
 
 #if 0
@@ -248,6 +248,21 @@ SEASTAR_TEST_CASE(test_exceed_record_limit){
         });
 }
 
+SEASTAR_TEST_CASE(test_commitlog_closed) {
+    commitlog::config cfg;
+    return cl_test(cfg, [](commitlog& log) {
+        return log.shutdown().then([&log] {
+            sstring tmp = "test321";
+            auto uuid = utils::UUID_gen::get_time_UUID();
+            return log.add_mutation(uuid, tmp.size(), [tmp](db::commitlog::output& dst) {
+                dst.write(tmp.data(), tmp.size());
+            }).then_wrapped([] (future<db::rp_handle> f) {
+                BOOST_REQUIRE_EXCEPTION(f.get(), gate_closed_exception, exception_predicate::message_equals("gate closed"));
+            });
+        });
+    });
+}
+
 SEASTAR_TEST_CASE(test_commitlog_delete_when_over_disk_limit) {
     commitlog::config cfg;
     cfg.commitlog_segment_size_in_mb = 2;
@@ -291,8 +306,10 @@ SEASTAR_TEST_CASE(test_commitlog_delete_when_over_disk_limit) {
 SEASTAR_TEST_CASE(test_commitlog_reader){
     static auto count_mutations_in_segment = [] (sstring path) -> future<size_t> {
         auto count = make_lw_shared<size_t>(0);
-        return db::commitlog::read_log_file(path, service::get_local_commitlog_priority(), [count](temporary_buffer<char> buf, db::replay_position rp) {
-            sstring str(buf.get(), buf.size());
+        return db::commitlog::read_log_file(path, db::commitlog::descriptor::FILENAME_PREFIX, service::get_local_commitlog_priority(), [count](fragmented_temporary_buffer buf, db::replay_position rp) {
+            auto linearization_buffer = bytes_ostream();
+            auto in = buf.get_istream();
+            auto str = to_sstring_view(in.read_bytes_view(buf.size_bytes(), linearization_buffer));
             BOOST_CHECK_EQUAL(str, "hej bubba cow");
             (*count)++;
             return make_ready_future<>();
@@ -393,7 +410,7 @@ SEASTAR_TEST_CASE(test_commitlog_entry_corruption){
                         BOOST_REQUIRE(!segments.empty());
                         auto seg = segments[0];
                         return corrupt_segment(seg, rps->at(1).pos + 4, 0x451234ab).then([seg, rps, &log] {
-                            return db::commitlog::read_log_file(seg, service::get_local_commitlog_priority(), [rps](temporary_buffer<char> buf, db::replay_position rp) {
+                            return db::commitlog::read_log_file(seg, db::commitlog::descriptor::FILENAME_PREFIX, service::get_local_commitlog_priority(), [rps](fragmented_temporary_buffer buf, db::replay_position rp) {
                                 BOOST_CHECK_EQUAL(rp, rps->at(0));
                                 return make_ready_future<>();
                             }).then([](auto s) {
@@ -436,7 +453,7 @@ SEASTAR_TEST_CASE(test_commitlog_chunk_corruption){
                         BOOST_REQUIRE(!segments.empty());
                         auto seg = segments[0];
                         return corrupt_segment(seg, rps->at(0).pos - 4, 0x451234ab).then([seg, rps, &log] {
-                            return db::commitlog::read_log_file(seg, service::get_local_commitlog_priority(), [rps](temporary_buffer<char> buf, db::replay_position rp) {
+                            return db::commitlog::read_log_file(seg, db::commitlog::descriptor::FILENAME_PREFIX, service::get_local_commitlog_priority(), [rps](fragmented_temporary_buffer buf, db::replay_position rp) {
                                 BOOST_FAIL("Should not reach");
                                 return make_ready_future<>();
                             }).then([](auto s) {
@@ -478,7 +495,7 @@ SEASTAR_TEST_CASE(test_commitlog_reader_produce_exception){
                         auto segments = log.get_active_segment_names();
                         BOOST_REQUIRE(!segments.empty());
                         auto seg = segments[0];
-                        return db::commitlog::read_log_file(seg, service::get_local_commitlog_priority(), [](temporary_buffer<char> buf, db::replay_position rp) {
+                        return db::commitlog::read_log_file(seg, db::commitlog::descriptor::FILENAME_PREFIX, service::get_local_commitlog_priority(), [](fragmented_temporary_buffer buf, db::replay_position rp) {
                             return make_exception_future(std::runtime_error("I am in a throwing mode"));
                         }).then([](auto s) {
                             return do_with(std::move(s), [](auto& s) {
@@ -509,6 +526,7 @@ SEASTAR_TEST_CASE(test_commitlog_counters) {
     BOOST_CHECK_EQUAL(count_cl_counters(), 0);
     return cl_test([count_cl_counters](commitlog& log) {
         BOOST_CHECK_GT(count_cl_counters(), 0);
+        return make_ready_future<>();
     }).finally([count_cl_counters] {
         BOOST_CHECK_EQUAL(count_cl_counters(), 0);
     });

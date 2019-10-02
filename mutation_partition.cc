@@ -38,6 +38,8 @@
 #include "view_info.hh"
 #include "mutation_cleaner.hh"
 #include <seastar/core/execution_stage.hh>
+#include "types/map.hh"
+#include "compaction_garbage_collector.hh"
 
 template<bool reversed>
 struct reversal_traits;
@@ -686,7 +688,7 @@ struct max_timestamp {
 template<>
 struct appending_hash<row> {
     template<typename Hasher>
-    void operator()(Hasher& h, const row& cells, const schema& s, column_kind kind, const std::vector<column_id>& columns, max_timestamp& max_ts) const {
+    void operator()(Hasher& h, const row& cells, const schema& s, column_kind kind, const query::column_id_vector& columns, max_timestamp& max_ts) const {
         for (auto id : columns) {
             const cell_and_hash* cell_and_hash = cells.find_cell_and_hash(id);
             if (!cell_and_hash) {
@@ -759,7 +761,7 @@ static void get_compacted_row_slice(const schema& s,
     const query::partition_slice& slice,
     column_kind kind,
     const row& cells,
-    const std::vector<column_id>& columns,
+    const query::column_id_vector& columns,
     RowWriter& writer)
 {
     for (auto id : columns) {
@@ -899,45 +901,53 @@ mutation_partition::query_compacted(query::result::partition_writer& pw, const s
 }
 
 std::ostream&
-operator<<(std::ostream& os, const std::pair<column_id, const atomic_cell_or_collection&>& c) {
-    return fprint(os, "{column: %s %s}", c.first, c.second);
+operator<<(std::ostream& os, const std::pair<column_id, const atomic_cell_or_collection::printer&>& c) {
+    return fmt_print(os, "{{column: {} {}}}", c.first, c.second);
 }
 
 // Transforms given range of printable into a range of strings where each element
 // in the original range is prefxied with given string.
 template<typename RangeOfPrintable>
 static auto prefixed(const sstring& prefix, const RangeOfPrintable& r) {
-    return r | boost::adaptors::transformed([&] (auto&& e) { return sprint("%s%s", prefix, e); });
+    return r | boost::adaptors::transformed([&] (auto&& e) { return format("{}{}", prefix, e); });
 }
 
 std::ostream&
-operator<<(std::ostream& os, const row& r) {
+operator<<(std::ostream& os, const row::printer& p) {
+    auto add_printer = [&] (const auto& c) {
+        return std::pair<column_id, atomic_cell_or_collection::printer>(std::piecewise_construct,
+            std::forward_as_tuple(c.first),
+            std::forward_as_tuple(p._schema.column_at(p._kind, c.first), c.second)
+        );
+    };
+
     sstring cells;
-    switch (r._type) {
+    switch (p._row._type) {
     case row::storage_type::set:
-        cells = ::join(",", prefixed("\n      ", r.get_range_set()));
+        cells = ::join(",", prefixed("\n      ", p._row.get_range_set() | boost::adaptors::transformed(add_printer)));
         break;
     case row::storage_type::vector:
-        cells = ::join(",", prefixed("\n      ", r.get_range_vector()));
+        cells = ::join(",", prefixed("\n      ", p._row.get_range_vector() | boost::adaptors::transformed(add_printer)));
         break;
     }
-    return fprint(os, "{row: %s}", cells);
+    return fmt_print(os, "{{row: {}}}", cells);
 }
 
 std::ostream&
 operator<<(std::ostream& os, const row_marker& rm) {
     if (rm.is_missing()) {
-        return fprint(os, "{row_marker: }");
+        return fmt_print(os, "{{row_marker: }}");
     } else if (rm._ttl == row_marker::dead) {
-        return fprint(os, "{row_marker: dead %s %s}", rm._timestamp, rm._expiry.time_since_epoch().count());
+        return fmt_print(os, "{{row_marker: dead {} {}}}", rm._timestamp, rm._expiry.time_since_epoch().count());
     } else {
-        return fprint(os, "{row_marker: %s %s %s}", rm._timestamp, rm._ttl.count(),
+        return fmt_print(os, "{{row_marker: {} {} {}}}", rm._timestamp, rm._ttl.count(),
             rm._ttl != row_marker::no_ttl ? rm._expiry.time_since_epoch().count() : 0);
     }
 }
 
 std::ostream&
-operator<<(std::ostream& os, const deletable_row& dr) {
+operator<<(std::ostream& os, const deletable_row::printer& p) {
+    auto& dr = p._deletable_row;
     os << "{deletable_row: ";
     if (!dr._marker.is_missing()) {
         os << dr._marker << " ";
@@ -945,16 +955,19 @@ operator<<(std::ostream& os, const deletable_row& dr) {
     if (dr._deleted_at) {
         os << dr._deleted_at << " ";
     }
-    return os << dr._cells << "}";
+    return os << row::printer(p._schema, column_kind::regular_column, dr._cells) << "}";
 }
 
 std::ostream&
-operator<<(std::ostream& os, const rows_entry& re) {
-    return fprint(os, "{rows_entry: cont=%d dummy=%d %s %s}", re.continuous(), re.dummy(), re.position(), re._row);
+operator<<(std::ostream& os, const rows_entry::printer& p) {
+    auto& re = p._rows_entry;
+    return fmt_print(os, "{{rows_entry: cont={} dummy={} {} {}}}", re.continuous(), re.dummy(), re.position(),
+                  deletable_row::printer(p._schema, re._row));
 }
 
 std::ostream&
-operator<<(std::ostream& os, const mutation_partition& mp) {
+operator<<(std::ostream& os, const mutation_partition::printer& p) {
+    auto& mp = p._mutation_partition;
     os << "{mutation_partition: ";
     if (mp._tombstone) {
         os << mp._tombstone << ",";
@@ -962,8 +975,11 @@ operator<<(std::ostream& os, const mutation_partition& mp) {
     if (!mp._row_tombstones.empty()) {
         os << "\n range_tombstones: {" << ::join(",", prefixed("\n    ", mp._row_tombstones)) << "},";
     }
-    os << "\n static: cont=" << int(mp._static_row_continuous) << " " << mp._static_row << ",";
-    os << "\n clustered: {" << ::join(",", prefixed("\n    ", mp._rows)) << "}}";
+    os << "\n static: cont=" << int(mp._static_row_continuous) << " " << row::printer(p._schema, column_kind::static_column, mp._static_row) << ",";
+    auto add_printer = [&] (const auto& re) {
+        return rows_entry::printer(p._schema, re);
+    };
+    os << "\n clustered: {" << ::join(",", prefixed("\n    ", mp._rows | boost::adaptors::transformed(add_printer))) << "}}";
     return os;
 }
 
@@ -986,14 +1002,14 @@ int compare_row_marker_for_merge(const row_marker& left, const row_marker& right
             return left.expiry() < right.expiry() ? -1 : 1;
         }
     } else {
-        // Both are deleted
+        // Both are either deleted or missing
         if (left.deletion_time() != right.deletion_time()) {
             // Origin compares big-endian serialized deletion time. That's because it
             // delegates to AbstractCell.reconcile() which compares values after
             // comparing timestamps, which in case of deleted cells will hold
             // serialized expiry.
-            return (uint32_t) left.deletion_time().time_since_epoch().count()
-                   < (uint32_t) right.deletion_time().time_since_epoch().count() ? -1 : 1;
+            return (uint64_t) left.deletion_time().time_since_epoch().count()
+                   < (uint64_t) right.deletion_time().time_since_epoch().count() ? -1 : 1;
         }
     }
     return 0;
@@ -1162,6 +1178,7 @@ row::apply_monotonically(const column_definition& column, atomic_cell_or_collect
 void
 row::append_cell(column_id id, atomic_cell_or_collection value) {
     if (_type == storage_type::vector && id < max_vector_size) {
+        assert(_storage.vector.v.size() <= id);
         _storage.vector.v.resize(id);
         _storage.vector.v.emplace_back(cell_and_hash{std::move(value), cell_hash_opt()});
         _storage.vector.present.set(id);
@@ -1488,7 +1505,7 @@ row::cell_entry::cell_entry(cell_entry&& o) noexcept
 const atomic_cell_or_collection& row::cell_at(column_id id) const {
     auto&& cell = find_cell(id);
     if (!cell) {
-        throw_with_backtrace<std::out_of_range>(sprint("Column not found for id = %d", id));
+        throw_with_backtrace<std::out_of_range>(format("Column not found for id = {:d}", id));
     }
     return *cell;
 }
@@ -1552,8 +1569,8 @@ bool row::equal(column_kind kind, const schema& this_schema, const row& other, c
                             std::pair<column_id, const atomic_cell_or_collection&> c2) {
         static_assert(schema::row_column_ids_are_ordered_by_name::value, "Relying on column ids being ordered by name");
         auto& at1 = *this_schema.column_at(kind, c1.first).type;
-        auto& at2 = other_schema.column_at(kind, c2.first).type;
-        return at1.equals(at2)
+        auto& at2 = *other_schema.column_at(kind, c2.first).type;
+        return at1 == at2
                && this_schema.column_at(kind, c1.first).name() == other_schema.column_at(kind, c2.first).name()
                && c1.second.equals(at1, c2.second);
     };
@@ -1635,7 +1652,8 @@ bool row::compact_and_expire(
         gc_clock::time_point query_time,
         can_gc_fn& can_gc,
         gc_clock::time_point gc_before,
-        const row_marker& marker)
+        const row_marker& marker,
+        compaction_garbage_collector* collector)
 {
     if (dead_marker_shadows_row(s, kind, marker)) {
         tomb.apply(shadowable_tombstone(api::max_timestamp, gc_clock::time_point::max()), row_marker());
@@ -1652,15 +1670,20 @@ bool row::compact_and_expire(
 
             if (cell.is_covered_by(tomb.regular(), def.is_counter())) {
                 erase = true;
+            } else if (cell.is_covered_by(tomb.shadowable().tomb(), def.is_counter())) {
+                erase = true;
             } else if (cell.has_expired(query_time)) {
                 erase = can_erase_cell();
                 if (!erase) {
                     c = atomic_cell::make_dead(cell.timestamp(), cell.deletion_time());
+                } else if (collector) {
+                    collector->collect(id, atomic_cell::make_dead(cell.timestamp(), cell.deletion_time()));
                 }
             } else if (!cell.is_live()) {
                 erase = can_erase_cell();
-            } else if (cell.is_covered_by(tomb.shadowable().tomb(), def.is_counter())) {
-                erase = true;
+                if (erase && collector) {
+                    collector->collect(id, atomic_cell::make_dead(cell.timestamp(), cell.deletion_time()));
+                }
             } else {
                 any_live = true;
             }
@@ -1670,7 +1693,7 @@ bool row::compact_and_expire(
           cell.data.with_linearized([&] (bytes_view cell_bv) {
             auto m_view = ctype->deserialize_mutation_form(cell_bv);
             collection_type_impl::mutation m = m_view.materialize(*ctype);
-            any_live |= m.compact_and_expire(tomb, query_time, can_gc, gc_before);
+            any_live |= m.compact_and_expire(id, tomb, query_time, can_gc, gc_before, collector);
             if (m.cells.empty() && m.tomb <= tomb.tomb()) {
                 erase = true;
             } else {
@@ -1689,9 +1712,10 @@ bool row::compact_and_expire(
         row_tombstone tomb,
         gc_clock::time_point query_time,
         can_gc_fn& can_gc,
-        gc_clock::time_point gc_before) {
+        gc_clock::time_point gc_before,
+        compaction_garbage_collector* collector) {
     row_marker m;
-    return compact_and_expire(s, kind, tomb, query_time, can_gc, gc_before, m);
+    return compact_and_expire(s, kind, tomb, query_time, can_gc, gc_before, m, collector);
 }
 
 deletable_row deletable_row::difference(const schema& s, column_kind kind, const deletable_row& other) const
@@ -1738,6 +1762,28 @@ row row::difference(const schema& s, column_kind kind, const row& other) const
         }
     });
     return r;
+}
+
+bool row_marker::compact_and_expire(tombstone tomb, gc_clock::time_point now,
+        can_gc_fn& can_gc, gc_clock::time_point gc_before, compaction_garbage_collector* collector) {
+    if (is_missing()) {
+        return false;
+    }
+    if (_timestamp <= tomb.timestamp) {
+        _timestamp = api::missing_timestamp;
+        return false;
+    }
+    if (_ttl > no_ttl && _expiry < now) {
+        _expiry -= _ttl;
+        _ttl = dead;
+    }
+    if (_ttl == dead && _expiry < gc_before && can_gc(tombstone(_timestamp, _expiry))) {
+        if (collector) {
+            collector->collect(*this);
+        }
+        _timestamp = api::missing_timestamp;
+    }
+    return !is_missing() && _ttl != dead;
 }
 
 mutation_partition mutation_partition::difference(schema_ptr s, const mutation_partition& other) const
@@ -1816,7 +1862,7 @@ class mutation_querier {
     ser::qr_partition__static_row__cells<bytes_ostream> _static_cells_wr;
     bool _live_data_in_static_row{};
     uint32_t _live_clustering_rows = 0;
-    stdx::optional<ser::qr_partition__rows<bytes_ostream>> _rows_wr;
+    std::optional<ser::qr_partition__rows<bytes_ostream>> _rows_wr;
     bool _short_reads_allowed;
 private:
     void query_static_row(const row& r, tombstone current_tombstone);
@@ -1952,8 +1998,8 @@ uint32_t mutation_querier::consume_end_of_stream() {
 class query_result_builder {
     const schema& _schema;
     query::result::builder& _rb;
-    stdx::optional<query::result::partition_writer> _pw;
-    stdx::optional<mutation_querier> _mutation_consumer;
+    std::optional<query::result::partition_writer> _pw;
+    std::optional<mutation_querier> _mutation_consumer;
     stop_iteration _stop;
     stop_iteration _short_read_allowed;
 public:
